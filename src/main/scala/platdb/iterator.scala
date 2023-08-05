@@ -211,7 +211,6 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
                 bucket.nodeElement(r.block,e.index) match
                     case Some(elem) => e = elem
                     case None => return (None,None,0)
-
         (Some(e.key),Some(e.value),e.flag)
     
     // 从指定id的node开始搜索key,并记录搜索路径

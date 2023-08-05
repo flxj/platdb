@@ -43,7 +43,7 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
     def size:Int = 
         var dataSize:Int = blockHeaderSize+(elements.length*blockIndexSize)
         for e <- elements do
-            dataSize= dataSize+ e.value.length // TODO: bytes length
+            dataSize= dataSize+ e.key.length +e.value.length // TODO: bytes length
         dataSize 
     
     //  insert a element into node. 
@@ -68,12 +68,12 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
             elements = elements.slice(0,idx)++elements.slice(idx+1,elements.length)
             unbalanced = true
     
-    // 参数为当前节点的孩子节点，该方法返回该孩子节点的索引位置
     def removeChild(node:Node):Unit
 
-    //
+    // 参数为当前节点的孩子节点，该方法返回该孩子节点的索引位置
     def childIndex(node:Node):Int 
 
     def split():List[Node] = None // 节点的结构的都在bucket层次维护
 
-    def block():Block // 返回该节点对应的Block对象    
+    def block():Block // 返回该节点对应的Block对象 
+    def writeTo(bk:Block):Int    

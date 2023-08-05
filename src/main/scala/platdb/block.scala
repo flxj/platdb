@@ -10,7 +10,7 @@ import java.io.RandomAccessFile
 trait Persistence:
     def size():Int
     def block():Block 
-    def writeTo(block:Block):Int 
+    def writeTo(block:Block):Int // 返回写入的字节数
 
 /* node
 +------------------+-----------------------------------------+

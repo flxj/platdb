@@ -9,17 +9,18 @@ class bucketValue(var root:Int,var sequence:Long,var count:Int):
     // 作为bucket类型的blockElement的value内容: NodeIndex --> (key: bucketName, value:bucketValue)
     override def toString(): String = ???
 
-class Bucket(val name:String) extends Persistence:
-    private[platdb] var head:Block = _
+object Bucket:
+    def bkValue(data:Array[Byte]):Option[bucketValue]
+
+class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
     private[platdb] var bkv:bucketValue = _
     private[platdb] var root:Option[Node] = _
     private[platdb] var nodes:Map[Int,Node] = _  // 缓存的都是写事务相关的node ?
-    private[platdb] var tx:Tx = _ 
     private[platdb] var buckets:Map[String,Bucket] = _ // sub-buckets
 
     def value:bucketValue = bkv 
+    def closed:Boolean
     def iterator():BucketIterator = new bucketIter(this)
-    
     // 查询元素对应的值
     def get(key:String):Option[String] = 
         if key.length == 0 then return None 
@@ -73,12 +74,106 @@ class Bucket(val name:String) extends Persistence:
                 node.del(key) // TODO: 返回key是否存在
                 bkv.count-=1
                 return true
-    // 
-    def getBucket(name:String):Option[Bucket] = None // 获取sub-bucket
-    def createBucket(name:String,cover:Boolean):(Option[Bucket],String) = (None,None)
-    def deleteBucket(name:String):Unit
-    def closed:Boolean
-
+    // 获取子bucket
+    def getBucket(name:String):Option[Bucket] = 
+        if name.length<=0 then return None 
+        if buckets.contains(name) then 
+            return buckets.get(name)
+        var c = iterator()
+        c.search(name) match
+            case (None,_,_) => return None 
+            case (Some(k),v,f) => 
+                if k!=name || f!=bucketType then 
+                    return None 
+                v match 
+                    case None => return None 
+                    case Some(data) =>
+                        Bucket.bkValue(data.getBytes()) match
+                            case None => return None 
+                            case Some(value) =>
+                                var bk = new Bucket(name,tx)
+                                bk.value = value 
+                                buckets.addOne((name,bk))
+                                return Some(bk)
+    // 创建bucket，如果已经存在，则返回None
+    def createBucket(name:String):Option[Bucket] = 
+        if name.le<=0 then 
+            return None 
+        else if !tx.writable then 
+            return None 
+        var c = iterator()
+        c.search(name) match
+            case (None,_,_) => _
+            case (Some(k),v,f) => 
+                if k==name && f!=bucketType then  // key已经存在
+                    return None 
+                if k == name && f == bucketType then // bucket已经存在
+                    v match 
+                        case None => return None 
+                        case Some(data) =>
+                            Bucket.bkValue(data.getBytes()) match
+                                case None => return None 
+                                case Some(value) =>
+                                    var bk = new Bucket(name,tx)
+                                    bk.value = value 
+                                    bk.rootNode = getNodeById(value.root)
+                                    buckets.addOne((name,bk))
+                                    return Some(bk)
+        // create
+        var bk = new Bucket(name,tx)
+        bk.bkv = new bucketValue(-1,0,0)
+        bk.rootNode = Some(new Node(new BlockHeader(-1,leafType,0,0,0)))
+        buckets.addOne((name,bk))
+        c.node() match 
+            case None => return None 
+            case Some(n) =>
+                n.put(name,name,bkv.toString(),bucketType,0)
+        Some(bk)
+    // 创建bucket,如果已经存在则返回该bucket
+    def createBucketIfNotExists(name:String):Option[Bucket] =
+        if closed then 
+            return None 
+        else if name.length()<=0 then 
+            return None 
+        else if !tx.writable then 
+            return None 
+        getBucket(name) match
+            case Some(bk) => return Some(bk)
+            case None => return createBucket(name)
+    // 删除bucket
+    def deleteBucket(name:String):Boolean =
+        if closed then 
+            return false 
+        else if name.length()<=0 then
+            return false 
+        else if !tx.writable then
+            return false
+        var c = iterator()
+        c.search(name) match 
+            case (None,_,_) => return false  
+            case (Some(k),_,f) => 
+                if k!=name || f!=bucketType then // name不存在，或者存在但不是bucket
+                    return false 
+                // 递归删除子bucket
+                getBucket(name) match
+                    case None => _ 
+                    case Some(child) => 
+                        for (Some(k),v) <- child.iterator() do
+                            v match
+                                case Some(value) => _ 
+                                case None => 
+                                    if !child.deleteBucket(k) then
+                                        return false
+                        buckets.remove(name) //清理缓存
+                        child.nodes.clear()  // 清理缓存节点
+                        child.rootNode = None 
+                        child.freeAll() // 释放所有节点空间
+                        c.node() match 
+                            case None => _
+                            case Some(node) => 
+                                node.del(name) // 从当前bucket中删除子bucket的记录        
+        true
+    // 根据blokid尝试获取节点或者block
     private[platdb] def nodeOrBlock(id:Int):(Option[Node],Option[Block]) = (None,None)
     private[platdb] def nodeElements(bk:Option[Block]):Option[ArrayBuffer[NodeElement]] = None 
     private[platdb] def nodeElement(bk:Option[Block],idx:Int):Option[NodeElement] = None 
@@ -309,6 +404,7 @@ class Bucket(val name:String) extends Persistence:
        (node,nodeB)
 
     private[platdb] def free(node:Node):Unit
+    private[platdb] def freeAll():Unit // 释放该bucket对象的所有page
 
 
 
