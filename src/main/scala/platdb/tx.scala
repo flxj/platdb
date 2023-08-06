@@ -61,13 +61,12 @@ txid可以表示db的一个版本(版本是保护整个db的)，读事务不会�
 
 */
 class Tx(val readonly:Boolean):
-    var db:DB = _ 
-    var meta:Meta = _ 
-    var root:Bucket = _ 
-    var blocks:Map[Int,Block] = _  // 缓存的dirty block (bucket的rebalance和spill操作产生的， 一个事务可能涉及多个bucket, 所有的dirty block都放这里)
+    private[platdb] var db:DB = _ 
+    private[platdb] var meta:Meta = _ 
+    private[platdb] var root:Bucket = _ 
+    private[platdb] var blocks:Map[Int,Block] = _  // 缓存的dirty block (bucket的rebalance和spill操作产生的， 一个事务可能涉及多个bucket, 所有的dirty block都放这里)
 
     def id:Int = 0 
-    def blockId:Int = meta.blockId
     def writable:Boolean = !readonly
     def commit():Unit
     def rollback():Unit
@@ -77,13 +76,14 @@ class Tx(val readonly:Boolean):
     def createBucketIfNotExists(name:String):(Option[Bucket],String) = (None,None)
     def deleteBucket(name:String):Unit
 
-    def writeFreelist():Unit // 将freelist写入文件
-    def writeBlock():Unit  // 将该事务的dirty blocks写入文件
+    private def writeFreelist():Unit // 将freelist写入文件
+    private def writeBlock():Unit  // 将该事务的dirty blocks写入文件
 
-    def free(id:Int):Unit // 调用db.freelist.free(txid,start,tail),释放缓存的block
-    def allocate(size:Int):Option[Int] // 调用db.freelist.allocate(),分配pgid
-    def block(id:Int):Option[Block] // 根据id查询缓存的block
-    def makeBlock(id:Int,size:Int):Block //  调用db.filemanager.allocate(size) 或者db.blockpool.allocate(size)方法得到一个空间合适的block, block会被缓存套blocks
+    private[platdb] def blockId:Int = meta.blockId
+    private[platdb] def free(id:Int):Unit // 调用db.freelist.free(txid,start,tail),释放缓存的block
+    private[platdb] def allocate(size:Int):Option[Int] // 调用db.freelist.allocate(),分配pgid
+    private[platdb] def block(id:Int):Option[Block] // 根据id查询缓存的block,如果不存在则需要从db加载
+    private[platdb] def makeBlock(id:Int,size:Int):Block //  调用db.filemanager.allocate(size) 或者db.blockpool.allocate(size)方法得到一个空间合适的block, block会被缓存套blocks
 
 
     

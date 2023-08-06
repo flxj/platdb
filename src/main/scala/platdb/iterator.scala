@@ -49,7 +49,7 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
                         return
                     child = node.elements[r.index].child
                 case None =>
-                    bucket.nodeElement(r.block,r.index) match
+                    bucket.getNodeElement(r.block,r.index) match
                         case Some(e) => child = e.child 
                         case None => return 
             if child>1 then 
@@ -149,7 +149,7 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
                         return
                     child = node.elements[r.index].child
                 case None =>
-                    bucket.nodeElement(r.block,r.index) match
+                    bucket.getNodeElement(r.block,r.index) match
                         case Some(e) => child = e.child 
                         case None => return 
             if child>1 then 
@@ -208,7 +208,7 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
         r.node match 
             case Some(node) => e = node.elements[r.index]
             case None =>
-                bucket.nodeElement(r.block,e.index) match
+                bucket.getNodeElement(r.block,e.index) match
                     case Some(elem) => e = elem
                     case None => return (None,None,0)
         (Some(e.key),Some(e.value),e.flag)

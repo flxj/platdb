@@ -5,20 +5,21 @@ import scala.collection.mutable.{ArrayBuffer}
 val nodeIndexSize = 20 
 
 // if isLeaf, valSize== pgid
-@SerialVersionUID(100L)
-case class NodeIndex(flag:Int,offset:Int,keySize:Int,valSize:Int) extends Serializable
+case class NodeIndex(flag:Int,offset:Int,keySize:Int,valSize:Int)
 
 // 对于分支节点元素，其value为空； 对于叶子节点元素其child字段为-1
 case class NodeElement(flag:Int,child:Int,key:String,value:String) // 一个节点元素将转换为---> 一个NodeIndex+Ayrray[Byte] ---> 存放到block的data字段中
     def keySize:Int 
     def valueSize:Int
 
-object NodeFactory:
-    def read(bk:Block):Option[Node] = None 
+object Node:
+    def read(bk:Block):Option[Node] = None
     def lowerBound(ntype:Int):Int = 0
     def isLeaf(node:Node):Boolean 
     def isBranch(node:Node):Boolean
     def minKeysPerBlock:Int 
+    def marshalIndex(e:NodeIndex):Array[Byte]
+    def unmashalIndex(b:Array[Byte]):Option[NodeIndex]
    
 // node
 private[platdb] class Node(var header:BlockHeader) extends Persistence:
@@ -34,16 +35,18 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
     // 
     def ntype:Int = header.flag
     // 
-    def isLeaf:Boolean = NodeFactory.isLeaf(this) 
+    def isLeaf:Boolean = Node.isLeaf(this)
     //
     def root:Node = parent match {
             case Some(node:Node) => node.root()
             case None => this
         }
+
+    // 包括header在内的节点大小
     def size:Int = 
         var dataSize:Int = blockHeaderSize+(elements.length*blockIndexSize)
         for e <- elements do
-            dataSize= dataSize+ e.key.length +e.value.length // TODO: bytes length
+            dataSize= dataSize+ e.keySize +e.valueSzie
         dataSize 
     
     //  insert a element into node. 
@@ -68,12 +71,42 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
             elements = elements.slice(0,idx)++elements.slice(idx+1,elements.length)
             unbalanced = true
     
-    def removeChild(node:Node):Unit
+    def removeChild(node:Node):Unit =
+        var idx:Int = -1 
+        for (i,child) <- children do 
+            if child.id == node.id then 
+                idx = i 
+        if idx >=0 then 
+            children = children.slice(0,idx)++children.slice(idx+1,children.length)
 
     // 参数为当前节点的孩子节点，该方法返回该孩子节点的索引位置
-    def childIndex(node:Node):Int 
-
-    def split():List[Node] = None // 节点的结构的都在bucket层次维护
-
+    def childIndex(node:Node):Int =
+        for (i,elem) <- elements do 
+            if elem.child == node.id then 
+                return i
+        return -1 
+    // 
     def block():Block // 返回该节点对应的Block对象 
-    def writeTo(bk:Block):Int    
+    // 将当前节点内容写入参数block
+    def writeTo(bk:Block):Int =
+        // 更新header
+        if isLeaf then 
+            bk.header.flag = leafType
+        else 
+            bk.header.flag = branchType
+        bk.count = elements.length
+        bk.header.size = size
+        bk.header.overflow = (size+osPageSize)/osPageSize - 1
+        // 更新data字段
+        bk.append(Block.MarshalHeader(bk.header))
+        for (i,elem) <- elements do 
+
+            // TODO: 构造一个NodeIndex
+
+            bk.append()
+        // TODO
+
+
+
+        
+        

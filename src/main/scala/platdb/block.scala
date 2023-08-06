@@ -6,6 +6,7 @@ import java.io.IOError
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
+import scala.collection.mutable.ArrayBuffer
 
 trait Persistence:
     def size():Int
@@ -32,21 +33,21 @@ val freelistType:Int = 4
 val bucketType:Int = 5
 
 @SerialVersionUID(100L)
-case class BlockHeader(id:Int,flag:Int,count:Int,overflow:Int,size:Int)  extends Serializable
+class BlockHeader(var id:Int,var flag:Int,var count:Int,var overflow:Int,var size:Int)
 
-protected class Block:
-    var header:BlockHeader // 该对象应该是可变的，因为可能需要为其分配id
-    var data:Array[Byte] // index和data区合并为data
-    var idx:Int 
-    val uid:Int // uid 可能会用于blockpool管理block用
-    
-    def bid:Int = header.id
-    def size:Int = 0 // 返回实际已经使用的容量 data[0:idx]
-    def btype:Int = 0 // block类型： 叶子节点还是分支节点
+// uid 可能会用于blockpool管理block用
+protected class Block(val uid:Int,var header:BlockHeader): // header对象应该是可变的，因为可能需要为其分配id
+    private var data:ArrayBuffer[Byte] = _ // index和data区合并为data
+    private var idx:Int = 0
+     
+    def id:Int = header.id
+    def uid:Int = uid 
+    def size:Int = idx // 返回实际已经使用的容量 data[0:idx]
+    def btype:Int = header.flag // block类型： 叶子节点还是分支节点
     def setid(id:Int):Unit
     def append(d:Array[Byte]):Uint // 追加data
-    def capacity:Int // 容量：data字段的物理长度
-    def data:Array[Byte] = data.slice(0,idx)
+    def capacity:Int = data.length // 容量：data字段的物理长度
+    def data:ArrayBuffer[Byte] = data.slice(0,idx)
 
 protected object Block:
     def MarshalHeader(pg:BlockHeader):Array[Byte] =

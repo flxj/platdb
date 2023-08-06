@@ -116,7 +116,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                                 case Some(value) =>
                                     var bk = new Bucket(name,tx)
                                     bk.value = value 
-                                    bk.rootNode = getNodeById(value.root)
+                                    bk.rootNode = node(value.root)
                                     buckets.addOne((name,bk))
                                     return Some(bk)
         // create
@@ -128,6 +128,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
             case None => return None 
             case Some(n) =>
                 n.put(name,name,bkv.toString(),bucketType,0)
+                bkv.count++
         Some(bk)
     // 创建bucket,如果已经存在则返回该bucket
     def createBucketIfNotExists(name:String):Option[Bucket] =
@@ -171,19 +172,74 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                         c.node() match 
                             case None => _
                             case Some(node) => 
-                                node.del(name) // 从当前bucket中删除子bucket的记录        
+                                node.del(name) // 从当前bucket中删除子bucket的记录 
+                                bkv.count--      
         true
     // 根据blokid尝试获取节点或者block
-    private[platdb] def nodeOrBlock(id:Int):(Option[Node],Option[Block]) = (None,None)
-    private[platdb] def nodeElements(bk:Option[Block]):Option[ArrayBuffer[NodeElement]] = None 
-    private[platdb] def nodeElement(bk:Option[Block],idx:Int):Option[NodeElement] = None 
-    // get方法都是按照 缓存->磁盘 顺序
-    private[platdb] def getNodeById(id:Int):Option[Node] = None 
-    private[platdb] def getNodeByBlock(bk:Option[Block]):Option[Node] = None 
-    private[platdb] def getNodeChild(node:Node,idx:Int):Option[Node] = None 
-    private[platdb] def getNodeRightSibling(node:Node):Option[Node] = None 
-    private[platdb] def getNodeLeftSibling(node:Node):Option[Node] = None 
+    private[platdb] def nodeOrBlock(id:Int):(Option[Node],Option[Block]) = 
+        if nodes.contains(id) then 
+            (nodes.get(id),None)
+        else 
+            (None,tx.block(id))
 
+    // 读取block中的节点元素
+    private[platdb] def nodeElements(bk:Option[Block]):Option[ArrayBuffer[NodeElement]] = 
+        bk match
+            case None => return None 
+            case Some(block) => 
+                Node.read(block) match
+                    case None => return None 
+                    case Some(node) => 
+                        nodes.addOne(node.id,node)
+                        return Some(node.elements)
+    // 获取节点元素
+    private[platdb] def getNodeElement(bk:Option[Block],idx:Int):Option[NodeElement] = 
+        nodeElements(bk) match
+            case Some(elems) =>
+                if idx>=0 && elems.length>idx then 
+                    return Some(elems[idx])
+        None
+    // 
+    private[platdb] def getNodeByBlock(bk:Option[Block]):Option[Node] = 
+        bk match
+            case None => return None 
+            case Some(block) => 
+                if nodes.contains(block.id) then 
+                    return nodes.get(block.id)
+                Node.read(block) match
+                    case None => return None 
+                    case Some(node) => 
+                        nodes.addOne((node.id,node))
+                        return Some(node)  
+    // get方法都是按照 缓存->磁盘 顺序
+    private[platdb] def node(id:Int):Option[Node] = 
+        if nodes.contains(id) then 
+            return nodes.get(id)
+        getNodeByBlock(tx.block(id))
+    // 尝试获取节点的孩子节点
+    private[platdb] def getNodeChild(node:Node,idx:Int):Option[Node] = 
+        if node.isLeaf || idx<0 || idx>= node.length then
+            return None
+        node(node.elements(idx).child)
+    // 尝试获取节点的右兄弟节点
+    private[platdb] def getNodeRightSibling(node:Node):Option[Node] = 
+        node.parent match
+            case None => return None 
+            case Some(p) =>
+                val idx = p.childIndex(node)
+                if idx >=0 && idx < p.length-1 then 
+                    return getNodeChild(p,idx+1)
+                return None  
+    // 尝试获取节点的左兄弟节点
+    private[platdb] def getNodeLeftSibling(node:Node):Option[Node] =
+        node.parent match
+            case None => return None 
+            case Some(p) =>
+                val idx = p.childIndex(node)
+                if idx >=1 then 
+                    return getNodeChild(p,idx-1)
+                return None
+    // 当前bucket中key的个数
     def length:Int = bkv.count
     private[platdb] def size():Int 
     private[platdb] def block():Block // 返回该bucket对应的Block结构
@@ -201,7 +257,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
         node.unbalanced = false 
         // 检查节点是否满足阈值
         val threshold:Int = osPageSize / 4
-        if node.size > threshold && node.length > NodeFactory.lowerBound(node.ntype) then
+        if node.size > threshold && node.length > Node.lowerBound(node.ntype) then
             return
         
         // 当前节点是否是父节点
@@ -228,7 +284,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                     mergeOnNode(p)
                     return
                 // 合并节点
-                if n.childIndex(node) == 0 then // 当前节点是其父节点的最左节点，因此将其右兄弟节点合并到当前节点中
+                if p.childIndex(node) == 0 then // 当前节点是其父节点的最左节点，因此将其右兄弟节点合并到当前节点中
                     getNodeRightSibling(node) match
                         case None => return
                         case Some(mergeFrom) => 
@@ -247,7 +303,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                             p.removeChild(mergeFrom)
                             nodes.remove(mergeFrom.id)
                             free(mergeFrom)
-                else 
+                else
                     getNodeLeftSibling(node) match // 将当前节点合并到其左兄弟节点中
                         case None => return
                         case Some(mergeTo) => 
@@ -350,7 +406,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
 
     //  将node按照size大小切分成若干节点    
     private def splitNode(node:Node,size:Int):List[Node] = 
-        if node.size <= size || node.length <= NodeFactory.minKeysPerBlock*2 then 
+        if node.size <= size || node.length <= Node.minKeysPerBlock*2 then 
             return List[Node](node)
         // 将当前节点切成两个， 递归切分第二个节点
         (headNode,tailNode) := cutNode(node,size)
