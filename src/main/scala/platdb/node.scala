@@ -13,15 +13,58 @@ case class NodeElement(flag:Int,child:Int,key:String,value:String) // 一个节�
     def valueSize:Int
 
 object Node:
-    def read(bk:Block):Option[Node] = None
+    // 
+    def read(bk:Block):Option[Node] = 
+        var node = new Node(bk.header)
+        node.elements = ArrayBuffer[NodeElement]()
+
+        val data = bk.data
+        var offset = blockHeaderSize
+        for i <- 0 until bk.header.count do 
+            val idx = data.slice(offset,offset+nodeIndexSize) 
+            unmashalIndex(idx) match
+                case None => return None 
+                case Some(ni) =>
+                    var child = ni.valSize 
+                    val key = data.slice(ni.offset,ni.offset+ni.keySize).toString()
+                    var value:String = ""
+                    if isLeaf(node) then
+                        child = 0 
+                        value = data.slice(ni.offset+ni.keySize,ni.offset+ni.keySize+ni.valSize).toString()
+                    node.elements.addOne(new NodeElement(ni.flag,child,key,value))
+        if node.length >0 then 
+            node.minKey = node.elements[0].key
+        Some(node)
+    // 
     def lowerBound(ntype:Int):Int = 0
     def isLeaf(node:Node):Boolean 
     def isBranch(node:Node):Boolean
     def minKeysPerBlock:Int 
-    def marshalIndex(e:NodeIndex):Array[Byte]
-    def unmashalIndex(b:Array[Byte]):Option[NodeIndex]
-   
-// node
+    // 
+    def marshalIndex(e:NodeIndex):Array[Byte] = 
+        var buf:ByteBuffer = ByteBuffer.allocate(nodeIndexSize)
+        buf.putInt(e.flag)
+        buf.putInt(e.offset)
+        buf.putInt(e.keySize)
+        buf.putInt(e.valSize)
+        buf.array()
+    // 
+    def unmashalIndex(bs:Array[Byte]):Option[NodeIndex] =
+        if bs.length != nodeIndexSize then 
+            None 
+        else
+            var arr = new Array[Int](nodeIndexSize/4)
+            var i = 0
+            while i<nodeIndexSize/4 do 
+                var n = 0
+                for j <- 0 to 3 do
+                    n = n << 8
+                    n = n | (bs(4*i+j) & 0xff)
+                arr(i) = n
+                i = i+1
+            Some(new NodeIndex(arr(0),arr(1),arr(2),arr(3)))
+
+// node作为b+树节点的内存表示
 private[platdb] class Node(var header:BlockHeader) extends Persistence:
     var unbalanced:Boolean = _
     var spilled:Boolean = _
@@ -35,7 +78,7 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
     // 
     def ntype:Int = header.flag
     // 
-    def isLeaf:Boolean = Node.isLeaf(this)
+    def isLeaf:Boolean = header.flag == leafType
     //
     def root:Node = parent match {
             case Some(node:Node) => node.root()
@@ -44,7 +87,7 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
 
     // 包括header在内的节点大小
     def size:Int = 
-        var dataSize:Int = blockHeaderSize+(elements.length*blockIndexSize)
+        var dataSize:Int = blockHeaderSize+(elements.length*nodeIndexSize)
         for e <- elements do
             dataSize= dataSize+ e.keySize +e.valueSzie
         dataSize 
@@ -99,12 +142,20 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
         bk.header.overflow = (size+osPageSize)/osPageSize - 1
         // 更新data字段
         bk.append(Block.MarshalHeader(bk.header))
+        var idx = bk.size
+        var offset = blockHeaderSize+(elements.length*nodeIndexSize)
         for (i,elem) <- elements do 
+            val ni = isLeaf match
+                case true => new NodeIndex(elem.flag,offset,elem.keySize,elem.valueSize)
+                case false => new NodeIndex(elem.flag,offset,elem.keySize,elem.child)
 
-            // TODO: 构造一个NodeIndex
-
-            bk.append()
-        // TODO
+            bk.write(idx,Node.marshalIndex(ni))
+            bk.write(offset,elem.key.getBytes)
+            bk.append(elem.value.getBytes)
+           
+            idx = idx+nodeIndexSize
+            offset = bk.size
+        bk.size
 
 
 

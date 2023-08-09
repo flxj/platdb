@@ -1,7 +1,5 @@
 package platdb
 
-//case class KVPair(val key:String,val value:String)
-
 trait BucketIterator extends Iterator[(Option[String],Option[String])]:
     def first():(Option[String],Option[String]) 
     def last():(Option[String],Option[String]) 

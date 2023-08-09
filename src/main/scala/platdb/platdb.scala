@@ -17,6 +17,8 @@ class Info:
   val b:String
 
 class DB:
+  var freelist:FreeList = _ 
+  
   def name:String 
   def open(path:String,ops:Options):Option[Boolean]
   def close():Option[Boolean]

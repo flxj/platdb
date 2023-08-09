@@ -158,17 +158,17 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                 // 递归删除子bucket
                 getBucket(name) match
                     case None => _ 
-                    case Some(child) => 
-                        for (Some(k),v) <- child.iterator() do
+                    case Some(childBk) => 
+                        for (Some(k),v) <- childBk.iterator() do
                             v match
                                 case Some(value) => _ 
                                 case None => 
-                                    if !child.deleteBucket(k) then
+                                    if !childBk.deleteBucket(k) then
                                         return false
                         buckets.remove(name) //清理缓存
-                        child.nodes.clear()  // 清理缓存节点
-                        child.rootNode = None 
-                        child.freeAll() // 释放所有节点空间
+                        childBk.nodes.clear()  // 清理缓存节点
+                        childBk.rootNode = None 
+                        childBk.freeAll() // 释放所有节点空间
                         c.node() match 
                             case None => _
                             case Some(node) => 
@@ -242,8 +242,8 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
     // 当前bucket中key的个数
     def length:Int = bkv.count
     private[platdb] def size():Int 
-    private[platdb] def block():Block // 返回该bucket对应的Block结构
-    private[platdb] def writeTo(bk:Block):Int 
+    private[platdb] def block():Block = None // 返回该bucket对应的Block结构
+    private[platdb] def writeTo(bk:Block):Int = 0
     
     // rebalance 
     private[platdb] def merge():Unit =
@@ -272,7 +272,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                             root = Some(child)
                             node.removeChild(child)
                             nodes.remove(node.id)
-                            free(node)
+                            freeNode(node)
                         case None => return 
                     return 
             case Some(p) => 
@@ -280,7 +280,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                     p.del(node.minKey)
                     p.removeChild(node)
                     nodes.remove(node.id)
-                    free(node)
+                    freeNode(node)
                     mergeOnNode(p)
                     return
                 // 合并节点
@@ -302,7 +302,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                             p.del(mergeFrom.minKey)
                             p.removeChild(mergeFrom)
                             nodes.remove(mergeFrom.id)
-                            free(mergeFrom)
+                            freeNode(mergeFrom)
                 else
                     getNodeLeftSibling(node) match // 将当前节点合并到其左兄弟节点中
                         case None => return
@@ -318,7 +318,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                             p.del(node.minKey)
                             p.removeChild(node)
                             nodes.remove(node.id)
-                            free(node)
+                            freeNode(node)
                 // 递归处理当前节点的父节点
                 mergeOnNode(p)
     // 将节点
@@ -458,11 +458,35 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                 parent.addOne(nodeB)
                 node.parent = Some(parent)
        (node,nodeB)
-
-    private[platdb] def free(node:Node):Unit
-    private[platdb] def freeAll():Unit // 释放该bucket对象的所有page
-
-
+    // 释放该节点
+    private[platdb] def freeNode(node:Node):Unit = 
+        if node.id != 0 then
+            tx.free(node.id)
+            node.header.id = 0 
+    // 释放该节点及其所有子节点对象对应的page
+    private[platdb] def freeFrom(id:Int):Uint = 
+        if id <= 0 then return None 
+        nodeOrBlock(id) match
+            case (None,None) => return None 
+            case (Some(node),_) =>
+                freeNode(node)
+                if !node.isLeaf then 
+                    for elem <- node.elements do // 递归释放
+                        freeFrom(elem.child) 
+            case (None,Some(bk)) =>
+                tx.free(bk.id)
+                if bk.header.flag != leafType then 
+                    nodeElements(Some(bk)) match 
+                        case Some(elems) =>
+                            for elem <- elems do
+                                freeFrom(elem.child)
+        None 
+    // 释放当前bucket的所有page
+    private[platdb] def freeAll():Unit =
+        if bkv.root == 0 then return None 
+        freeFrom(bkv.root)
+        bkv.root = 0
+        None 
 
 /*
 -----------------------------------------------------

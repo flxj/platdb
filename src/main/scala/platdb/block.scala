@@ -45,6 +45,7 @@ protected class Block(val uid:Int,var header:BlockHeader): // header对象应该
     def size:Int = idx // 返回实际已经使用的容量 data[0:idx]
     def btype:Int = header.flag // block类型： 叶子节点还是分支节点
     def setid(id:Int):Unit
+    def write(offset:Int,data:Array[Byte]):Unit
     def append(d:Array[Byte]):Uint // 追加data
     def capacity:Int = data.length // 容量：data字段的物理长度
     def data:ArrayBuffer[Byte] = data.slice(0,idx)
@@ -73,7 +74,6 @@ protected object Block:
                 arr(i) = n
                 i = i+1
             Some(new BlockHeader(arr(0),arr(1),arr(2),arr(3),arr(4)))
-
 
 //  对于bucket类型的header该 
 
