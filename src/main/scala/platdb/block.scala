@@ -7,6 +7,7 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
 import scala.collection.mutable.ArrayBuffer
+import scala.util.{Try,Success,Failure}
 
 trait Persistence:
     def size():Int
@@ -75,7 +76,10 @@ protected object Block:
                 i = i+1
             Some(new BlockHeader(arr(0),arr(1),arr(2),arr(3),arr(4)))
 
-//  对于bucket类型的header该 
+class BlockPool(val size:Int):
+    def idle:Int = 0 
+    def get(size:Int):Block
+    def revert(uid:Int):Uint
 
     
 /* how to load a logic page from file?
@@ -106,24 +110,23 @@ protected class FileManager(val path:String, val fmType:String):
             case e:Exception => false 
             case _ => true 
 
-    def grow(size:Int):Option[Int] = 
-        if !opend || size<=0 then None 
-        var w:FileOutputStream
+    def grow(size:Int):Boolean = 
+        if !opend || size<=0 then return false 
+        var w:FileOutputStream = _ 
         try 
             val arr = new Array[Byte](size)
             val idx = f.length().intValue()
 
             w = new FileOutputStream(f)
             w.write(arr,idx,arr.length)
-            Some(size)
+            true 
         catch 
-            case e:Exception => None 
-            case _ => Some(0)
+            case e:Exception => return false  
         finally 
             w.close()
 
     def read(bid:Int):Option[Block] = 
-        if !opend || bid<0 then None 
+        if !opend || bid<0 then return None 
         val offset = pgid*osPageSize
         var reader:RandomAccessFile
         try
@@ -142,13 +145,12 @@ protected class FileManager(val path:String, val fmType:String):
                 throw new Exception("read block data error")
             Some(new Block(pg,data)) // TODO: 从缓存中拿Block
         catch 
-            case e:Exception => None 
-            case _ => None
+            case e:Exception => None
         finally
             reader.close()
         
-    def write(bk:Block):Option[Int] = 
-        if !opend || bk.size == 0 then None 
+    def write(bk:Block):(Boolean,Int) = 
+        if !opend || bk.size == 0 then return (false,0)
         var w:RandomAccessFile
         try 
             val phd = Block.MarshalHeader(bk.header)
@@ -159,10 +161,9 @@ protected class FileManager(val path:String, val fmType:String):
             w = new RandomAccessFile(f,"rw")
             w.seek(hd.id*osPageSize)
             w.write(d)
-            Some(d.length)
+            (true,d.length)
         catch 
-            case e:Exception => None 
-            case _ => Some(0)
+            case e:Exception => (false,0)
         finally 
             w.close()
 

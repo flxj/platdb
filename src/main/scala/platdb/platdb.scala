@@ -4,6 +4,9 @@ import java.io.ObjectOutputStream
 import java.io.ObjectInputStream
 import java.io.ByteArrayOutputStream
 import java.io.ByteArrayInputStream
+import java.util.concurrent.locks.ReentrantReadWriteLock
+import scala.collection.mutable.ArrayBuffer
+
 
 
 object PlatDB:
@@ -17,7 +20,12 @@ class Info:
   val b:String
 
 class DB:
-  var freelist:FreeList = _ 
+  private[platdb] var filemanager:FileManager = _ 
+  private[platdb] var freelist:FreeList = _ 
+  private[platdb] var blockpool:BlockPool = _ 
+  private[platdb] var rTx:ArrayBuffer[Tx]
+  private[platdb] var rwTx:Option[Tx]
+  private[platdb] var rwLock:ReentrantReadWriteLock
   
   def name:String 
   def open(path:String,ops:Options):Option[Boolean]
@@ -30,6 +38,8 @@ class DB:
   def update(op:(Tx)=>Unit):Unit
   def view(op:(Tx)=>Unit):Unit
   def snapshot(path:String):Option[Int]
+
+  private[platdb] def removeTx(id:Int):Unit
 
 
 

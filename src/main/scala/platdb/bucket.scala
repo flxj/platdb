@@ -322,10 +322,11 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                 // 递归处理当前节点的父节点
                 mergeOnNode(p)
     // 将节点
-    private[platdb] def split():Unit =
+    private[platdb] def split():Boolean =
         // 先切分缓存的子bucket
         for (name,bucket) <- buckets do 
-            bucket.split()
+            if !bucket.split() then 
+                return false 
             // bk的根节点可能发生了变化，因此需要将新的bk root信息插入当前bk
             val v = bucket.value
             /*   
@@ -361,14 +362,17 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
         }
         */
         bkv.root = root.root.id
+        true 
     // 切分当前节点
-    private def splitOnNode(node:Node):Unit =
-        if node.spilled then return None 
+    private def splitOnNode(node:Node):Boolean =
+        if node.spilled then return true 
          // TODO: sort.Sort(n.children)
         // 递归地切分当前节点的孩子节点，注意由于切分孩子可能会在当前节点的children数组中再添加元素，而这些元素是不需要再切分的，因此此处循环使用下标来迭代
         val n = node.children.length
         for i <- 0 until n do 
-            splitOnNode(node.children[i]) // TODO: 如果出错了应该返回，或者抛出异常
+            if !splitOnNode(node.children[i]) then // TODO: 如果出错了应该返回，或者抛出异常
+                return false 
+                
         
         node.children = Array[Node]()
         // 切分当前节点
@@ -402,7 +406,8 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
         node.parent match
             case Some(p) if p.id == 0 => 
                 node.children = Array[Node]()
-                splitOnNode(p)
+                if !splitOnNode(p) then return false 
+        true 
 
     //  将node按照size大小切分成若干节点    
     private def splitNode(node:Node,size:Int):List[Node] = 
@@ -454,8 +459,8 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                 p.children.addOne(nodeB)
             case None =>
                 var parent = new Node(new BlockHeader)
-                parent.addOne(node)
-                parent.addOne(nodeB)
+                parent.children.addOne(node)
+                parent.children.addOne(nodeB)
                 node.parent = Some(parent)
        (node,nodeB)
     // 释放该节点
@@ -530,3 +535,14 @@ spill当前节点操作会尝试将该node切分成若干nodes, 然后调用tx.f
 */
 
 // 优化: 延迟rebalance，允许出现叶子节点高度不一致？
+
+
+
+// TODO 实现一种内存桶,使用自适应基数树，内存桶的内容能持久化到普通桶中
+
+
+class MemBucket:
+    var db:DB = _ 
+
+    def put(key:String,value:String):Boolean
+    def get(key:String):Option[String]

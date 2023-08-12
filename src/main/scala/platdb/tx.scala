@@ -1,4 +1,6 @@
 package platdb
+
+import scala.collection.mutable.{Map,ArrayBuffer}
 /*
 txid可以表示db的一个版本(版本是保护整个db的)，读事务不会改变db的txid(它只能持有一份该读事务创建时候db最新的已经提交的版本), 写事务成功提交后会将db当前的txid+1, 并且由于写事务对db的增删改操作都是新建dirty page,所以不会影响之前的版本。
 
@@ -64,35 +66,176 @@ class Tx(val readonly:Boolean):
     private[platdb] var db:DB
     private[platdb] var meta:Meta = _ 
     private[platdb] var root:Bucket = _ 
-    private[platdb] var blocks:Map[Int,Block] = _  // 缓存的dirty block (bucket的rebalance和spill操作产生的， 一个事务可能涉及多个bucket, 所有的dirty block都放这里)
+    private[platdb] var blocks:Map[Int,Block] = _  // cache dirty blocks,rebalance(merge/split) bucket maybe product them
+    private[platdb] var closed:Boolean
 
-    def id:Int = meta.txid 
+    def txid:Int = meta.txid
     def writable:Boolean = !readonly
-    def commit():Unit
-    def rollback():Unit
-    def close():Unit
-    def bucket(name:String):Option[Bucket] = None 
-    def createBucket(name:String):(Option[Bucket],String) = (None,None)
-    def createBucketIfNotExists(name:String):(Option[Bucket],String) = (None,None)
-    def deleteBucket(name:String):Unit
+    def rootBucket():Option[Bucket] = Some(root)
+    // open and return a bucket
+    def bucket(name:String):Option[Bucket] = root.getBucket(name)
+    // craete a bucket
+    def createBucket(name:String):Option[Bucket] = root.createBucket(name)
+    // 
+    def createBucketIfNotExists(name:String):Option[Bucket] = root.createBucketIfNotExists(name)
+    // delete bucket
+    def deleteBucket(name:String):Boolean = root.deleteBucket(name)
+    // commit current transaction
+    def commit():Boolean = 
+        if db.closed then
+            return false 
+        else if closed then
+            return false 
+        else if !writable then // cannot commit read-only tx
+            return false  
+        // merge bucket nodes first
+        root.merge()
+        // spill buckets to dirty blocks
+        if !root.split() then
+            rollback()
+            return false 
+        
+        // updata meta info
+        meta.root = root.bkv
 
-    private def writeFreelist():Unit // 将freelist写入文件
-    private def writeBlock():Unit  // 将该事务的dirty blocks写入文件
+        // free the old freelist and write the new list to db file.
+        if meta.freelistId!=0 then
+            db.freelist.free(txid,db.freelist.header.id,db.freelist.header.overflow)
+        if !writeFreelist() then
+            return false 
+        
+        if !writeBlock() then
+            rollbackTx()
+            return false 
+        
+        if !writeMeta() then
+            rollbackTx()
+            return false 
+        close()
+        true 
+    //  rollback current tx
+    private def rollbackTx():Unit = 
+        if db.closed then
+            return None 
+        else if closed then
+            return None 
+        if writable then
+            db.freelist.rollbackFree(txid)
+            // TODO:
+            // Read free page list from freelist page.
+			// tx.db.freelist.reload(tx.db.page(tx.db.meta().freelist))
+        close()
+    // user call rollback directly
+    def rollback():Unit =
+        if db.closed then
+            return None 
+        else if closed then
+            return None 
+        if writable then
+            db.freelist.rollbackFree(txid)
+        close()
+    // close current tx: release all object references about the tx 
+    private def close():Unit = 
+        if db.closed then 
+            return None 
+        else if closed then 
+            return None 
+        
+        if !writable then
+            db.removeTx(txid)
+        else 
+            db.rwTx = None 
+		    db.rwLock.writeLock().unlock()
 
-    // 返回最大blockid
+        for (id,bk)<- blocks do
+            db.blockpool.revert(bk.uid)
+        db = None 
+        meta = None
+        root = new Bucket("",this)
+        blocks.clear()
+
+    // write freelist to db file
+    private def writeFreelist():Boolean = 
+        // allocate new pages
+        val maxId = meta.blockId
+        val sz = db.freelist.size
+        allocate(sz) match
+            case None => 
+                rollbackTx()
+                false 
+            case Some(id) =>
+                var bk = db.blockpool.get(sz)
+                bk.setid(id)
+                db.freelist.writeTo(bk)
+
+                val (success,_) = db.filemanager.write(bk)
+                if !success then
+                    rollbackTx()
+                else
+                    meta.freelistId = id 
+                db.blockpool.revert(bk.uid)
+                /*
+                // If the high water mark has moved up then attempt to grow the database.
+                if tx.meta.pgid > opgid {
+                    if err := tx.db.grow(int(tx.meta.pgid+1) * tx.db.pageSize); err != nil {
+                        tx.rollback()
+                        return err
+                    }
+                } 
+                */
+                if success && meta.blockId > maxId then
+                    // TODO
+                success
+    // write all dirty blocks to db file
+    private def writeBlock():Boolean =
+        var arr = new ArrayBuffer[Block]()
+        for (id,bk) <- blocks do
+            arr+=bk 
+        arr.sortWith((b1:Block,b2:Block) => b1.id < b2.id)
+
+        for bk <- arr do
+            val (success,_) = db.filemanager.write(bk)
+            if !success then
+                return false 
+        true 
+    // write meta blocks to db file
+    private def writeMeta():Boolean  =
+        var bk = db.blockpool.get(meta.size)
+        bk.setid(meta.id)
+
+        val (success,_) = db.filemanager.write(bk)
+        db.blockpool.revert(bk.uid)
+        success
+    
+    // return the max blockid
     private[platdb] def blockId:Int = meta.blockId
-    private[platdb] def block(id:Int):Option[Block] // 根据id查询缓存的block,如果不存在则需要从db加载
-    // 调用db.freelist.free(txid,start,tail),释放缓存的block
+    // get block by bid
+    private[platdb] def block(id:Int):Option[Block] =
+        if blocks.contains(id) then 
+            return blocks.get(id)
+        db.filemanager.read(id) match
+            case Some(bk) => 
+                blocks(id) = bk 
+                return Some(bk)
+            case None => return None 
+        
+    // release a block's pages
     private[platdb] def free(id:Int):Unit =
         block(id) match
             case None => None 
             case Some(bk) => 
-                db.freelist.free(id,bk.header.id,bk.header.overflow)
-    // 调用db.freelist.allocate(),分配pgid  
-    private[platdb] def allocate(size:Int):Option[Int] 
+                db.freelist.free(txid,bk.header.id,bk.header.overflow)
+    // allocate page space according size 
+    private[platdb] def allocate(size:Int):Option[Int] =
+        var n = size/osPageSize
+        if size%osPageSize!=0 then n++
+        db.freelist.allocate(txid,n)
     
-    private[platdb] def makeBlock(id:Int,size:Int):Block //  调用db.filemanager.allocate(size) 或者db.blockpool.allocate(size)方法得到一个空间合适的block, block会被缓存套blocks
-
-
-    
-// 返回Unit的方法都可能抛出异常
+    // construct a block object according size, then set its id
+    private[platdb] def makeBlock(id:Int,size:Int):Block = 
+        var bk = db.blockpool.get(size)
+        bk.setid(id)
+        blocks.addOne((id,bk))
+        bk 
+    //
+    def openMemBucket(name:String):Option[MemBucket] = None 
