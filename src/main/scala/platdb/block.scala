@@ -43,16 +43,27 @@ protected class Block(val uid:Int,var header:BlockHeader): // header对象应该
      
     def id:Int = header.id
     def uid:Int = uid 
-    def size:Int = idx // 返回实际已经使用的容量 data[0:idx]
-    def btype:Int = header.flag // block类型： 叶子节点还是分支节点
-    def setid(id:Int):Unit
+    // 返回实际已经使用的容量 data[0:idx]
+    def size:Int = idx 
+    // block类型： 叶子节点还是分支节点
+    def btype:Int = header.flag 
+    def setid(id:Int):Unit = header.id = id 
     def write(offset:Int,data:Array[Byte]):Unit
-    def append(d:Array[Byte]):Uint // 追加data
-    def capacity:Int = data.length // 容量：data字段的物理长度
-    def data:ArrayBuffer[Byte] = data.slice(0,idx)
+    // 追加data
+    def append(d:Array[Byte]):Uint 
+    // 容量：data字段的物理长度
+    def capacity:Int = data.length 
+    // 所有数据
+    def data:ArrayBuffer[Byte] = data.slice(0,idx) 
+    // 返回除了header外的数据
+    def tail:Option[ArrayBuffer[Byte]] = 
+        if size>blockHeaderSize then
+            Some(data.slice(blockHeaderSize,size))
+        else
+            None 
 
 protected object Block:
-    def MarshalHeader(pg:BlockHeader):Array[Byte] =
+    def marshalHeader(pg:BlockHeader):Array[Byte] =
         var buf:ByteBuffer = ByteBuffer.allocate(blockHeaderSize)
         buf.putInt(pg.id)
         buf.putInt(pg.flag)
@@ -61,7 +72,7 @@ protected object Block:
         buf.putInt(pg.size)
         buf.array()
     
-    def UnmarshalHeader(bs:Array[Byte]):Option[BlockHeader] =
+    def unmarshalHeader(bs:Array[Byte]):Option[BlockHeader] =
         if bs.length != blockHeaderSize then 
             None 
         else
@@ -153,15 +164,12 @@ protected class FileManager(val path:String, val fmType:String):
         if !opend || bk.size == 0 then return (false,0)
         var w:RandomAccessFile
         try 
-            val phd = Block.MarshalHeader(bk.header)
-            if phd.id <=1 && phd.btype!=metaType then 
+            if bk.id <=1 && bk.btype!=metaType then 
                 throw new Exception("block type error")
-            val d = phd ++ bk.data
-
             w = new RandomAccessFile(f,"rw")
-            w.seek(hd.id*osPageSize)
-            w.write(d)
-            (true,d.length)
+            w.seek(bk.id*osPageSize)
+            w.write(bk.data)
+            (true,bk.size)
         catch 
             case e:Exception => (false,0)
         finally 

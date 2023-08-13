@@ -10,57 +10,6 @@ txid可以表示db的一个版本(版本是保护整个db的)，读事务不会�
 
 同时当前已经打开的只读事务持有的版本可能跨度较大， 那末对于两个相邻版本之间的版本， 如果已经没有事务在持有它，那末也是可以释放的
 
-
-# 只读事务：
-
-[1] db.Begin()
-先获取meta page互斥lock, 再获取mmap读锁
-创建一个Tx实例，调用Tx.init(db) 初始化该实例
--- 拷贝meta page
--- 拷贝root bucket
-将该tx对象加入到db的事务列表(只读事务列表)， boltdb支持并发读，并且同时至多有一个写事务，写事务之间串行执行
-释放meta page互斥锁
-更新db的事务状态信息(事务个数，当前打开的事务个数等统计信息)
-
-[2] 执行事务操作
--- 只读事务一般会
-[3] 调用t.Rollback()结束事务
-对于只读事务因为没有对数据进行过修改，所以其rollback操作就是调用tx.db.removeTx(tx),将事务实例从db的事务列表中移除
--- 释放mmap读锁
--- 获取meta page互斥锁
--- 更新db的事务列表
--- 释放meta page互斥锁
--- 更新db的事务状态信息
-
-# 读写事务：
-[1] db.Begin()
-先获取一个读写锁的写锁(目的是保证同一时间至多只能有一个写事务存在)
-获取meta page互斥锁
-创建一个Tx实例，调用Tx.init(db) 初始化该实例
--- 拷贝meta page
--- 拷贝root bucket
--- 初始化tx.pages缓存，将tx.meta.txid加1
-调用db.freePages()释放已经关闭的只读事务关联的所有pages (找到当前只读事务列表中txid最小的txid值，然后将freelist.pending中所有小于该txid的page都释放)
--- 获取db的事务列表中txid最小的事务，记其id为minid，如果存在则调用db.freelist.release(minid - 1)
--- 遍历db事务列表，依次调用db.freelist.releaseRange(minid, t.meta.txid-1)
--- 调用db.freelist.releaseRange(minid, txid(0xFFFFFFFFFFFFFFFF))
-释放meta page互斥锁
-[2] 执行事务操作
--- 读写事务一般会
-[3] 如果执行事务没出错则tx.Commit()提交事务的修改
--- tx.root.rebalance() 节点合并操作，该操作涉及freelist释放pgid （被释放的pgid会进入freelist.pending中而不会立即用于再次分配，这是因为可能有其它读事务正在依赖该page,需要等系统中没有任何读事务持有该page后才能将该pgid用于分配；如果贸然释放就可能导致读事务读到新的写事务尚未提交的修改）
--- tx.root.spill() 将节点拆分成osPagesize大小，该操作涉及从freelist处分配pgid
--- tx.meta.root.root = tx.root.root 将meta page的root bucket设置为最新的，释放原来旧的root
--- tx.db.freelist.free(tx.meta.txid, tx.db.page(tx.meta.freelist)) 释放旧的freelist
--- tx.commitFreelist() 提交新的freelist
--- 如果当前db下一个要分配的pgid值,tx.meta.pgid> 旧meta.pgid， 则需要扩大数据库tx.db.grow(int(tx.meta.pgid+1) *tx.db.pageSize)
--- tx.write() 将修改写入文件: 将该写事务创建的dirty pages写入文件
--- tx.writeMeta() 将meta page写入文件
--- tx.close()
-[4] 如果执行事务出错则调用tx.Rollback()
--- tx.db.freelist.rollback(tx.meta.txid)
--- tx.close()
-
 */
 class Tx(val readonly:Boolean):
     private[platdb] var db:DB
@@ -73,7 +22,7 @@ class Tx(val readonly:Boolean):
     def writable:Boolean = !readonly
     def rootBucket():Option[Bucket] = Some(root)
     // open and return a bucket
-    def bucket(name:String):Option[Bucket] = root.getBucket(name)
+    def openBucket(name:String):Option[Bucket] = root.getBucket(name)
     // craete a bucket
     def createBucket(name:String):Option[Bucket] = root.createBucket(name)
     // 
@@ -237,5 +186,3 @@ class Tx(val readonly:Boolean):
         bk.setid(id)
         blocks.addOne((id,bk))
         bk 
-    //
-    def openMemBucket(name:String):Option[MemBucket] = None 

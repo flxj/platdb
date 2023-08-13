@@ -8,12 +8,11 @@ val nodeIndexSize = 20
 case class NodeIndex(flag:Int,offset:Int,keySize:Int,valSize:Int)
 
 // 对于分支节点元素，其value为空； 对于叶子节点元素其child字段为-1
-case class NodeElement(flag:Int,child:Int,key:String,value:String) // 一个节点元素将转换为---> 一个NodeIndex+Ayrray[Byte] ---> 存放到block的data字段中
-    def keySize:Int 
-    def valueSize:Int
+class NodeElement(flag:Int,child:Int,key:String,value:String) // 一个节点元素将转换为---> 一个NodeIndex+Ayrray[Byte] ---> 存放到block的data字段中
+    def keySize:Int = key.getBytes.length
+    def valueSize:Int = value.getBytes.length
 
 object Node:
-    // 
     def read(bk:Block):Option[Node] = 
         var node = new Node(bk.header)
         node.elements = ArrayBuffer[NodeElement]()
@@ -37,8 +36,8 @@ object Node:
         Some(node)
     // 
     def lowerBound(ntype:Int):Int = 0
-    def isLeaf(node:Node):Boolean 
-    def isBranch(node:Node):Boolean
+    def isLeaf(node:Node):Boolean = node.header.flag == leafType
+    def isBranch(node:Node):Boolean = node.header.flag == branchType
     def minKeysPerBlock:Int 
     // 
     def marshalIndex(e:NodeIndex):Array[Byte] = 
@@ -141,7 +140,7 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
         bk.header.size = size
         bk.header.overflow = (size+osPageSize)/osPageSize - 1
         // 更新data字段
-        bk.append(Block.MarshalHeader(bk.header))
+        bk.append(Block.marshalHeader(bk.header))
         var idx = bk.size
         var offset = blockHeaderSize+(elements.length*nodeIndexSize)
         for (i,elem) <- elements do 

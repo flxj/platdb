@@ -28,7 +28,7 @@ class DB:
   private[platdb] var rwLock:ReentrantReadWriteLock
   
   def name:String 
-  def open(path:String,ops:Options):Option[Boolean]
+  def open(path:String,ops:Options):Boolean
   def close():Option[Boolean]
   def closed:Boolean
   def sync():Unit

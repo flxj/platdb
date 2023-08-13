@@ -493,56 +493,5 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
         bkv.root = 0
         None 
 
-/*
------------------------------------------------------
-boltdb bucket插入操作：先创建一个cursor，然后调用seek方法定位到叶子节点， 在调用cursor.node().put()方法将元素插入该叶子节点
-seek方法会先到bucket的nodes缓存中寻找，如果没有再到事务中寻找bucket.tx.pages(pgid)： 先找tx缓存的dirty pages, 如果没有直接从mmap中加载(tx.db.page(pgid)）
-cursor().node()方法首先检查栈顶元素，如果node字段不为空并且是个叶子节点则直接返回该*node
-否则尝试从栈底元素开始，自顶向下检索b+树的路径： 如果栈底底元素node字段为空，则先调用c.bucket.node(c.stack[0].page.id, nil)方法，使用pgid创建一个node对象，并将该node缓存到bucket.nodes中
-```golang
-// Start from root and traverse down the hierarchy.
-var n = c.stack[0].node
-if n == nil {
-  n = c.bucket.node(c.stack[0].page.id, nil) // 返回创建的node指针
-}
-for _, ref := range c.stack[:len(c.stack)-1] { // 自顶向下检索的过程
-  _assert(!n.isLeaf, "expected branch node")
-  n = n.childAt(ref.index) // 调用n.bucket.node(n.inodes[index].pgid, n)
-}
-_assert(n.isLeaf, "expected leaf node")
-return n
-```
-经过cursor.node()方法，其搜索路径上涉及的所有page都转化成了node,并缓存到bucket中 （cursor.node方法在创建节点时候会调整节点的chiledren字段）
-调用node.put()方法将元素插入当前节点
-bucket插入操作结束
----------------------------
-bucket relabalce()操作： 先对缓存的所有node执行rebalance, 然后对所有subbucket执行rebalabce
-```golang
-for _, n := range b.nodes {
-  n.rebalance()
-}
-for _, child := range b.buckets {
-child.rebalance()
-}
-```
-node的rebalance操作主要逻辑是：对标记的unbalance=true的节点，检查节点大小和元素个数，如果低于阈值，则需要和它的左右兄弟合并，因为合并操作会导致当前节点的父节点上有元素删除，因此需要递归的向上继续rebalance,直到root节点.   (搜索其左右兄弟的操作涉及从mmap加载新的page,创建新node并缓存到bucket.nodes)  两个节点合并后，对其中不再需要的一个节点调用node.free()方法释放其pgid: n.bucket.tx.db.freelist.free(n.bucket.tx.meta.txid, n.bucket.tx.page(n.pgid))
-rebalance操作会调整node的chileren字段
-------------------------------
-bucket spill() 操作： 先spill它的所有缓存的子buckets. 然后调用b.rootNode.spill() 方法从根结点开始，将当前bucket的节点进行溢出
-node.spill()会先针对children字段的节点进行递归spill, 然后再spill当前节点
-spill当前节点操作会尝试将该node切分成若干nodes, 然后调用tx.freelist.free() 释放原来的pgid, 接着调用tx.allocate()为这些nodes分配新pgid，将node信息写入新分配的page, 并把对应page缓存到tx.pages中， 节点切分会向父节点elements中插入元素
-另外如果在split节点时候，发现当前节点的parent为空，那末也会创建一个新节点作为parent,当前节点以及切出来的另一个节点会加入这个parent的children字段
-*/
 
 // 优化: 延迟rebalance，允许出现叶子节点高度不一致？
-
-
-
-// TODO 实现一种内存桶,使用自适应基数树，内存桶的内容能持久化到普通桶中
-
-
-class MemBucket:
-    var db:DB = _ 
-
-    def put(key:String,value:String):Boolean
-    def get(key:String):Option[String]
