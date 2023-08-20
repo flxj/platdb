@@ -1,16 +1,26 @@
 package platdb
 
 import scala.collection.mutable.{Map,ArrayBuffer}
+
 /*
-txid可以表示db的一个版本(版本是保护整个db的)，读事务不会改变db的txid(它只能持有一份该读事务创建时候db最新的已经提交的版本), 写事务成功提交后会将db当前的txid+1, 并且由于写事务对db的增删改操作都是新建dirty page,所以不会影响之前的版本。
-
-写事务提交后可能会释放一些page, 这会在freelist的pending中添加一条记录 'txid: pageids' 表示txid版本的这些pageids需要释放
-
-下一个写事务在开始执行之前会尝试调用freelist释放pending中的page, 只要pending中待释放的版本小于当前打开的只读事务持有的最小版本，那末就可以释放这些pending元素 （表示当前肯定已经没有只读事务在持有这些待释放pages了）
-
-同时当前已经打开的只读事务持有的版本可能跨度较大， 那末对于两个相邻版本之间的版本， 如果已经没有事务在持有它，那末也是可以释放的
+A: 
+    事务的读写操作都发生在内存中，因此如果事务在提交之前失败，不会影响磁盘中的内容
+    读写事务对db的所有增删改操作都会记录到dirty page上，提交事务时候先将freelist写入文件，然后是dirty page,最后提交meta信息
+    meta信息包含当前db的版本以及根节点等信息，只有meta成功写入才表示事务提交成功，因此若事务在写meta之前失败，此时只写入dirty pages或者freelist均不会影响db内容的一致性
+    那么如果写meta错误如何保证原子性呢？———> boltdb这样做
+C:
+    写事务是串行执行的，因此每个打开的读写事务操作的db对象均是上一个唯一的写事务更新后的版本，
+    由于原子性/持久性的保证，只要每个读写事务的操作是一致的，db视图就会从一个一致状态移动到下一个一致状态
+I:
+    允许同时有多个只读事务以及至多一个读写事务同时操作数据库，并使用MVCC保证并发事务的隔离性
+    当开启一个事务，会拷贝一份当前最新的meta信息，即持有一个db的最新版本，因此后开启的事务不会读到旧版本的内容
+    只读事务不会改变db版本，读写事务会在提交成功后更新db的版本信息，因为读写事务对db的变动都写入dirty page, 因此读写事务执行期间其他并发执行的只读事务不会读到该写事务的修改
+    （读写事务释放的page只有在没有其他任何只读事务持有后才能用于分配为dirty page)
+D:
+    提交成功的读写事务对db的修改均会持久化到磁盘文件，未提交成功的事务不会影响db的内容
 
 */
+
 class Tx(val readonly:Boolean):
     private[platdb] var db:DB
     private[platdb] var meta:Meta = _ 
@@ -74,14 +84,14 @@ class Tx(val readonly:Boolean):
             // Read free page list from freelist page.
 			// tx.db.freelist.reload(tx.db.page(tx.db.meta().freelist))
         close()
-    // user call rollback directly
+    // user call rollback directly，we do nothing except rollback freelist.
     def rollback():Unit =
         if db.closed then
             return None 
         else if closed then
             return None 
         if writable then
-            db.freelist.rollbackFree(txid)
+            db.freelist.rollback(txid)
         close()
     // close current tx: release all object references about the tx 
     private def close():Unit = 
@@ -97,7 +107,7 @@ class Tx(val readonly:Boolean):
 		    db.rwLock.writeLock().unlock()
 
         for (id,bk)<- blocks do
-            db.blockpool.revert(bk.uid)
+            db.blockBuffer.revert(bk.uid)
         db = None 
         meta = None
         root = new Bucket("",this)
@@ -105,7 +115,7 @@ class Tx(val readonly:Boolean):
 
     // write freelist to db file
     private def writeFreelist():Boolean = 
-        // allocate new pages
+        // allocate new pages for freelist
         val maxId = meta.blockId
         val sz = db.freelist.size
         allocate(sz) match
@@ -113,16 +123,16 @@ class Tx(val readonly:Boolean):
                 rollbackTx()
                 false 
             case Some(id) =>
-                var bk = db.blockpool.get(sz)
+                var bk = db.blockBuffer.get(sz)
                 bk.setid(id)
                 db.freelist.writeTo(bk)
-
-                val (success,_) = db.filemanager.write(bk)
+                // write new freelsit to file
+                val (success,_) = db.fileManager.write(bk)
                 if !success then
                     rollbackTx()
                 else
                     meta.freelistId = id 
-                db.blockpool.revert(bk.uid)
+                db.blockBuffer.revert(bk.uid)
                 /*
                 // If the high water mark has moved up then attempt to grow the database.
                 if tx.meta.pgid > opgid {
@@ -143,17 +153,17 @@ class Tx(val readonly:Boolean):
         arr.sortWith((b1:Block,b2:Block) => b1.id < b2.id)
 
         for bk <- arr do
-            val (success,_) = db.filemanager.write(bk)
+            val (success,_) = db.fileManager.write(bk)
             if !success then
                 return false 
         true 
     // write meta blocks to db file
     private def writeMeta():Boolean  =
-        var bk = db.blockpool.get(meta.size)
+        var bk = db.blockBuffer.get(meta.size)
         bk.setid(meta.id)
 
-        val (success,_) = db.filemanager.write(bk)
-        db.blockpool.revert(bk.uid)
+        val (success,_) = db.fileManager.write(bk)
+        db.blockBuffer.revert(bk.uid)
         success
     
     // return the max blockid
@@ -162,7 +172,7 @@ class Tx(val readonly:Boolean):
     private[platdb] def block(id:Int):Option[Block] =
         if blocks.contains(id) then 
             return blocks.get(id)
-        db.filemanager.read(id) match
+        db.fileManager.read(id) match
             case Some(bk) => 
                 blocks(id) = bk 
                 return Some(bk)
@@ -182,7 +192,7 @@ class Tx(val readonly:Boolean):
     
     // construct a block object according size, then set its id
     private[platdb] def makeBlock(id:Int,size:Int):Block = 
-        var bk = db.blockpool.get(size)
+        var bk = db.blockBuffer.get(size)
         bk.setid(id)
         blocks.addOne((id,bk))
         bk 

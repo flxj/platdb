@@ -4,13 +4,31 @@ import scala.collection.mutable.{Map}
 import scala.collection.mutable.ArrayBuffer
 import scala.util.control.Breaks._
 
+val bucketValueSize = 16
+
 // count表示当前bucket中key的个数
-class bucketValue(var root:Int,var sequence:Long,var count:Int):
+class bucketValue(var root:Int,var count:Int,var sequence:Long):
     // 作为bucket类型的blockElement的value内容: NodeIndex --> (key: bucketName, value:bucketValue)
     override def toString(): String = ???
 
 object Bucket:
-    def bkValue(data:Array[Byte]):Option[bucketValue]
+    def read(data:Array[Byte]):Option[bucketValue] =
+        if data.length!=bucketValueSize then
+            return None 
+        var r = 0
+        var c = 0
+        var s:Long = 0
+        for i <- 0 to 3 do
+            r = r << 8
+            r = r | (data(i) & 0xff)
+            c = c << 8
+            c = c | (data(4+i) & 0xff)
+        for i <- 0 to 7 do
+            s = s << 8
+            c = c | (data(8+i) & 0xff)
+        Some(new bucketValue(r,c,s))
+    //     
+    def marshal(bkv:bucketValue):Array[Byte] = None
 
 class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
     private[platdb] var bkv:bucketValue = _
@@ -88,7 +106,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                 v match 
                     case None => return None 
                     case Some(data) =>
-                        Bucket.bkValue(data.getBytes()) match
+                        Bucket.read(data.getBytes()) match
                             case None => return None 
                             case Some(value) =>
                                 var bk = new Bucket(name,tx)
@@ -111,7 +129,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                     v match 
                         case None => return None 
                         case Some(data) =>
-                            Bucket.bkValue(data.getBytes()) match
+                            Bucket.read(data.getBytes()) match
                                 case None => return None 
                                 case Some(value) =>
                                     var bk = new Bucket(name,tx)

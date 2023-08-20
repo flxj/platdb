@@ -4,6 +4,7 @@
 
 class MemDB:
     val name:String 
+    var store:DB = _
 
 class MemTx:
     val id:Int
@@ -20,7 +21,7 @@ class MemMap:
     def writeTo(path:String):Unit // 将该内存map持久化到某个文件中 --> 新建一个磁盘DB对象，然后向其写入当前桶的所有内容 （注意版本）
 
 class MemSet:
-    var bk:MemBucket = _ 
+    var bk:MemMap = _ 
 
 class MemPriorityQueue:
     var tx:MemTx = _ 

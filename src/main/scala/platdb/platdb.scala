@@ -20,12 +20,14 @@ class Info:
   val b:String
 
 class DB:
-  private[platdb] var filemanager:FileManager = _ 
+  private[platdb] var fileManager:FileManager = _ 
   private[platdb] var freelist:FreeList = _ 
-  private[platdb] var blockpool:BlockPool = _ 
+  private[platdb] var blockBuffer:BlockBuffer = _ 
   private[platdb] var rTx:ArrayBuffer[Tx]
   private[platdb] var rwTx:Option[Tx]
   private[platdb] var rwLock:ReentrantReadWriteLock
+  private[platdb] var meta:Meta
+
   
   def name:String 
   def open(path:String,ops:Options):Boolean
@@ -35,7 +37,7 @@ class DB:
   def info:Info
 
   def begin(writable:Boolean):Option[Tx]
-  def update(op:(Tx)=>Unit):Unit
+  def update(op:(Tx)=>Unit):Unit 
   def view(op:(Tx)=>Unit):Unit
   def snapshot(path:String):Option[Int]
 

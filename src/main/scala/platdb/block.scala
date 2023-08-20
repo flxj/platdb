@@ -36,7 +36,7 @@ val bucketType:Int = 5
 @SerialVersionUID(100L)
 class BlockHeader(var id:Int,var flag:Int,var count:Int,var overflow:Int,var size:Int)
 
-// uid 可能会用于blockpool管理block用
+// uid 可能会用于blockBuffer pool管理block用
 protected class Block(val uid:Int,var header:BlockHeader): // header对象应该是可变的，因为可能需要为其分配id
     private var data:ArrayBuffer[Byte] = _ // index和data区合并为data
     private var idx:Int = 0
@@ -87,7 +87,7 @@ protected object Block:
                 i = i+1
             Some(new BlockHeader(arr(0),arr(1),arr(2),arr(3),arr(4)))
 
-class BlockPool(val size:Int):
+class BlockBuffer(val size:Int):
     def idle:Int = 0 
     def get(size:Int):Block
     def revert(uid:Int):Uint
