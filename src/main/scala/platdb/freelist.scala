@@ -104,7 +104,7 @@ private[platdb] class Freelist(val oldid:Int) extends Persistence:
 		unleashing = unleashing.takeRight(unleashing.length-i-1)
 		idle = reform()
 
-	//  释放以startid为起始pageid的(tail+1)个连续的page空间
+	// 释放以startid为起始pageid的(tail+1)个连续的page空间
 	// 写事务提交后可能会释放一些page, 这会在freelist的pending中添加一条记录 'txid: pageids' 表示txid版本的这些pageids需要释放
 	def free(txid:Int,startid:Int,tail:Int):Unit = 
 		val ff = FreeFragment(startid,startid+tail,tail+1)

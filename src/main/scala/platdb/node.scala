@@ -2,7 +2,7 @@ package platdb
 
 import scala.collection.mutable.{ArrayBuffer}
 
-val nodeIndexSize = 20 
+val nodeIndexSize = 16 
 
 // if isLeaf, valSize== pgid
 case class NodeIndex(flag:Int,offset:Int,keySize:Int,valSize:Int)
@@ -10,7 +10,7 @@ case class NodeIndex(flag:Int,offset:Int,keySize:Int,valSize:Int)
 // 对于分支节点元素，其value为空； 对于叶子节点元素其child字段为-1
 class NodeElement(flag:Int,child:Int,key:String,value:String) // 一个节点元素将转换为---> 一个NodeIndex+Ayrray[Byte] ---> 存放到block的data字段中
     def keySize:Int = key.getBytes.length
-    def valueSize:Int = value.getBytes.length
+    def valueSize:Int = value.getBytes.length // TODO 使用Array[Byte] 作为key,value字段类型
 
 object Node:
     def read(bk:Block):Option[Node] = 

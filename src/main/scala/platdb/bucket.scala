@@ -9,8 +9,9 @@ val bucketValueSize = 16
 // count表示当前bucket中key的个数
 class bucketValue(var root:Int,var count:Int,var sequence:Long):
     // 作为bucket类型的blockElement的value内容: NodeIndex --> (key: bucketName, value:bucketValue)
-    override def toString(): String = ???
+    def content: String = new String(Bucket.marshal(this))
 
+//
 object Bucket:
     def read(data:Array[Byte]):Option[bucketValue] =
         if data.length!=bucketValueSize then
@@ -25,10 +26,15 @@ object Bucket:
             c = c | (data(4+i) & 0xff)
         for i <- 0 to 7 do
             s = s << 8
-            c = c | (data(8+i) & 0xff)
+            s = s | (data(8+i) & 0xff)
         Some(new bucketValue(r,c,s))
     //     
-    def marshal(bkv:bucketValue):Array[Byte] = None
+    def marshal(bkv:bucketValue):Array[Byte] = 
+        var buf:ByteBuffer = ByteBuffer.allocate(bucketValueSize)
+        buf.putInt(bkv.root)
+        buf.putInt(bkv.count)
+        buf.putLong(bkv.sequence)
+        buf.array()
 
 class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
     private[platdb] var bkv:bucketValue = _
@@ -145,7 +151,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
         c.node() match 
             case None => return None 
             case Some(n) =>
-                n.put(name,name,bkv.toString(),bucketType,0)
+                n.put(name,name,bkv.content,bucketType,0)
                 bkv.count++
         Some(bk)
     // 创建bucket,如果已经存在则返回该bucket
@@ -365,7 +371,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                             if flag!=bucketType then 
                                 throw new Exception(s"unexpected bucket header flag:$flag")
                             c.node() match 
-                                case Some(node) => node.put(k,key,v.toString(),bucketType,0)
+                                case Some(node) => node.put(k,key,v.content,bucketType,0)
                                 case None => throw new Exception("")
         // 切分当前节点
         root match
@@ -427,7 +433,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                 if !splitOnNode(p) then return false 
         true 
 
-    //  将node按照size大小切分成若干节点    
+    //  将node按照size大小切分成若干节点
     private def splitNode(node:Node,size:Int):List[Node] = 
         if node.size <= size || node.length <= Node.minKeysPerBlock*2 then 
             return List[Node](node)

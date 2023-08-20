@@ -6,6 +6,7 @@ import java.io.IOError
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
+import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
 import scala.util.{Try,Success,Failure}
 
@@ -37,24 +38,34 @@ val bucketType:Int = 5
 class BlockHeader(var id:Int,var flag:Int,var count:Int,var overflow:Int,var size:Int)
 
 // uid 可能会用于blockBuffer pool管理block用
-protected class Block(val uid:Int,var header:BlockHeader): // header对象应该是可变的，因为可能需要为其分配id
-    private var data:ArrayBuffer[Byte] = _ // index和data区合并为data
-    private var idx:Int = 0
+private[platdb] class Block(val uid:Int,val sz:Int): // header对象应该是可变的，因为可能需要为其分配id
+    var header:BlockHeader = _
+    var data:ArrayBuffer[Byte] = new ArrayBuffer[Byte](sz) // header 和实际data都放到data中
+    private var idx:Int = 0 // idx总是指向下一个写入位置
      
     def id:Int = header.id
     def uid:Int = uid 
-    // 返回实际已经使用的容量 data[0:idx]
-    def size:Int = idx 
-    // block类型： 叶子节点还是分支节点
+    // 返回实际已经使用的容量
+    def size:Int = idx
+    // 容量：data字段的物理长度
+    def capacity:Int = data.length
+    // block类型
     def btype:Int = header.flag 
     def setid(id:Int):Unit = header.id = id 
-    def write(offset:Int,data:Array[Byte]):Unit
+    def reset():Unit = idx = 0
+    def write(offset:Int,d:Array[Byte]):Unit =
+        if offset<0 || d.length == 0 then 
+            return None
+        if offset+d.length >= capacity then 
+            data++=new ArrayBuffer[Byte](offset+d.length-capacity)
+        if d.copyToArray(data,offset)!= d.length then
+            return None
+        if d.length+offset > idx then
+            idx = d.length+offset
     // 追加data
-    def append(d:Array[Byte]):Uint 
-    // 容量：data字段的物理长度
-    def capacity:Int = data.length 
+    def append(d:Array[Byte]):Uint = write(idx,d)
     // 所有数据
-    def data:ArrayBuffer[Byte] = data.slice(0,idx) 
+    def all:ArrayBuffer[Byte] = data.slice(0,idx)
     // 返回除了header外的数据
     def tail:Option[ArrayBuffer[Byte]] = 
         if size>blockHeaderSize then
@@ -71,7 +82,6 @@ protected object Block:
         buf.putInt(pg.overflow)
         buf.putInt(pg.size)
         buf.array()
-    
     def unmarshalHeader(bs:Array[Byte]):Option[BlockHeader] =
         if bs.length != blockHeaderSize then 
             None 
@@ -86,24 +96,18 @@ protected object Block:
                 arr(i) = n
                 i = i+1
             Some(new BlockHeader(arr(0),arr(1),arr(2),arr(3),arr(4)))
-
-class BlockBuffer(val size:Int):
-    def idle:Int = 0 
-    def get(size:Int):Block
-    def revert(uid:Int):Uint
-
-    
-/* how to load a logic page from file?
-按照osPageSize将文件划分成若干物理段，若干物理上连续的page组成一个逻辑block, 而一个block对应于内存中的一个B+树node
-
-1. use pgid to seek pageheader location in file
-2. read the pageheader
-3. get overflow value, then read continue pages of number overflow 
-4. read size bytes and  unmashal it to Node
-*/
+//
+protected class BlockBuffer(val size:Int):
+    private var id = new AtomicInteger(1)
+    def idle:Map[Int,Block] = _
+    def get(size:Int):Block =
+        val bid = id.getAndIncrement()
+        var bk = new Block(bid,size)
+        return bk 
+    def revert(uid:Int):Uint = None
 
 // 
-protected class FileManager(val path:String, val fmType:String):
+protected class FileManager(val path:String, val fmType:String,var pool:BlockBuffer):
     var f:File = _
     var opend:Boolean = _
     def size:Option[Long] = 
@@ -135,44 +139,53 @@ protected class FileManager(val path:String, val fmType:String):
             case e:Exception => return false  
         finally 
             w.close()
-
+    //
     def read(bid:Int):Option[Block] = 
-        if !opend || bid<0 then return None 
-        val offset = pgid*osPageSize
+        if !opend || bid<0 then 
+            return None 
+        val offset = bid*osPageSize
         var reader:RandomAccessFile
         try
             reader = new RandomAccessFile(f,"rw")
+            // 1. use pgid to seek block header location in file
             reader.seek(offset)
-            // 1. get header
+            // 2. read the block header content
             var hd = new Array[Byte](blockHeaderSize)
             if reader.read(hd,0,blockHeaderSize)!= blockHeaderSize then
               throw new Exception("read block header error")
-            var Some(pg) = Block.Unmarshal(hd)
-
-            // 2. get data
-            reader.seek(offset+blockHeaderSize)
-            var data = new Array[Byte](pg.size)
-            if reader.read(data,0,pg.size) != pg.size then
-                throw new Exception("read block data error")
-            Some(new Block(pg,data)) // TODO: 从缓存中拿Block
-        catch 
+            
+            Block.unmarshalHeader(hd) match
+                case None => throw new Exception("parse block header error")
+                case Some(bhd) =>
+                    // 3. get overflow value, then read continue pages of number overflow 
+                    val sz = (bhd.overflow+1)*osPageSize
+                    var data = new Array[Byte](sz)
+                    if reader.read(data,0,sz) != sz then
+                        throw new Exception("read block data error")
+                    // get a block from pool
+                    var bk = pool.get(sz)
+                    bk.header = bhd 
+                    bk.write(0,data)
+                    Some(bk) 
+        catch
             case e:Exception => None
         finally
             reader.close()
-        
+    //   
     def write(bk:Block):(Boolean,Int) = 
-        if !opend || bk.size == 0 then return (false,0)
+        if !opend || bk.size == 0 then 
+            return (false,0)
         var w:RandomAccessFile
         try 
             if bk.id <=1 && bk.btype!=metaType then 
-                throw new Exception("block type error")
+                throw new Exception(s"block type error ${bk.btype}")
             w = new RandomAccessFile(f,"rw")
             w.seek(bk.id*osPageSize)
             w.write(bk.data)
             (true,bk.size)
         catch 
             case e:Exception => (false,0)
-        finally 
+        finally
             w.close()
 
 

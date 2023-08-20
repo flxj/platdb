@@ -84,7 +84,7 @@ class Tx(val readonly:Boolean):
             // Read free page list from freelist page.
 			// tx.db.freelist.reload(tx.db.page(tx.db.meta().freelist))
         close()
-    // user call rollback directly，we do nothing except rollback freelist.
+    // user call rollback directly，because not write any change to db file, so we do nothing except rollback freelist.
     def rollback():Unit =
         if db.closed then
             return None 
