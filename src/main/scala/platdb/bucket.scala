@@ -403,7 +403,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
         for n <- splitNode(node,osPageSize) do 
             if n.id > 0 then 
                 tx.free(n.id)
-                n.header.id = 0
+                n.header.pgid = 0
             // 重新分配block并写入节点内容
             tx.allocate(n.size) match
                 case None => return 
@@ -491,7 +491,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
     private[platdb] def freeNode(node:Node):Unit = 
         if node.id != 0 then
             tx.free(node.id)
-            node.header.id = 0 
+            node.header.pgid = 0 
     // 释放该节点及其所有子节点对象对应的page
     private[platdb] def freeFrom(id:Int):Uint = 
         if id <= 0 then return None 
@@ -503,7 +503,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                     for elem <- node.elements do // 递归释放
                         freeFrom(elem.child) 
             case (None,Some(bk)) =>
-                tx.free(bk.id)
+                tx.free(bk.pgid)
                 if bk.header.flag != leafType then 
                     nodeElements(Some(bk)) match 
                         case Some(elems) =>

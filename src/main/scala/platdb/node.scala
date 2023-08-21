@@ -72,7 +72,7 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
     var children:ArrayBuffer[Node] = _
     var elements:ArrayBuffer[NodeElement] = _
 
-    def id:Int = header.id
+    def id:Int = header.pgid
     def length:Int = elements.length 
     // 
     def ntype:Int = header.flag

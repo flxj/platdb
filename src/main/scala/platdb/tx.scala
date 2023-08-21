@@ -59,7 +59,7 @@ class Tx(val readonly:Boolean):
 
         // free the old freelist and write the new list to db file.
         if meta.freelistId!=0 then
-            db.freelist.free(txid,db.freelist.header.id,db.freelist.header.overflow)
+            db.freelist.free(txid,db.freelist.header.pgid,db.freelist.header.overflow)
         if !writeFreelist() then
             return false 
         
@@ -127,7 +127,7 @@ class Tx(val readonly:Boolean):
                 bk.setid(id)
                 db.freelist.writeTo(bk)
                 // write new freelsit to file
-                val (success,_) = db.fileManager.write(bk)
+                val (success,_) = db.blockBuffer.write(bk)
                 if !success then
                     rollbackTx()
                 else
@@ -153,7 +153,7 @@ class Tx(val readonly:Boolean):
         arr.sortWith((b1:Block,b2:Block) => b1.id < b2.id)
 
         for bk <- arr do
-            val (success,_) = db.fileManager.write(bk)
+            val (success,_) = db.blockBuffer.write(bk)
             if !success then
                 return false 
         true 
@@ -162,7 +162,7 @@ class Tx(val readonly:Boolean):
         var bk = db.blockBuffer.get(meta.size)
         bk.setid(meta.id)
 
-        val (success,_) = db.fileManager.write(bk)
+        val (success,_) = db.blockBuffer.write(bk)
         db.blockBuffer.revert(bk.uid)
         success
     
@@ -172,7 +172,7 @@ class Tx(val readonly:Boolean):
     private[platdb] def block(id:Int):Option[Block] =
         if blocks.contains(id) then 
             return blocks.get(id)
-        db.fileManager.read(id) match
+        db.blockBuffer.read(id) match
             case Some(bk) => 
                 blocks(id) = bk 
                 return Some(bk)
@@ -183,7 +183,7 @@ class Tx(val readonly:Boolean):
         block(id) match
             case None => None 
             case Some(bk) => 
-                db.freelist.free(txid,bk.header.id,bk.header.overflow)
+                db.freelist.free(txid,bk.header.pgid,bk.header.overflow)
     // allocate page space according size 
     private[platdb] def allocate(size:Int):Option[Int] =
         var n = size/osPageSize

@@ -13,7 +13,7 @@ private[platdb] object Meta:
 		bk.tail match
 			case None => None 
 			case Some(data) => 
-				var meta = new Meta(bk.id)
+				var meta = new Meta(bk.pgid)
 				if data.length!=metaPageSize then
 					return None 
 				var arr = new Array[Int](6)
@@ -57,7 +57,7 @@ private[platdb] class Meta(val id:Int) extends Persistence:
 	def size:Int = blockHeaderSize+metaPageSize
 	def block():Block = None 
 	def writeTo(bk:Block):Int =
-		bk.header.id = id 
+		bk.header.pgid = id 
 		bk.header.flag = flags
 		bk.header.overflow = 0
 		bk.header.count = 1
@@ -217,7 +217,7 @@ object Freelist:
 		bk.tail match
 			case None => None 
 			case Some(data) => 
-				var freelist = new Freelist(bk.id)
+				var freelist = new Freelist(bk.pgid)
 				if data.length < freelistHeaderSize then
 					return None 
 				unmarshalHeader(data.slice(0,freelistHeaderSize)) match
