@@ -9,10 +9,13 @@ import java.io.RandomAccessFile
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
 import scala.util.{Try,Success,Failure}
+import java.nio.channels.FileLock
+import java.nio.channels.FileChannel
+import java.util.Timer
+import java.util.Date
 
 trait Persistence:
     def size():Int
-    def block():Block 
     def writeTo(block:Block):Int // 返回写入的字节数
 
 /* node
@@ -112,66 +115,117 @@ protected class BlockBuffer(val size:Int,var fm:FileManager):
     // TODO: 从缓存中read的block,需要归还
     def revert(uid:Int):Uint = None 
     // 
-    def read(pgid:Int):Option[Block] = 
+    def read(pgid:Int):Try[Block] = 
         // TODO: 先查看缓存有没有
-        fm.read(pgid) match
-            case (None,_) => return None
-            case (Some(hd),None) => return None
-            case (Some(hd),Some(data)) =>
-                // get a block from idle
-                var bk = get(hd.size)
-                bk.header = hd 
-                bk.write(0,data)
-                return Some(bk)
-                // TODO: 是否缓存读到的block
-    def write(bk:Block):(Boolean,Int) = 
-        fm.write(bk) 
+        Try(
+            fm.read(pgid) match
+                case (None,_) => 
+                    return None
+                case (Some(hd),None) => 
+                    return None
+                case (Some(hd),Some(data)) =>
+                    // get a block from idle
+                    var bk = get(hd.size)
+                    bk.header = hd 
+                    bk.write(0,data)
+                    return bk
+                    // TODO: 是否缓存读到的block
+        )
+    def write(bk:Block):Try[Boolean] = 
+        Try(fm.write(bk)) 
         // TODO: 是否缓存该block？ 是否延迟写入文件？
         
     // TODO: sync将所有脏block写入文件？
     def sync():Unit
 
 // 
-protected class FileManager(val path:String, val fmType:String):
-    var f:File = _
-    var opend:Boolean = _
+protected class FileManager(val path:String,val readonly:Boolean):
+    var opend:Boolean
+    var file:File = null
+    var writer:RandomAccessFile = null // writer
+    var channel:FileChannel = null
+    var lock:FileLock = null
+    //
     def size:Option[Long] = 
         if !opend then None 
-        f.length()
+        file.length()
+    // open and lock 
+    def open(timeout:Int):Unit
+        if opend then return None 
+        file = new File(path)
+        if !file.exists() then
+            file.createNewFile()
+        //
+        var mode:String = "rw"
+        if readonly then
+            mode = "r"
+        writer = new RandomAccessFile(file,mode)
+        channel = writer.getChannel()
+        
+        val start = new Date()
+        while !opend do
+            lock = channel.tryLock(0L,Long.MaxValue,readonly)
+            if lock != null then
+                opend = true
+            else
+                val now = new Date()
+                val d = now.getTime() - start.getTime()
+                if d/1000 > timeout then
+                    throw new Exception(s"open database timeout:${timeout}s")
+    // close and unlock
+    def close():Unit =
+        if !opend then
+            return None
+        channel.close()
+        writer.close()
+        lock.release()
+        opend = false
 
-    def open():Boolean
-        if opend then true 
-        try 
-            f = new File(path)
-            if !f.exists() then
-                f.createNewFile()
-            open = true 
-        catch 
-            case e:Exception => false 
-            case _ => true 
+    def grow(size:Int):Unit = 
+        if !opend then
+            throw new Exception("db file closed")
+        if size<0 then 
+            return None // TODO shrink the file
+        if size == 0 then
+            return None
 
-    def grow(size:Int):Boolean = 
-        if !opend || size<=0 then return false 
         var w:FileOutputStream = _ 
         try 
             val arr = new Array[Byte](size)
-            val idx = f.length().intValue()
+            val idx = file.length().intValue()
 
-            w = new FileOutputStream(f)
+            w = new FileOutputStream(file) // TODO:
             w.write(arr,idx,arr.length)
-            true 
-        catch 
-            case e:Exception => return false  
         finally 
             w.close()
+    
+    def readAt(id:Int,size:Int):Array[Byte] =
+        if !opend then
+            throw new Exception("db file closed")
+        if bid<0 then 
+            throw new Exception(s"illegal page id ${bid}")
+        var reader:RandomAccessFile
+        try 
+            reader = new RandomAccessFile(file,"r")
+            reader.seek(id*osPageSize)
+            var data = new Array[Byte](size)
+            if reader.read(data,0,size)!= size then
+              throw new Exception("read size is unexpected")
+            data
+        catch
+            case e:Exception => throw e
+        finally
+            reader.close()
     //
     def read(bid:Int):(Option[BlockHeader],Option[Array[Byte]]) = 
-        if !opend || bid<0 then 
-            return None 
+        if !opend then
+            throw new Exception("db file closed")
+        if bid<0 then 
+            throw new Exception(s"illegal block id ${bid}")
         val offset = bid*osPageSize
         var reader:RandomAccessFile
         try
-            reader = new RandomAccessFile(f,"rw")
+            reader = new RandomAccessFile(file,"r")
             // 1. use pgid to seek block header location in file
             reader.seek(offset)
             // 2. read the block header content
@@ -187,27 +241,18 @@ protected class FileManager(val path:String, val fmType:String):
                     var data = new Array[Byte](sz)
                     if reader.read(data,0,sz) != sz then
                         throw new Exception("read block data error")
-                    (Some(bhd),Some(data))    
-        catch
-            case e:Exception => (None,None)
+                    (Some(bhd),Some(data)) 
         finally
             reader.close()
-    //   
-    def write(bk:Block):(Boolean,Int) = 
-        if !opend || bk.size == 0 then 
-            return (false,0)
-        var w:RandomAccessFile
-        try 
-            if bk.pgid <=1 && bk.btype!=metaType then 
-                throw new Exception(s"block type error ${bk.btype}")
-            w = new RandomAccessFile(f,"rw")
-            w.seek(bk.pgid*osPageSize)
-            w.write(bk.data)
-            (true,bk.size)
-        catch 
-            case e:Exception => (false,0)
-        finally
-            w.close()
-
-
-    
+    //  
+    def write(bk:Block):Boolean = 
+        if !opend then
+            throw new Exception("db file closed")
+        if bk.size == 0 then 
+            return true
+        if bk.pgid <=1 && bk.btype != metaType then // TODO remove this check to tx
+            throw new Exception(s"block type error ${bk.btype}")
+        writer.seek(bk.pgid*osPageSize)
+        writer.write(bk.data)
+        true
+        

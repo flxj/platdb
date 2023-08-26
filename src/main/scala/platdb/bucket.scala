@@ -10,6 +10,7 @@ val bucketValueSize = 16
 class bucketValue(var root:Int,var count:Int,var sequence:Long):
     // 作为bucket类型的blockElement的value内容: NodeIndex --> (key: bucketName, value:bucketValue)
     def content: String = new String(Bucket.marshal(this))
+    override def clone:bucketValue = new bucketValue(root,count,sequence)
 
 //
 object Bucket:
@@ -265,8 +266,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                 return None
     // 当前bucket中key的个数
     def length:Int = bkv.count
-    private[platdb] def size():Int 
-    private[platdb] def block():Block = None // 返回该bucket对应的Block结构
+    private[platdb] def size():Int = bucketValueSize
     private[platdb] def writeTo(bk:Block):Int = 0
     
     // rebalance 

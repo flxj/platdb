@@ -127,8 +127,6 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
             if elem.child == node.id then 
                 return i
         return -1 
-    // 
-    def block():Block // 返回该节点对应的Block对象 
     // 将当前节点内容写入参数block
     def writeTo(bk:Block):Int =
         // 更新header

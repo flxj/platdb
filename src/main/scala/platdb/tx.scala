@@ -1,6 +1,8 @@
 package platdb
 
 import scala.collection.mutable.{Map,ArrayBuffer}
+import scala.util.Failure
+import scala.util.Success
 
 /*
 A: 
@@ -22,11 +24,22 @@ D:
 */
 
 class Tx(val readonly:Boolean):
-    private[platdb] var db:DB
-    private[platdb] var meta:Meta = _ 
-    private[platdb] var root:Bucket = _ 
-    private[platdb] var blocks:Map[Int,Block] = _  // cache dirty blocks,rebalance(merge/split) bucket maybe product them
-    private[platdb] var closed:Boolean
+    private[platdb] var sysCommit:Boolean
+    private[platdb] var db:DB = null
+    private[platdb] var meta:Meta = null
+    private[platdb] var root:Bucket
+    private[platdb] var blocks:Map[Int,Block] = null // cache dirty blocks,rebalance(merge/split) bucket maybe product them
+    
+    private[platdb] def closed:Boolean = db == null
+
+    private[platdb] def init(db:DB):Unit =
+        db = db
+        meta = db.meta.clone
+        blocks = new Map[Int,Block]()
+        root = new Bucket("",this)
+        root.bkv = meta.root.clone
+        if !readonly then
+            meta.txid++
 
     def txid:Int = meta.txid
     def writable:Boolean = !readonly
@@ -40,19 +53,22 @@ class Tx(val readonly:Boolean):
     // delete bucket
     def deleteBucket(name:String):Boolean = root.deleteBucket(name)
     // commit current transaction
-    def commit():Boolean = 
-        if db.closed then
-            return false 
-        else if closed then
-            return false 
+    def commit():Try[Boolean] = 
+        if closed then
+            return Failure(new Exception("tx closed"))
+        else if db.closed then // TODO remove this
+            return Failure(new Exception("db closed"))
+        else if sysCommit then
+            return Failure( new Exception("not allow to rollback system tx manually"))
         else if !writable then // cannot commit read-only tx
-            return false  
+            return Failure(new Exception("cannot commit read-only tx"))
+        
         // merge bucket nodes first
         root.merge()
         // spill buckets to dirty blocks
         if !root.split() then
             rollback()
-            return false 
+            return Success(false)
         
         // updata meta info
         meta.root = root.bkv
@@ -60,44 +76,50 @@ class Tx(val readonly:Boolean):
         // free the old freelist and write the new list to db file.
         if meta.freelistId!=0 then
             db.freelist.free(txid,db.freelist.header.pgid,db.freelist.header.overflow)
-        if !writeFreelist() then
-            return false 
-        
-        if !writeBlock() then
-            rollbackTx()
-            return false 
-        
-        if !writeMeta() then
-            rollbackTx()
-            return false 
+        // 
+        writeFreelist() match
+            case Failure(e) => return Failure(e)
+        writeBlock() match
+            case Failure(e) => 
+                rollbackTx()
+                return Failure(e)
+        writeMeta() match
+            case Failure(e) => 
+                rollbackTx()
+                return Failure(e)
         close()
-        true 
-    //  rollback current tx
-    private def rollbackTx():Unit = 
-        if db.closed then
-            return None 
-        else if closed then
-            return None 
+        Success(true)
+    
+    //  rollback current tx during commit process
+    private[platdb] def rollbackTx():Unit = 
+        if closed then 
+            throw new Exception("tx closed")
+        else if db.closed then
+            throw new Exception("db closed")
+        //
         if writable then
-            db.freelist.rollbackFree(txid)
+            db.freelist.rollback(txid)
             // TODO:
             // Read free page list from freelist page.
 			// tx.db.freelist.reload(tx.db.page(tx.db.meta().freelist))
         close()
     // user call rollback directly，because not write any change to db file, so we do nothing except rollback freelist.
-    def rollback():Unit =
-        if db.closed then
-            return None 
-        else if closed then
-            return None 
+    def rollback():Try[Boolean] =
+        if closed then
+            return Failure(new Exception("tx closed"))
+        else if db.closed then
+            return Failure(new Exception("db closed"))
+        else if sysCommit then
+            return Failure(new Exception("not allow to rollback system tx manually"))
         if writable then
             db.freelist.rollback(txid)
         close()
+        Success(true)
     // close current tx: release all object references about the tx 
     private def close():Unit = 
-        if db.closed then 
+        if closed then 
             return None 
-        else if closed then 
+        else if db.closed then 
             return None 
         
         if !writable then
@@ -108,64 +130,72 @@ class Tx(val readonly:Boolean):
 
         for (id,bk)<- blocks do
             db.blockBuffer.revert(bk.uid)
-        db = None 
-        meta = None
+        db = null
+        meta = null
         root = new Bucket("",this)
         blocks.clear()
 
     // write freelist to db file
-    private def writeFreelist():Boolean = 
+    private def writeFreelist():Try[Boolean] = 
         // allocate new pages for freelist
         val maxId = meta.blockId
         val sz = db.freelist.size
         allocate(sz) match
             case None => 
                 rollbackTx()
-                false 
+                return Failure(new Exception(s"tx ${txid} allocate block space failed"))
             case Some(id) =>
                 var bk = db.blockBuffer.get(sz)
                 bk.setid(id)
                 db.freelist.writeTo(bk)
                 // write new freelsit to file
-                val (success,_) = db.blockBuffer.write(bk)
-                if !success then
-                    rollbackTx()
-                else
-                    meta.freelistId = id 
-                db.blockBuffer.revert(bk.uid)
-                /*
-                // If the high water mark has moved up then attempt to grow the database.
-                if tx.meta.pgid > opgid {
-                    if err := tx.db.grow(int(tx.meta.pgid+1) * tx.db.pageSize); err != nil {
-                        tx.rollback()
-                        return err
-                    }
-                } 
-                */
-                if success && meta.blockId > maxId then
-                    // TODO
-                success
+                db.blockBuffer.write(bk) match
+                    case Failure(e) => return Failure(e)
+                    case Success(flag) =>
+                        if !flag then
+                            rollbackTx()
+                            return Failure(new Exception(s"tx ${} write freelist to db file failed"))
+                        meta.freelistId = id 
+                        db.blockBuffer.revert(bk.uid)
+                        /*
+                        // If the high water mark has moved up then attempt to grow the database.
+                        if tx.meta.pgid > opgid {
+                            if err := tx.db.grow(int(tx.meta.pgid+1) * tx.db.pageSize); err != nil {
+                                tx.rollback()
+                                return err
+                            }
+                        } 
+                        */
+                        if meta.blockId > maxId then
+                            // TODO grow
+                        Success(true)
     // write all dirty blocks to db file
-    private def writeBlock():Boolean =
+    private def writeBlock():Try[Boolean] =
         var arr = new ArrayBuffer[Block]()
         for (id,bk) <- blocks do
             arr+=bk 
         arr.sortWith((b1:Block,b2:Block) => b1.id < b2.id)
 
         for bk <- arr do
-            val (success,_) = db.blockBuffer.write(bk)
-            if !success then
-                return false 
-        true 
+            db.blockBuffer.write(bk) match
+                case Failure(e) => return Failure(e)
+                case Success(flag) =>
+                    if !flag then
+                        return Failure(new Exception(s"tx ${txid} commit dirty blcok ${bk.id} failed"))
+        Success(true) 
     // write meta blocks to db file
-    private def writeMeta():Boolean  =
+    private def writeMeta():Try[Boolean]  =
         var bk = db.blockBuffer.get(meta.size)
         bk.setid(meta.id)
-
-        val (success,_) = db.blockBuffer.write(bk)
-        db.blockBuffer.revert(bk.uid)
-        success
-    
+        try 
+            db.blockBuffer.write(bk) match
+                case Failure(e) => return Failure(e)
+                case Success(flag) =>
+                    if !falg then
+                        return Failure( new Exception(s"tx ${txid} commit meta ${bk.id} failed"))
+            Success(true)
+        finally
+            db.blockBuffer.revert(bk.uid)
     // return the max blockid
     private[platdb] def blockId:Int = meta.blockId
     // get block by bid

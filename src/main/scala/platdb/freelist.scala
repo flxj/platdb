@@ -7,6 +7,7 @@ import scala.util.control.Breaks._
 val metaPageSize = 32
 
 private[platdb] object Meta:
+    def readFromBytes(data:Array[Byte]):Option[Meta] // TODO
 	def read(bk:Block):Option[Meta] =
 		if bk.header.flag!= metaType then 
 			return None 
@@ -55,7 +56,6 @@ private[platdb] class Meta(val id:Int) extends Persistence:
 	var root:bucketValue
 
 	def size:Int = blockHeaderSize+metaPageSize
-	def block():Block = None 
 	def writeTo(bk:Block):Int =
 		bk.header.pgid = id 
 		bk.header.flag = flags
@@ -65,6 +65,15 @@ private[platdb] class Meta(val id:Int) extends Persistence:
         bk.append(Block.marshalHeader(bk.header))
         bk.write(bk.size,Meta.marshal(this))
 		bk.size
+	override def clone:Meta =
+		var m = new Meta(id)
+		m.pageSize = pageSize
+		m.flags = flags
+		m.freelistId = freelistId
+		m.blockId = blockId
+		m.txid = txid
+		m.root = new bucketValue(root.root,root.count,root.sequence)
+		m
 
 val freelistHeaderSize = 8
 val freelistElementSize = 8
@@ -90,18 +99,22 @@ private[platdb] class Freelist(val oldid:Int) extends Persistence:
 			sz+= fc.ids.length*freelistElementSize
 		sz 
 	
-	// 将unleashing集合中所有<=txid的freeClaim的ids移动到idle队列
+	// 将unleashing集合中所有txid值在区间[start,end]中的freeClaim的ids移动到idle队列
 	// 下一个写事务在开始执行之前会尝试调用freelist释放pending中的page, 只要pending中待释放的版本小于当前打开的只读事务持有的最小版本
 	// ，那末就可以释放这些pending元素 （表示当前肯定已经没有只读事务在持有这些待释放pages了）
     // 同时当前已经打开的只读事务持有的版本可能跨度较大， 那末对于两个相邻版本之间的版本， 如果已经没有事务在持有它，那末也是可以释放的
-	def unleash(txid:Int):Unit =
-		unleashing.sortWith((c1:FreeClaim,c2:FreeClaim)=> c1.txid < c2.txid)
+	def unleash(start:Int,end:Int):Unit =
+		if start > end then return None
+		unleashing.sortWith((c1:FreeClaim,c2:FreeClaim) => c1.txid < c2.txid)
 		var i = 0
-		while i<unleashing.length && unleashing(i).txid<=txid do
+		var j = unleashing.length-1
+		while i<unleashing.length && unleashing(i).txid<start do
 			i++
-		for j <- 0 to i do
-			idle++=unleashing(i).ids
-		unleashing = unleashing.takeRight(unleashing.length-i-1)
+		while j>0 && unleashing(j).txid>end do
+			j--
+		for k <- i to j do
+			idle++=unleashing(k).ids
+		unleashing = unleashing.slice(0,i) ++ unleashing.takeRight(j+1)
 		idle = reform()
 
 	// 释放以startid为起始pageid的(tail+1)个连续的page空间
@@ -193,7 +206,6 @@ private[platdb] class Freelist(val oldid:Int) extends Persistence:
 		mg.sortWith((f1:FreeFragment,f2:FreeFragment) => f1.length < f2.length || (f1.length == f2.length && f1.start < f2.start))
 		mg
 	//
-	def block():Block = None
 	def writeTo(bk:Block):Int =
 		bk.header.flag = freelistType
 		bk.header.count = 1
