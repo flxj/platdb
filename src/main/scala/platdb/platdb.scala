@@ -10,19 +10,21 @@ import scala.util.control.Breaks._
 import scala.util.{Try,Failure,Success}
 import java.util.concurrent.locks.Lock
 
-
+// global options
 object PlatDB:
     @main def main(args: String*) =
         println("hello,platdb")
 
+//
 case class Options(val timeout:Int,val bufSize:Int,val readonly:Boolean)
 
+//
 class DB(val path:String,val ops:Options):
     private[platdb] var fileManager:FileManager = null
     private[platdb] var freelist:FreeList = null
     private[platdb] var blockBuffer:BlockBuffer = null
     private[platdb] var meta:Meta = null
-    private var closeFlag:Boolean = true
+    private var openFlag:Boolean = false
     private var rTx:ArrayBuffer[Tx]
     private var rwTx:Option[Tx] = None
     private var rwLock:ReentrantReadWriteLock
@@ -30,31 +32,31 @@ class DB(val path:String,val ops:Options):
 
     def name:String = path
     def isReadonly:Boolean = ops.readonly
+    def isClosed:Boolean = !openFlag
     def open():Try[Boolean] =
       try
-          if !closeFlag then
+          if openFlag then
             return Success(true)
+
           // 尝试打开文件,如果超时则抛出一个异常
           fileManager = new FileManager(path,ops.readonly)
           fileManager.open(ops.timeout)
+          blockBuffer = new BlockBuffer(ops.bufSize,fileManager)
 
           // TODO: 如果是第一次open db, 如何初始化？！
 
-          // 读取meta 
+          // read meta 
           meta = loadMeta(0)
-          
-          if ops.readonly then
-            return Success(true)
-
-          // 读取freelist 
-          freelist = loadFreelist(meta.freelistId)
-          
-          blockBuffer = new BlockBuffer(ops.bufSize,fileManager)
-          rTx = new ArrayBuffer[Tx]()
           metaLock = new Lock()
-          rwLock = new ReentrantReadWriteLock()
-          closeFlag = false
-          Try(true) 
+          
+          rTx = new ArrayBuffer[Tx]()
+          if !ops.readonly then
+            // read freelist
+            freelist = loadFreelist(meta.freelistId)
+            rwLock = new ReentrantReadWriteLock()
+          
+          openFlag = true
+          Success(true)
       catch
           case ex:Exception => Failure(ex)
           case er:Error => Failure(er)
@@ -63,19 +65,29 @@ class DB(val path:String,val ops:Options):
     private def loadMeta(id:Int):Meta =
       val data = fileManager.readAt(id,meta.size)
       Meta.readFromBytes(data) match
-        case None => throw new Exception(s"read meta data from page ${id} failed")
+        case None => throw new Exception(s"not found meta data from page ${id}")
         case Some(m) => return m
 
     // 可能返回异常
-    private def loadFreelist(id:Int):Freelist
+    private def loadFreelist(id:Int):Freelist =
+      val hd = fileManager.readAt(id,blockHeaderSize)
+      Block.unmarshalHeader(hd) match
+        case None => throw new Exception(s"not found freelist header from page ${id}")
+        case Some(h) => 
+          val data = fileManager.readAt(id,h.size)
+          val bk = new Block(0,data.length)
+          bk.header = h
+          Freelist.read(bk) match
+            case None => throw new Exception(s"not found freelist data from page ${id}")
+            case Some(fl) => return fl
     
     // 关闭数据库,调用该函数会阻塞直到所有已经打开的事务被提交
     def close(): Try[Boolean] =
       try 
         rwLock.writeLock().lock()
         metaLock.lock()
-        if !closed then
-          closeFlag = true
+        if !isClosed then
+          openFlag = false
           fileManager.close()
           fileManager = null
           freelist = null
@@ -85,8 +97,7 @@ class DB(val path:String,val ops:Options):
       finally
         metaLock.unlock()
         rwLock.writeLock().unlock()
-
-    def closed:Boolean = closeFlag
+    //
     def sync():Unit
 
     // 打开一个事务

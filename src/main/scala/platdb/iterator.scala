@@ -151,7 +151,7 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
                         case Some(e) => child = e.child 
                         case None => return 
             if child>1 then 
-                (n,b) := bucket.nodeOrBlock(child)  // blockId等于0或1的位置是为meta预留的
+                (n,b) := bucket.nodeOrBlock(child)  // pageId等于0或1的位置是为meta预留的
                 r = Record(n,b,0)
                 r.index = r.count -1 
                 stack = stack::r

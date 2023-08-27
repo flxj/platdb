@@ -3,6 +3,7 @@ package platdb
 import scala.collection.mutable.{Map,ArrayBuffer}
 import scala.util.Failure
 import scala.util.Success
+import scala.util.Try
 
 /*
 A: 
@@ -56,19 +57,23 @@ class Tx(val readonly:Boolean):
     def commit():Try[Boolean] = 
         if closed then
             return Failure(new Exception("tx closed"))
-        else if db.closed then // TODO remove this
+        else if db.isClosed then // TODO remove this
             return Failure(new Exception("db closed"))
         else if sysCommit then
             return Failure( new Exception("not allow to rollback system tx manually"))
         else if !writable then // cannot commit read-only tx
             return Failure(new Exception("cannot commit read-only tx"))
         
-        // merge bucket nodes first
-        root.merge()
-        // spill buckets to dirty blocks
-        if !root.split() then
-            rollback()
-            return Success(false)
+        try 
+            // merge bucket nodes first
+            root.merge()
+            // spill buckets to dirty blocks
+            root.split()
+        catch
+            case e:Exception =>
+                rollback() match
+                    case Failure(e) => _
+                return Failure(e)
         
         // updata meta info
         meta.root = root.bkv
@@ -94,7 +99,7 @@ class Tx(val readonly:Boolean):
     private[platdb] def rollbackTx():Unit = 
         if closed then 
             throw new Exception("tx closed")
-        else if db.closed then
+        else if db.isClosed then
             throw new Exception("db closed")
         //
         if writable then
@@ -107,7 +112,7 @@ class Tx(val readonly:Boolean):
     def rollback():Try[Boolean] =
         if closed then
             return Failure(new Exception("tx closed"))
-        else if db.closed then
+        else if db.isClosed then
             return Failure(new Exception("db closed"))
         else if sysCommit then
             return Failure(new Exception("not allow to rollback system tx manually"))
@@ -119,7 +124,7 @@ class Tx(val readonly:Boolean):
     private def close():Unit = 
         if closed then 
             return None 
-        else if db.closed then 
+        else if db.isClosed then 
             return None 
         
         if !writable then
@@ -138,7 +143,7 @@ class Tx(val readonly:Boolean):
     // write freelist to db file
     private def writeFreelist():Try[Boolean] = 
         // allocate new pages for freelist
-        val maxId = meta.blockId
+        val maxId = meta.pageId
         val sz = db.freelist.size
         allocate(sz) match
             case None => 
@@ -154,7 +159,7 @@ class Tx(val readonly:Boolean):
                     case Success(flag) =>
                         if !flag then
                             rollbackTx()
-                            return Failure(new Exception(s"tx ${} write freelist to db file failed"))
+                            return Failure(new Exception(s"tx ${txid} write freelist to db file failed"))
                         meta.freelistId = id 
                         db.blockBuffer.revert(bk.uid)
                         /*
@@ -166,7 +171,7 @@ class Tx(val readonly:Boolean):
                             }
                         } 
                         */
-                        if meta.blockId > maxId then
+                        if meta.pageId > maxId then
                             // TODO grow
                         Success(true)
     // write all dirty blocks to db file
@@ -196,17 +201,19 @@ class Tx(val readonly:Boolean):
             Success(true)
         finally
             db.blockBuffer.revert(bk.uid)
-    // return the max blockid
-    private[platdb] def blockId:Int = meta.blockId
+    // return the max pageid
+    private[platdb] def maxPageId:Int = meta.pageId
     // get block by bid
-    private[platdb] def block(id:Int):Option[Block] =
+    private[platdb] def block(id:Int):Try[Block] =
         if blocks.contains(id) then 
-            return blocks.get(id)
+            blocks.get(id) match
+                case Some(bk) =>  return Success(bk)
+                case None => return Failure(new Exception(s"null block cache $id"))
         db.blockBuffer.read(id) match
-            case Some(bk) => 
+            case Success(bk) => 
                 blocks(id) = bk 
-                return Some(bk)
-            case None => return None 
+                Success(bk)
+            case Failure(e) => Failure(e)
         
     // release a block's pages
     private[platdb] def free(id:Int):Unit =

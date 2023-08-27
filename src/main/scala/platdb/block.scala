@@ -117,23 +117,29 @@ protected class BlockBuffer(val size:Int,var fm:FileManager):
     // 
     def read(pgid:Int):Try[Block] = 
         // TODO: 先查看缓存有没有
-        Try(
+        try 
             fm.read(pgid) match
                 case (None,_) => 
-                    return None
+                    return Failure(new Exception(s"not found block header for pgid ${pgid}"))
                 case (Some(hd),None) => 
-                    return None
+                    return Failure(new Exception(s"not found block data for pgid ${pgid}"))
                 case (Some(hd),Some(data)) =>
                     // get a block from idle
                     var bk = get(hd.size)
                     bk.header = hd 
                     bk.write(0,data)
-                    return bk
+                    return Success(bk)
                     // TODO: 是否缓存读到的block
-        )
+        catch
+            case e:Exception => return Failure(e)
+
     def write(bk:Block):Try[Boolean] = 
-        Try(fm.write(bk)) 
         // TODO: 是否缓存该block？ 是否延迟写入文件？
+        try 
+            fm.write(bk)
+            Success(true)
+        catch
+            case e:Exception => return Failure(e)
         
     // TODO: sync将所有脏block写入文件？
     def sync():Unit
@@ -231,16 +237,16 @@ protected class FileManager(val path:String,val readonly:Boolean):
             // 2. read the block header content
             var hd = new Array[Byte](blockHeaderSize)
             if reader.read(hd,0,blockHeaderSize)!= blockHeaderSize then
-              throw new Exception("read block header error")
+              throw new Exception(s"read block header ${bid} error")
             
             Block.unmarshalHeader(hd) match
-                case None => throw new Exception("parse block header error")
+                case None => throw new Exception(s"parse block header ${bid} error")
                 case Some(bhd) =>
                     // 3. get overflow value, then read continue pages of number overflow 
                     val sz = (bhd.overflow+1)*osPageSize
                     var data = new Array[Byte](sz)
                     if reader.read(data,0,sz) != sz then
-                        throw new Exception("read block data error")
+                        throw new Exception("read block data size unexpected")
                     (Some(bhd),Some(data)) 
         finally
             reader.close()

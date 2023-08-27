@@ -79,6 +79,10 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
     // 
     def isLeaf:Boolean = header.flag == leafType
     //
+    def isRoot:Boolean = parent match
+        case Some(n) => false
+        case None => true
+    //
     def root:Node = parent match {
             case Some(node:Node) => node.root()
             case None => this

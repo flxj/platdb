@@ -4,10 +4,20 @@ import java.nio.ByteBuffer
 import scala.collection.mutable.{ArrayBuffer,Map}
 import scala.util.control.Breaks._
 
-val metaPageSize = 32
+val metaElementSize = 32
 
 private[platdb] object Meta:
-    def readFromBytes(data:Array[Byte]):Option[Meta] // TODO
+    def readFromBytes(data:Array[Byte]):Option[Meta] =
+        if data.length < blockHeaderSize+metaElementSize then
+			throw new Exception("illegal meta data")
+        Block.unmarshalHeader(data.slice(0,blockHeaderSize)) match
+			case None => throw new Exception("parse block header data failed")
+			case Some(hd) =>
+				var bk = new Block(0,data.length)
+				bk.header = hd
+				bk.write(0,data)
+				return read(bk)
+	//
 	def read(bk:Block):Option[Meta] =
 		if bk.header.flag!= metaType then 
 			return None 
@@ -15,7 +25,7 @@ private[platdb] object Meta:
 			case None => None 
 			case Some(data) => 
 				var meta = new Meta(bk.pgid)
-				if data.length!=metaPageSize then
+				if data.length!=metaElementSize then
 					return None 
 				var arr = new Array[Int](6)
 				var s:Long = 0
@@ -31,16 +41,16 @@ private[platdb] object Meta:
 				
 				meta.pageSize = arr(0)
 				meta.freelistId = arr(1)
-				meta.blockId = arr(2)
+				meta.pageId = arr(2)
 				meta.txid = arr(3)
 				meta.root = new bucketValue(arr(4),s,arr(5))
 				Some(meta)
 
 	def marshal(meta:Meta):Array[Byte] =
-		var buf:ByteBuffer = ByteBuffer.allocate(metaPageSize)
+		var buf:ByteBuffer = ByteBuffer.allocate(metaElementSize)
         buf.putInt(meta.pageSize)
         buf.putInt(meta.freelistId)
-        buf.putInt(meta.blockId)
+        buf.putInt(meta.pageId)
         buf.putInt(meta.txid)
         buf.putInt(meta.root.id)
 		buf.putInt(meta.root.count)
@@ -51,11 +61,11 @@ private[platdb] class Meta(val id:Int) extends Persistence:
     var pageSize:Int
     var flags:Int
     var freelistId:Int // 记录freelist block的pgid
-    var blockId:Int
+    var pageId:Int
     var txid:Int
 	var root:bucketValue
 
-	def size:Int = blockHeaderSize+metaPageSize
+	def size:Int = blockHeaderSize+metaElementSize
 	def writeTo(bk:Block):Int =
 		bk.header.pgid = id 
 		bk.header.flag = flags
@@ -70,7 +80,7 @@ private[platdb] class Meta(val id:Int) extends Persistence:
 		m.pageSize = pageSize
 		m.flags = flags
 		m.freelistId = freelistId
-		m.blockId = blockId
+		m.pageId = pageId
 		m.txid = txid
 		m.root = new bucketValue(root.root,root.count,root.sequence)
 		m
@@ -222,21 +232,22 @@ private[platdb] class Freelist(val oldid:Int) extends Persistence:
 			bk.append(Freelist.marshalElement(ff))
 		size
 
-object Freelist:
+private[platdb] object Freelist:
+	def headerSize:Int = blockHeaderSize + freelistHeaderSize
 	def read(bk:Block):Option[Freelist] = 
 		if bk.header.flag!=freelistType then 
-			return None 
+			throw new Exception(s"block type is not freelist ${bk.header.flag}") 
 		bk.tail match
 			case None => None 
 			case Some(data) => 
 				var freelist = new Freelist(bk.pgid)
 				if data.length < freelistHeaderSize then
-					return None 
+					throw new Exception("illegal freelist header data") 
 				unmarshalHeader(data.slice(0,freelistHeaderSize)) match
-					case None => return None 
+					case None => throw new Exception("illegal freelist header data")
 					case Some(hd) =>
 						if data.length != freelistHeaderSize+(hd.count*freelistElementSize) then
-							return None 
+							throw new Exception("illegal freelist data") 
 						freelist.idle = new ArrayBuffer[FreeFragment]()
 						freelist.unleashing = new ArrayBuff[FreeClaim]()
 						freelist.allocated = new Map[Int,ArrayBuffer[FreeFragment]]()
@@ -244,12 +255,23 @@ object Freelist:
 						var idx = freelistHeaderSize+freelistElementSize
 						while idx <= data.length do
 							unmarshalElement(data.slice(idx-freelistElementSize,idx)) match
-								case None => return None 
+								case None => throw new Exception("illegal freelist element data")
 								case Some(ff) =>
 									freelist.idle+=ff 
 						return Some(freelist)
 		None 
-    //
+    // 从原始data
+	def readFromBytes(data:Array[data]):Option[Freelist] =
+		if data.length < headerSize then
+			throw new Exception("illegal freelist data")
+		Block.unmarshalHeader(data.slice(0,blockHeaderSize)) match
+			case None => throw new Exception("parse block header data failed")
+			case Some(hd) =>
+				var bk = new Block(0,data.length)
+				bk.header = hd
+				bk.write(0,data)
+				return read(bk)
+	//
     def unmarshalHeader(data:Array[Byte]):Option[FreelistHeader] =
         var count = 0
 		var ftype = 0
@@ -282,5 +304,4 @@ object Freelist:
 		var buf:ByteBuffer = ByteBuffer.allocate(freelistElementSize)
         buf.putInt(ff.start)
         buf.putInt(ff.end)
-		//buf.putInt(ff.length)
         buf.array()

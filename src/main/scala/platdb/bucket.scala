@@ -3,6 +3,9 @@ package platdb
 import scala.collection.mutable.{Map}
 import scala.collection.mutable.ArrayBuffer
 import scala.util.control.Breaks._
+import scala.util.Try
+import scala.util.Success
+import scala.util.Failure
 
 val bucketValueSize = 16
 
@@ -43,169 +46,202 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
     private[platdb] var nodes:Map[Int,Node] = _  // 缓存的都是写事务相关的node ?
     private[platdb] var buckets:Map[String,Bucket] = _ // sub-buckets
 
+    // 当前bucket中key的个数
+    def length:Int = bkv.count
     def value:bucketValue = bkv 
-    def closed:Boolean
+    //def closed:Boolean = tx.closed
     def iterator():BucketIterator = new bucketIter(this)
     // 查询元素对应的值
-    def get(key:String):Option[String] = 
-        if key.length == 0 then return None 
+    def get(key:String):Try[String] = 
+        if tx.isClosed then
+            return Failure(new Exception("tx is closed")) 
+        else if key.length == 0 then 
+            return Failure(new Exception("search key is null"))
         var c = iterator()
         c.find(key) match 
             case (Some(k),v) => 
                 if k == key then 
-                    return v 
-        None 
+                    return Success(v) 
+        Failure(new Exception("not found value"))
     // 插入元素
-    def put(key:String,value:String):Boolean = 
-        if key.length == 0 then
-            return false 
+    def put(key:String,value:String):Try[Boolean] =
+        if tx.isClosed then
+            return Failure(new Exception("tx is closed")) 
         else if !tx.writable then 
-            return false 
-        else if key.length() <= 0 || key.length()>= maxKeySize then 
-            return false 
-        else if value.length()>= maxValueSize then
-            return false 
+            return Failure(new Exception("readonly tx not allow put operation")) 
+        else if key.length == 0 then
+            return Failure(new Exception("instert key is null"))
+        else if  key.length>=maxKeySize then
+            return Failure(new Exception(s"key is too large,limit $maxKeySize"))
+        else if value.length>=maxValueSize then
+            return Failure(new Exception(s"value is too large,limit $maxValueSize"))
 
         var c = iterator()
         c.search(key) match 
-            case (None,_,_) => return false 
+            case (None,_,_) => return Failure(new Exception("not found value"))
             case (Some(k),_,f) =>
                 if k == key && f == bucketType then
-                    return false 
+                    return Failure(new Exception("the value type is bucket"))
         c.current() match 
             case Some(node) =>
                 if node.isLeaf then 
                     node.put(key,key,value,leafType,0)
                     bkv.count+=1
-                    return true
-        false 
+                    return Success(true)
+        Failure(new Exception("not found insert node")) 
     // 从bucket中删除某个key值，返回操作是否成功，注意如果key对应一个子bucket则删除操作被忽略
-    def delete(key:String):Boolean = 
-        if key.length() <=0 then
-            return false 
+    def delete(key:String):Try[Boolean] = 
+        if tx.isClosed then
+            return Failure(new Exception("tx is closed")) 
         else if !tx.writable then 
-            return false 
+            return Failure(new Exception("readonly tx not allow delete operation")) 
+        else if key.length <=0 then
+            return Failure(new Exception("delete key is null")) 
         
         var c = iterator()
         c.search(key) match 
-            case (None,_,_) => return false  
+            case (None,_,_) => return Failure(new Exception("not found value"))
             case (Some(k),_,f) =>
                 if k == key && f == bucketType then
-                    return false 
+                    return Failure(new Exception("not allow delete bucket value")) 
         c.current() match 
-            case None => return false 
             case Some(node) =>
-                if !node.isLeaf then return false 
-                node.del(key) // TODO: 返回key是否存在
-                bkv.count-=1
-                return true
+                if node.isLeaf then
+                    node.del(key) 
+                    bkv.count-=1
+                    buckets.remove(key)
+                    return Success(true)
+        Failure(new Exception("not found delete object"))
+    
     // 获取子bucket
-    def getBucket(name:String):Option[Bucket] = 
-        if name.length<=0 then return None 
+    def getBucket(name:String):Try[Bucket] = 
+        if tx.isClosed then
+            return Failure(new Exception("tx is closed")) 
+        else if name.length==0 then 
+            return Failure(new Exception("bucket name is null"))
         if buckets.contains(name) then 
-            return buckets.get(name)
+            Some(bk) = buckets.get(name)
+            return Success(bk)
+
         var c = iterator()
         c.search(name) match
-            case (None,_,_) => return None 
+            case (None,_,_) => return Failure(new Exception(s"not found bucket $name"))
             case (Some(k),v,f) => 
                 if k!=name || f!=bucketType then 
-                    return None 
+                    return Failure(new Exception(s"not found bucket $name"))
                 v match 
-                    case None => return None 
+                    case None => return Failure(new Exception(s"query bucket $name value failed"))
                     case Some(data) =>
                         Bucket.read(data.getBytes()) match
-                            case None => return None 
+                            case None => return Failure(new Exception(s"parse bucket $name value failed")) 
                             case Some(value) =>
                                 var bk = new Bucket(name,tx)
                                 bk.value = value 
                                 buckets.addOne((name,bk))
-                                return Some(bk)
+                                return Success(bk)
     // 创建bucket，如果已经存在，则返回None
-    def createBucket(name:String):Option[Bucket] = 
-        if name.le<=0 then 
-            return None 
+    def createBucket(name:String):Try[Bucket] = 
+        if tx.isClosed then
+            return Failure(new Exception("tx is closed")) 
         else if !tx.writable then 
-            return None 
+            return Failure(new Exception("readonly tx not allow create operation")) 
+        else if name.length()==0 then 
+            return Failure(new Exception("bucket name is null"))
+        else if buckets.contains(name) then 
+            return Failure(new Exception(s"bucket $name is already exists"))
+        
         var c = iterator()
         c.search(name) match
-            case (None,_,_) => _
+            case (None,_,_) => return Failure(new Exception("bucket create failed: not found create node"))
             case (Some(k),v,f) => 
                 if k==name && f!=bucketType then  // key已经存在
-                    return None 
+                    return Failure(new Exception(s"bucket create failed: key $name is already exists")) 
                 if k == name && f == bucketType then // bucket已经存在
                     v match 
-                        case None => return None 
+                        case None => _
                         case Some(data) =>
                             Bucket.read(data.getBytes()) match
-                                case None => return None 
+                                case None => _  
                                 case Some(value) =>
                                     var bk = new Bucket(name,tx)
                                     bk.value = value 
                                     bk.rootNode = node(value.root)
                                     buckets.addOne((name,bk))
-                                    return Some(bk)
-        // create
+                    return Failure(new Exception(s"bucket create failed: bucket $name is already exists"))
+        // create a new bucket
         var bk = new Bucket(name,tx)
-        bk.bkv = new bucketValue(-1,0,0)
-        bk.rootNode = Some(new Node(new BlockHeader(-1,leafType,0,0,0)))
+        bk.bkv = new bucketValue(-1,0,0) // 空的bkv值
+        bk.rootNode = Some(new Node(new BlockHeader(-1,leafType,0,0,0))) // TODO: 是否直接设为None更合适？
         buckets.addOne((name,bk))
         c.node() match 
-            case None => return None 
+            case None => Failure(new Exception("bucket create failed: not found create node"))
             case Some(n) =>
-                n.put(name,name,bkv.content,bucketType,0)
+                n.put(name,name,bk.value.content,bucketType,0)
                 bkv.count++
-        Some(bk)
+                Success(bk)
+
     // 创建bucket,如果已经存在则返回该bucket
-    def createBucketIfNotExists(name:String):Option[Bucket] =
-        if closed then 
-            return None 
-        else if name.length()<=0 then 
-            return None 
+    def createBucketIfNotExists(name:String):Try[Bucket] =
+        if tx.isClosed then
+            return Failure(new Exception("tx is closed")) 
         else if !tx.writable then 
-            return None 
+            return Failure(new Exception("readonly tx not allow create operation"))  
+        else if name.length()<=0 then 
+            return Failure(new Exception("bucket name is null"))
+        
         getBucket(name) match
-            case Some(bk) => return Some(bk)
-            case None => return createBucket(name)
+            case Some(bk) => Success(bk)
+            case None => createBucket(name)
     // 删除bucket
-    def deleteBucket(name:String):Boolean =
-        if closed then 
-            return false 
-        else if name.length()<=0 then
-            return false 
-        else if !tx.writable then
-            return false
+    def deleteBucket(name:String):Try[Boolean] =
+        if tx.isClosed then
+            return Failure(new Exception("tx is closed"))  
+        else if !tx.writable then 
+            return Failure(new Exception("readonly tx not allow delete operation"))  
+        else if name.length()<=0 then 
+            return Failure(new Exception("bucket name is null"))
+        
         var c = iterator()
         c.search(name) match 
-            case (None,_,_) => return false  
+            case (None,_,_) => return Failure(new Exception(s"not found key $name")) 
             case (Some(k),_,f) => 
-                if k!=name || f!=bucketType then // name不存在，或者存在但不是bucket
-                    return false 
+                // name不存在，或者存在但不是bucket
+                if k!=name then 
+                    return Failure(new Exception(s"$name not exists")) 
+                if f!=bucketType then
+                    return Failure(new Exception(s"$name is not a bucket"))
+
                 // 递归删除子bucket
                 getBucket(name) match
-                    case None => _ 
+                    case None => return Failure(new Exception(s"query bucket $name failed")) 
                     case Some(childBk) => 
-                        for (Some(k),v) <- childBk.iterator() do
-                            v match
-                                case Some(value) => _ 
-                                case None => 
-                                    if !childBk.deleteBucket(k) then
-                                        return false
+                        for (k,v) <- childBk.iterator() do
+                            k match
+                                case None => _
+                                case Some(key) =>
+                                    v match
+                                        case Some(value) => _ // k是个普通元素
+                                        case None => 
+                                            childBk.deleteBucket(key) match
+                                                case Failure(e) => return Failure(e)
                         buckets.remove(name) //清理缓存
                         childBk.nodes.clear()  // 清理缓存节点
                         childBk.rootNode = None 
                         childBk.freeAll() // 释放所有节点空间
                         c.node() match 
-                            case None => _
+                            case None => return Failure(new Exception(s"not found bucket $name node")) 
                             case Some(node) => 
                                 node.del(name) // 从当前bucket中删除子bucket的记录 
-                                bkv.count--      
-        true
+                                bkv.count--
+                Success(true)
     // 根据blokid尝试获取节点或者block
     private[platdb] def nodeOrBlock(id:Int):(Option[Node],Option[Block]) = 
         if nodes.contains(id) then 
             (nodes.get(id),None)
         else 
-            (None,tx.block(id))
+            tx.block(id) match
+                case Success(bk) => (None,Some(bk))
+                case Failure(_) =>  (None,None)
 
     // 读取block中的节点元素
     private[platdb] def nodeElements(bk:Option[Block]):Option[ArrayBuffer[NodeElement]] = 
@@ -225,10 +261,10 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                     return Some(elems[idx])
         None
     // 
-    private[platdb] def getNodeByBlock(bk:Option[Block]):Option[Node] = 
+    private[platdb] def getNodeByBlock(bk:Try[Block]):Option[Node] = 
         bk match
-            case None => return None 
-            case Some(block) => 
+            case Failure(_) => return None 
+            case Success(block) => 
                 if nodes.contains(block.id) then 
                     return nodes.get(block.id)
                 Node.read(block) match
@@ -241,6 +277,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
         if nodes.contains(id) then 
             return nodes.get(id)
         getNodeByBlock(tx.block(id))
+
     // 尝试获取节点的孩子节点
     private[platdb] def getNodeChild(node:Node,idx:Int):Option[Node] = 
         if node.isLeaf || idx<0 || idx>= node.length then
@@ -264,27 +301,27 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                 if idx >=1 then 
                     return getNodeChild(p,idx-1)
                 return None
-    // 当前bucket中key的个数
-    def length:Int = bkv.count
     private[platdb] def size():Int = bucketValueSize
     private[platdb] def writeTo(bk:Block):Int = 0
     
     // rebalance 
-    private[platdb] def merge():Unit =
+    // 错误处理：直接抛异常
+    private[platdb] def merge():Unit = 
         for (id,node) <- nodes do 
             mergeOnNode(node)
         for (name,bucket) <- buckets do 
             bucket.merge()
-    //        
+    //  
+    // 错误处理：直接抛异常      
     private def mergeOnNode(node:Node):Unit =
-        if !node.unbalanced then return None 
+        if !node.unbalanced then return None
         node.unbalanced = false 
         // 检查节点是否满足阈值
         val threshold:Int = osPageSize / 4
         if node.size > threshold && node.length > Node.lowerBound(node.ntype) then
-            return
+            return None
         
-        // 当前节点是否是父节点
+        // 当前节点是否是根节点
         node.parent match
             case None =>
                 // 根节点是个分支节点，并且根节点只有一个子节点，那么直接将该孩子节点提升为根节点 （显然根节点要是个叶子节点，即使就一个元素那也不需要处理）
@@ -297,8 +334,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                             node.removeChild(child)
                             nodes.remove(node.id)
                             freeNode(node)
-                        case None => return 
-                    return 
+                    return None
             case Some(p) => 
                 if node.length == 0 then // If node has no keys then just remove it.
                     p.del(node.minKey)
@@ -306,11 +342,11 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                     nodes.remove(node.id)
                     freeNode(node)
                     mergeOnNode(p)
-                    return
+                    return None
                 // 合并节点
                 if p.childIndex(node) == 0 then // 当前节点是其父节点的最左节点，因此将其右兄弟节点合并到当前节点中
                     getNodeRightSibling(node) match
-                        case None => return
+                        case None => return None
                         case Some(mergeFrom) => 
                             for elem <- mergeFrom.elements do 
                                 if nodes.contains(elem.child) then // 如果缓存中有mergeFrom的孩子节点，那么需要把这些节点的父亲节点重置为当前节点
@@ -346,11 +382,10 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                 // 递归处理当前节点的父节点
                 mergeOnNode(p)
     // 将节点
-    private[platdb] def split():Boolean =
+    private[platdb] def split():Unit =
         // 先切分缓存的子bucket
         for (name,bucket) <- buckets do 
-            if !bucket.split() then 
-                return false 
+            bucket.split() 
             // bk的根节点可能发生了变化，因此需要将新的bk root信息插入当前bk
             val v = bucket.value
             /*   
@@ -359,45 +394,38 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
 			continue
 		}
             */
-            bucket.root match
-                case None => _ 
+            bucket.root match 
                 case Some(n) => 
                     var c = bucket.iterator()
                     c.search(name) match 
-                        case (None,_,_) => throw new Exception("misplaced bucket header:")
+                        case (None,_,_) => throw new Exception(s"misplaced bucket header:$name")
                         case (Some(k),_,flag) =>
                             if k!=key then 
-                                throw new Exception("misplaced bucket header:")
+                                throw new Exception(s"misplaced bucket header:$name")
                             if flag!=bucketType then 
-                                throw new Exception(s"unexpected bucket header flag:$flag")
+                                throw new Exception(s"unexpected bucket header: $name flag:$flag")
                             c.node() match 
                                 case Some(node) => node.put(k,key,v.content,bucketType,0)
-                                case None => throw new Exception("")
+                                case None => throw new Exception(s"not found leaf node for bucket element:$name")
         // 切分当前节点
         root match
-            case None => return  // Ignore if there's not a materialized root node.
+            case None => return None // Ignore if there's not a materialized root node.
             case Some(node) => splitOnNode(node)
         
         root = Some(root.root)
-        /* 
-        // Update the root node for this bucket.
-        if b.rootNode.pgid >= b.tx.meta.pgid {
-            panic(fmt.Sprintf("pgid (%d) above high water mark (%d)", b.rootNode.pgid, b.tx.meta.pgid))
-        }
-        */
+        if root.id >= tx.maxPageId then
+            throw new Exception(s"pgid ${root.id} above high water mark ${tx.maxPageId}")
         bkv.root = root.root.id
-        true 
+
     // 切分当前节点
-    private def splitOnNode(node:Node):Boolean =
-        if node.spilled then return true 
+    private def splitOnNode(node:Node):Unit =
+        if node.spilled then return None
          // TODO: sort.Sort(n.children)
         // 递归地切分当前节点的孩子节点，注意由于切分孩子可能会在当前节点的children数组中再添加元素，而这些元素是不需要再切分的，因此此处循环使用下标来迭代
         val n = node.children.length
         for i <- 0 until n do 
-            if !splitOnNode(node.children[i]) then // TODO: 如果出错了应该返回，或者抛出异常
-                return false 
-                
-        
+            splitOnNode(node.children[i])
+ 
         node.children = Array[Node]()
         // 切分当前节点
         for n <- splitNode(node,osPageSize) do 
@@ -406,11 +434,12 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
                 n.header.pgid = 0
             // 重新分配block并写入节点内容
             tx.allocate(n.size) match
-                case None => return 
+                case None => return throw new Exception(s"allocate size ${n.size} page id failed")
                 case Some(id) => 
-                    if id >= tx.blockId then throw new Exception(s"pgid ($id) above high water mark (${tx.blockId})")
+                    if id >= tx.maxPageId then 
+                        throw new Exception(s"pgid $id above high water mark ${tx.maxPageId}")
                     tx.makeBlock(id,n.size) match 
-                        case None => throw new Exception(s"allocate block failed (${id})")
+                        case None => throw new Exception(s"allocate size ${n.size} block failed ${id}")
                         case Some(bk) =>
                             n.writeTo(bk)
                             n.header = bk.header
@@ -430,8 +459,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
         node.parent match
             case Some(p) if p.id == 0 => 
                 node.children = Array[Node]()
-                if !splitOnNode(p) then return false 
-        true 
+                splitOnNode(p)
 
     //  将node按照size大小切分成若干节点
     private def splitNode(node:Node,size:Int):List[Node] = 
@@ -515,7 +543,5 @@ class Bucket(val name:String,private[platdb] var tx:Tx) extends Persistence:
         if bkv.root == 0 then return None 
         freeFrom(bkv.root)
         bkv.root = 0
-        None 
-
 
 // 优化: 延迟rebalance，允许出现叶子节点高度不一致？
