@@ -1,6 +1,8 @@
 package platdb
 
+import java.nio.ByteBuffer
 import scala.collection.mutable.{ArrayBuffer}
+import scala.util.control.Breaks._
 
 val nodeIndexSize = 16 
 
@@ -8,37 +10,44 @@ val nodeIndexSize = 16
 case class NodeIndex(flag:Int,offset:Int,keySize:Int,valSize:Int)
 
 // 对于分支节点元素，其value为空； 对于叶子节点元素其child字段为-1
-class NodeElement(flag:Int,child:Int,key:String,value:String) // 一个节点元素将转换为---> 一个NodeIndex+Ayrray[Byte] ---> 存放到block的data字段中
+class NodeElement(var flag:Int,var child:Int,var key:String,var value:String): // 一个节点元素将转换为---> 一个NodeIndex+Ayrray[Byte] ---> 存放到block的data字段中
     def keySize:Int = key.getBytes.length
     def valueSize:Int = value.getBytes.length // TODO 使用Array[Byte] 作为key,value字段类型
 
 object Node:
     def read(bk:Block):Option[Node] = 
         var node = new Node(bk.header)
-        node.elements = ArrayBuffer[NodeElement]()
+        node.elements = new ArrayBuffer[NodeElement]()
 
         val data = bk.data
         var offset = blockHeaderSize
-        for i <- 0 until bk.header.count do 
-            val idx = data.slice(offset,offset+nodeIndexSize) 
-            unmashalIndex(idx) match
-                case None => return None 
-                case Some(ni) =>
-                    var child = ni.valSize 
-                    val key = data.slice(ni.offset,ni.offset+ni.keySize).toString()
-                    var value:String = ""
-                    if isLeaf(node) then
-                        child = 0 
-                        value = data.slice(ni.offset+ni.keySize,ni.offset+ni.keySize+ni.valSize).toString()
-                    node.elements.addOne(new NodeElement(ni.flag,child,key,value))
-        if node.length >0 then 
-            node.minKey = node.elements[0].key
-        Some(node)
+        breakable(
+            for i <- 0 until bk.header.count do 
+                val idx = data.slice(offset,offset+nodeIndexSize) 
+                unmashalIndex(idx.toArray) match
+                    case None => 
+                        node = null
+                        break() 
+                    case Some(ni) =>
+                        var child = ni.valSize 
+                        val key = data.slice(ni.offset,ni.offset+ni.keySize).toString()
+                        var value:String = ""
+                        if isLeaf(node) then
+                            child = 0 
+                            value = data.slice(ni.offset+ni.keySize,ni.offset+ni.keySize+ni.valSize).toString()
+                        node.elements.addOne(new NodeElement(ni.flag,child,key,value))
+        )
+        if node!=null then
+            if node.length >0 then 
+                node.minKey = node.elements(0).key
+            Some(node)
+        else
+            None
     // 
     def lowerBound(ntype:Int):Int = 0
     def isLeaf(node:Node):Boolean = node.header.flag == leafType
     def isBranch(node:Node):Boolean = node.header.flag == branchType
-    def minKeysPerBlock:Int 
+    def minKeysPerBlock:Int = 2
     // 
     def marshalIndex(e:NodeIndex):Array[Byte] = 
         var buf:ByteBuffer = ByteBuffer.allocate(nodeIndexSize)
@@ -78,21 +87,21 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
     def ntype:Int = header.flag
     // 
     def isLeaf:Boolean = header.flag == leafType
-    //
+    def isBranch:Boolean = header.flag == branchType
     def isRoot:Boolean = parent match
         case Some(n) => false
         case None => true
     //
     def root:Node = parent match {
-            case Some(node:Node) => node.root()
+            case Some(node:Node) => node.root
             case None => this
         }
 
     // 包括header在内的节点大小
-    def size:Int = 
+    def size():Int = 
         var dataSize:Int = blockHeaderSize+(elements.length*nodeIndexSize)
         for e <- elements do
-            dataSize= dataSize+ e.keySize +e.valueSzie
+            dataSize= dataSize+ e.keySize +e.valueSize
         dataSize 
     
     //  insert a element into node. 
@@ -104,33 +113,37 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
             elements+= elem 
         else 
             val idx:Int = elements.indexWhere((e:NodeElement) => e.key>=oldKey) // TODO ensure indexWhere method
-            if idx <= elements.length-1 &&  elements[idx].key == oldKey then
+            if idx <= elements.length-1 &&  elements(idx).key == oldKey then
                 elements(idx) = elem 
             else 
                 elements.insert(idx,elem)
     //  TODO
     def del(key:String):Unit =
         if key.length<=0 then return
-        idx:= elements.indexWhere((e:NodeElement) => e.key>=oldKey)
-        if idx>=0 && idx<elements.length && elements[idx].key == key then 
+        val idx = elements.indexWhere((e:NodeElement) => e.key>=key)
+        if idx>=0 && idx<elements.length && elements(idx).key == key then 
             // remove the element
             elements = elements.slice(0,idx)++elements.slice(idx+1,elements.length)
             unbalanced = true
     
     def removeChild(node:Node):Unit =
         var idx:Int = -1 
-        for (i,child) <- children do 
-            if child.id == node.id then 
+        for i <- 0 until children.length do 
+            if children(i).id == node.id then 
                 idx = i 
         if idx >=0 then 
             children = children.slice(0,idx)++children.slice(idx+1,children.length)
 
     // 参数为当前节点的孩子节点，该方法返回该孩子节点的索引位置
     def childIndex(node:Node):Int =
-        for (i,elem) <- elements do 
-            if elem.child == node.id then 
-                return i
-        return -1 
+        var idx:Int = -1
+        breakable(
+            for i <- 0 until elements.length do 
+                if elements(i).child == node.id then 
+                    idx = i
+                    break()
+        )
+        idx
     // 将当前节点内容写入参数block
     def writeTo(bk:Block):Int =
         // 更新header
@@ -138,14 +151,14 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
             bk.header.flag = leafType
         else 
             bk.header.flag = branchType
-        bk.count = elements.length
-        bk.header.size = size
-        bk.header.overflow = (size+osPageSize)/osPageSize - 1
+        bk.header.count = elements.length
+        bk.header.size = size()
+        bk.header.overflow = (size()+osPageSize)/osPageSize - 1
         // 更新data字段
         bk.append(Block.marshalHeader(bk.header))
         var idx = bk.size
         var offset = blockHeaderSize+(elements.length*nodeIndexSize)
-        for (i,elem) <- elements do 
+        for elem <- elements do 
             val ni = isLeaf match
                 case true => new NodeIndex(elem.flag,offset,elem.keySize,elem.valueSize)
                 case false => new NodeIndex(elem.flag,offset,elem.keySize,elem.child)

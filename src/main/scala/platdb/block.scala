@@ -14,7 +14,7 @@ import java.nio.channels.FileChannel
 import java.util.Timer
 import java.util.Date
 
-trait Persistence:
+private[platdb] trait Persistence:
     def size():Int
     def writeTo(block:Block):Int // 返回写入的字节数
 
@@ -47,7 +47,6 @@ private[platdb] class Block(val uid:Int,val sz:Int): // header对象应该是可
     private var idx:Int = 0 // idx总是指向下一个写入位置
      
     def id:Int = header.pgid
-    def uid:Int = uid 
     // 返回实际已经使用的容量
     def size:Int = idx
     // 容量：data字段的物理长度
@@ -60,26 +59,26 @@ private[platdb] class Block(val uid:Int,val sz:Int): // header对象应该是可
         if offset<0 || d.length == 0 then 
             return None
         if offset+d.length >= capacity then 
-            data++=new ArrayBuffer[Byte](offset+d.length-capacity)
-        if d.copyToArray(data,offset)!= d.length then
-            return None
+            data++=new Array[Byte](offset+d.length-capacity)
+        for i <- 0 until d.length do
+            data(offset+i) = d(i)
         if d.length+offset > idx then
             idx = d.length+offset
     // 追加data
-    def append(d:Array[Byte]):Uint = write(idx,d)
+    def append(d:Array[Byte]):Unit = write(idx,d)
     // 所有数据
     def all:ArrayBuffer[Byte] = data.slice(0,idx)
     // 返回除了header外的数据
-    def tail:Option[ArrayBuffer[Byte]] = 
+    def tail:Option[Array[Byte]] = 
         if size>blockHeaderSize then
-            Some(data.slice(blockHeaderSize,size))
+            Some(data.slice(blockHeaderSize,size).toArray)
         else
             None 
 
 protected object Block:
     def marshalHeader(pg:BlockHeader):Array[Byte] =
         var buf:ByteBuffer = ByteBuffer.allocate(blockHeaderSize)
-        buf.putInt(pg.id)
+        buf.putInt(pg.pgid)
         buf.putInt(pg.flag)
         buf.putInt(pg.count)
         buf.putInt(pg.overflow)
@@ -113,7 +112,7 @@ protected class BlockBuffer(val size:Int,var fm:FileManager):
         var bk = new Block(bid,size)
         return bk 
     // TODO: 从缓存中read的block,需要归还
-    def revert(uid:Int):Uint = None 
+    def revert(uid:Int):Unit = None 
     // 
     def read(pgid:Int):Try[Block] = 
         // TODO: 先查看缓存有没有
@@ -142,21 +141,22 @@ protected class BlockBuffer(val size:Int,var fm:FileManager):
             case e:Exception => return Failure(e)
         
     // TODO: sync将所有脏block写入文件？
-    def sync():Unit
+    def sync():Unit = None
 
 // 
 protected class FileManager(val path:String,val readonly:Boolean):
-    var opend:Boolean
+    var opend:Boolean = false
     var file:File = null
     var writer:RandomAccessFile = null // writer
     var channel:FileChannel = null
     var lock:FileLock = null
     //
-    def size:Option[Long] = 
-        if !opend then None 
+    def size:Long = 
+        if !opend then 
+            throw new Exception(s"file ${path} not open")
         file.length()
     // open and lock 
-    def open(timeout:Int):Unit
+    def open(timeout:Int):Unit =
         if opend then return None 
         file = new File(path)
         if !file.exists() then
@@ -195,7 +195,7 @@ protected class FileManager(val path:String,val readonly:Boolean):
         if size == 0 then
             return None
 
-        var w:FileOutputStream = _ 
+        var w:FileOutputStream = null
         try 
             val arr = new Array[Byte](size)
             val idx = file.length().intValue()
@@ -203,14 +203,15 @@ protected class FileManager(val path:String,val readonly:Boolean):
             w = new FileOutputStream(file) // TODO:
             w.write(arr,idx,arr.length)
         finally 
-            w.close()
+            if w!=null then
+                w.close()
     
     def readAt(id:Int,size:Int):Array[Byte] =
         if !opend then
             throw new Exception("db file closed")
-        if bid<0 then 
-            throw new Exception(s"illegal page id ${bid}")
-        var reader:RandomAccessFile
+        if id<0 then 
+            throw new Exception(s"illegal page id ${id}")
+        var reader:RandomAccessFile = null
         try 
             reader = new RandomAccessFile(file,"r")
             reader.seek(id*osPageSize)
@@ -221,7 +222,8 @@ protected class FileManager(val path:String,val readonly:Boolean):
         catch
             case e:Exception => throw e
         finally
-            reader.close()
+            if reader!=null then
+                reader.close()
     //
     def read(bid:Int):(Option[BlockHeader],Option[Array[Byte]]) = 
         if !opend then
@@ -229,7 +231,7 @@ protected class FileManager(val path:String,val readonly:Boolean):
         if bid<0 then 
             throw new Exception(s"illegal block id ${bid}")
         val offset = bid*osPageSize
-        var reader:RandomAccessFile
+        var reader:RandomAccessFile = null
         try
             reader = new RandomAccessFile(file,"r")
             // 1. use pgid to seek block header location in file
@@ -249,16 +251,17 @@ protected class FileManager(val path:String,val readonly:Boolean):
                         throw new Exception("read block data size unexpected")
                     (Some(bhd),Some(data)) 
         finally
-            reader.close()
+            if reader!=null then
+                reader.close()
     //  
     def write(bk:Block):Boolean = 
         if !opend then
             throw new Exception("db file closed")
         if bk.size == 0 then 
             return true
-        if bk.pgid <=1 && bk.btype != metaType then // TODO remove this check to tx
+        if bk.id <=1 && bk.btype != metaType then // TODO remove this check to tx
             throw new Exception(s"block type error ${bk.btype}")
-        writer.seek(bk.pgid*osPageSize)
-        writer.write(bk.data)
+        writer.seek(bk.id*osPageSize)
+        writer.write(bk.data.toArray)
         true
         

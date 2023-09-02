@@ -4,7 +4,7 @@ lazy val root = project
   .in(file("."))
   .settings(
     name := "platdb",
-    version := "0.1.0-alpha",
+    version := "0.9.0-alpha",
 
     scalaVersion := scala3Version,
 

@@ -4,6 +4,7 @@ import scala.collection.mutable.{Map,ArrayBuffer}
 import scala.util.Failure
 import scala.util.Success
 import scala.util.Try
+import scala.util.control.Breaks._
 
 /*
 A: 
@@ -24,35 +25,46 @@ D:
 
 */
 
-class Tx(val readonly:Boolean):
-    private[platdb] var sysCommit:Boolean
+trait Transaction:
+    def id:Int
+    def writable:Boolean
+    def commit():Try[Boolean]
+    def rollback():Try[Boolean]
+
+    def openBucket(name:String):Try[Bucket]
+    def createBucket(name:String):Try[Bucket]
+    def deleteBucket(name:String):Try[Boolean]
+
+
+private[platdb] class Tx(val readonly:Boolean) extends Transaction:
+    private[platdb] var sysCommit:Boolean = false 
     private[platdb] var db:DB = null
     private[platdb] var meta:Meta = null
-    private[platdb] var root:Bucket
+    private[platdb] var root:Bucket = null
     private[platdb] var blocks:Map[Int,Block] = null // cache dirty blocks,rebalance(merge/split) bucket maybe product them
     
     private[platdb] def closed:Boolean = db == null
 
     private[platdb] def init(db:DB):Unit =
-        db = db
+        this.db = db
         meta = db.meta.clone
-        blocks = new Map[Int,Block]()
+        blocks = Map[Int,Block]()
         root = new Bucket("",this)
         root.bkv = meta.root.clone
         if !readonly then
-            meta.txid++
+            meta.txid+=1
 
-    def txid:Int = meta.txid
+    def id:Int = meta.txid
     def writable:Boolean = !readonly
-    def rootBucket():Option[Bucket] = Some(root)
+    private[platdb] def rootBucket():Option[Bucket] = Some(root)
     // open and return a bucket
-    def openBucket(name:String):Option[Bucket] = root.getBucket(name)
+    def openBucket(name:String):Try[Bucket] = root.getBucket(name)
     // craete a bucket
-    def createBucket(name:String):Option[Bucket] = root.createBucket(name)
+    def createBucket(name:String):Try[Bucket] = root.createBucket(name)
     // 
-    def createBucketIfNotExists(name:String):Option[Bucket] = root.createBucketIfNotExists(name)
+    def createBucketIfNotExists(name:String):Try[Bucket] = root.createBucketIfNotExists(name)
     // delete bucket
-    def deleteBucket(name:String):Boolean = root.deleteBucket(name)
+    def deleteBucket(name:String):Try[Boolean] = root.deleteBucket(name)
     // commit current transaction
     def commit():Try[Boolean] = 
         if closed then
@@ -72,7 +84,7 @@ class Tx(val readonly:Boolean):
         catch
             case e:Exception =>
                 rollback() match
-                    case Failure(e) => _
+                    case _ => None
                 return Failure(e)
         
         // updata meta info
@@ -80,15 +92,18 @@ class Tx(val readonly:Boolean):
 
         // free the old freelist and write the new list to db file.
         if meta.freelistId!=0 then
-            db.freelist.free(txid,db.freelist.header.pgid,db.freelist.header.overflow)
+            db.freelist.free(id,db.freelist.header.pgid,db.freelist.header.overflow)
         // 
         writeFreelist() match
+            case Success(_) => None
             case Failure(e) => return Failure(e)
         writeBlock() match
+            case Success(_) => None
             case Failure(e) => 
                 rollbackTx()
                 return Failure(e)
         writeMeta() match
+            case Success(_) => None
             case Failure(e) => 
                 rollbackTx()
                 return Failure(e)
@@ -103,7 +118,7 @@ class Tx(val readonly:Boolean):
             throw new Exception("db closed")
         //
         if writable then
-            db.freelist.rollback(txid)
+            db.freelist.rollback(id)
             // TODO:
             // Read free page list from freelist page.
 			// tx.db.freelist.reload(tx.db.page(tx.db.meta().freelist))
@@ -117,7 +132,7 @@ class Tx(val readonly:Boolean):
         else if sysCommit then
             return Failure(new Exception("not allow to rollback system tx manually"))
         if writable then
-            db.freelist.rollback(txid)
+            db.freelist.rollback(id)
         close()
         Success(true)
     // close current tx: release all object references about the tx 
@@ -128,10 +143,9 @@ class Tx(val readonly:Boolean):
             return None 
         
         if !writable then
-            db.removeTx(txid)
+            db.removeTx(id)
         else 
-            db.rwTx = None 
-		    db.rwLock.writeLock().unlock()
+            db.removeRTx()
 
         for (id,bk)<- blocks do
             db.blockBuffer.revert(bk.uid)
@@ -144,11 +158,11 @@ class Tx(val readonly:Boolean):
     private def writeFreelist():Try[Boolean] = 
         // allocate new pages for freelist
         val maxId = meta.pageId
-        val sz = db.freelist.size
+        val sz = db.freelist.size()
         allocate(sz) match
             case None => 
                 rollbackTx()
-                return Failure(new Exception(s"tx ${txid} allocate block space failed"))
+                return Failure(new Exception(s"tx ${id} allocate block space failed"))
             case Some(id) =>
                 var bk = db.blockBuffer.get(sz)
                 bk.setid(id)
@@ -159,7 +173,7 @@ class Tx(val readonly:Boolean):
                     case Success(flag) =>
                         if !flag then
                             rollbackTx()
-                            return Failure(new Exception(s"tx ${txid} write freelist to db file failed"))
+                            return Failure(new Exception(s"tx ${id} write freelist to db file failed"))
                         meta.freelistId = id 
                         db.blockBuffer.revert(bk.uid)
                         /*
@@ -173,6 +187,7 @@ class Tx(val readonly:Boolean):
                         */
                         if meta.pageId > maxId then
                             // TODO grow
+                            return Failure(new Exception("Not implement"))
                         Success(true)
     // write all dirty blocks to db file
     private def writeBlock():Try[Boolean] =
@@ -181,23 +196,27 @@ class Tx(val readonly:Boolean):
             arr+=bk 
         arr.sortWith((b1:Block,b2:Block) => b1.id < b2.id)
 
-        for bk <- arr do
-            db.blockBuffer.write(bk) match
-                case Failure(e) => return Failure(e)
-                case Success(flag) =>
-                    if !flag then
-                        return Failure(new Exception(s"tx ${txid} commit dirty blcok ${bk.id} failed"))
-        Success(true) 
+        try 
+            for bk <- arr do
+                db.blockBuffer.write(bk) match
+                    case Failure(e) => throw e
+                    case Success(flag) =>
+                        if !flag then
+                            throw new Exception(s"tx ${id} commit dirty blcok ${bk.id} failed")
+            Success(true)
+        catch
+            case e:Exception => return Failure(e)
+ 
     // write meta blocks to db file
     private def writeMeta():Try[Boolean]  =
-        var bk = db.blockBuffer.get(meta.size)
+        var bk = db.blockBuffer.get(meta.size())
         bk.setid(meta.id)
         try 
             db.blockBuffer.write(bk) match
                 case Failure(e) => return Failure(e)
                 case Success(flag) =>
-                    if !falg then
-                        return Failure( new Exception(s"tx ${txid} commit meta ${bk.id} failed"))
+                    if !flag then
+                        return Failure( new Exception(s"tx ${id} commit meta ${bk.id} failed"))
             Success(true)
         finally
             db.blockBuffer.revert(bk.uid)
@@ -218,14 +237,14 @@ class Tx(val readonly:Boolean):
     // release a block's pages
     private[platdb] def free(id:Int):Unit =
         block(id) match
-            case None => None 
-            case Some(bk) => 
-                db.freelist.free(txid,bk.header.pgid,bk.header.overflow)
+            case Failure(e) => None 
+            case Success(bk) => 
+                db.freelist.free(id,bk.header.pgid,bk.header.overflow)
     // allocate page space according size 
     private[platdb] def allocate(size:Int):Option[Int] =
         var n = size/osPageSize
-        if size%osPageSize!=0 then n++
-        db.freelist.allocate(txid,n)
+        if size%osPageSize!=0 then n+=1
+        Some(db.freelist.allocate(id,n))
     
     // construct a block object according size, then set its id
     private[platdb] def makeBlock(id:Int,size:Int):Block = 
