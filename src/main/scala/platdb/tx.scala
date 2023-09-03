@@ -8,43 +8,60 @@ import scala.util.control.Breaks._
 
 /*
 A: 
-    事务的读写操作都发生在内存中，因此如果事务在提交之前失败，不会影响磁盘中的内容
-    读写事务对db的所有增删改操作都会记录到dirty page上，提交事务时候先将freelist写入文件，然后是dirty page,最后提交meta信息
-    meta信息包含当前db的版本以及根节点等信息，只有meta成功写入才表示事务提交成功，因此若事务在写meta之前失败，此时只写入dirty pages或者freelist均不会影响db内容的一致性
-    那么如果写meta错误如何保证原子性呢？———> boltdb这样做
+    Reads and writes to transactions occur in memory, so if a transaction fails before committing, it does not affect the contents of the disk
+    All additions, deletions, and changes to the DB by read-write transactions will be recorded on the dirty pages, 
+    and the freelist is written to the file first when the transaction is committed, then the dirty page, and finally the meta information is committed
+    The meta information contains the current DB version and root node information, 
+    and only the successful writing of meta indicates that the transaction is committed successfully, 
+    so if the transaction fails before writing meta, only writing dirty pages or freelist will not affect the consistency of db content
+    So how to guarantee atomicity if writing meta error? ———> boltdb does this
 C:
-    写事务是串行执行的，因此每个打开的读写事务操作的db对象均是上一个唯一的写事务更新后的版本，
-    由于原子性/持久性的保证，只要每个读写事务的操作是一致的，db视图就会从一个一致状态移动到下一个一致状态
+    Write transactions are performed serially, 
+    so each open read or write transaction is operating on a DB object that is an updated version of the previous write transaction.
+    Due to the atomicity/durability guarantee, as long as each write transaction itself is logically consistent, 
+    it drives the db view to move from one consistent state to the next
 I:
-    允许同时有多个只读事务以及至多一个读写事务同时操作数据库，并使用MVCC保证并发事务的隔离性
-    当开启一个事务，会拷贝一份当前最新的meta信息，即持有一个db的最新版本，因此后开启的事务不会读到旧版本的内容
-    只读事务不会改变db版本，读写事务会在提交成功后更新db的版本信息，因为读写事务对db的变动都写入dirty page, 因此读写事务执行期间其他并发执行的只读事务不会读到该写事务的修改
-    （读写事务释放的page只有在没有其他任何只读事务持有后才能用于分配为dirty page)
+    Multiple read-only transactions and at most one read-write transaction are allowed to operate the database at the same time,
+    and MVCC is used to ensure the isolation of concurrent transactions
+    When a transaction is opened, it will copy the latest meta information, that is, it holds the latest version of the DB, 
+    so the later opened transaction will not read the content of the old version
+    The read-only transaction does not change the DB version, and the write transaction will update the version information of the DB after the commit is successful,
+    because the changes of the write transaction to the DB are written to the dirty page, 
+    so other parallel read-only transactions during the execution of the read and write transaction will not read the modification of the write transaction
+    (Pages freed by write transactions can only be used for allocation as dirty pages if no other read-only transactions are held.)
 D:
-    提交成功的读写事务对db的修改均会持久化到磁盘文件，未提交成功的事务不会影响db的内容
-
+    Modifications to the DB by a successfully committed write transaction are persisted to the disk file,
+    and an uncommitted transaction does not affect the contents of the DB
 */
 
 trait Transaction:
+    // return current transactions identity
     def id:Int
+    // readonly or read-write transaction
     def writable:Boolean
+    // if the transaction is closed
+    def closed:Boolean
+    // commit transaction,if its already closed then throw an exception
     def commit():Try[Boolean]
+    // rollback transaction,if its already closed then throw an exception
     def rollback():Try[Boolean]
-
+    // open a bucket,if not exists will throw an exception
     def openBucket(name:String):Try[Bucket]
+    // create a bucket,if already exists will throw an exception
     def createBucket(name:String):Try[Bucket]
+    // create a bucket,if exists then return the bucket
+    def createBucketIfNotExists(name:String):Try[Bucket]
+    // delete a bucket,if bucket not exists will throw an exception
     def deleteBucket(name:String):Try[Boolean]
 
-
+// platdb transaction implement
 private[platdb] class Tx(val readonly:Boolean) extends Transaction:
-    private[platdb] var sysCommit:Boolean = false 
-    private[platdb] var db:DB = null
-    private[platdb] var meta:Meta = null
-    private[platdb] var root:Bucket = null
-    private[platdb] var blocks:Map[Int,Block] = null // cache dirty blocks,rebalance(merge/split) bucket maybe product them
+    var sysCommit:Boolean = false 
+    var db:DB = null
+    var meta:Meta = null
+    var root:Bucket = null
+    var blocks:Map[Int,Block] = null // cache dirty blocks,rebalance(merge/split) bucket maybe product them
     
-    private[platdb] def closed:Boolean = db == null
-
     private[platdb] def init(db:DB):Unit =
         this.db = db
         meta = db.meta.clone
@@ -55,6 +72,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
             meta.txid+=1
 
     def id:Int = meta.txid
+    def closed:Boolean = db == null
     def writable:Boolean = !readonly
     private[platdb] def rootBucket():Option[Bucket] = Some(root)
     // open and return a bucket
@@ -89,33 +107,28 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
         
         // updata meta info
         meta.root = root.bkv
-
         // free the old freelist and write the new list to db file.
         if meta.freelistId!=0 then
             db.freelist.free(id,db.freelist.header.pgid,db.freelist.header.overflow)
-        // 
-        writeFreelist() match
-            case Success(_) => None
-            case Failure(e) => return Failure(e)
-        writeBlock() match
-            case Success(_) => None
-            case Failure(e) => 
-                rollbackTx()
-                return Failure(e)
-        writeMeta() match
-            case Success(_) => None
-            case Failure(e) => 
-                rollbackTx()
+        //
+        try 
+            writeFreelist() 
+            writeBlock()
+            writeMeta() 
+        catch
+            case e:Exception => 
+                rollbackTx() match
+                    case _ => None
                 return Failure(e)
         close()
         Success(true)
     
     //  rollback current tx during commit process
-    private[platdb] def rollbackTx():Unit = 
+    private[platdb] def rollbackTx():Try[Boolean] = 
         if closed then 
-            throw new Exception("tx closed")
+            return Failure(throw new Exception("tx closed"))
         else if db.isClosed then
-            throw new Exception("db closed")
+            return Failure(throw new Exception("db closed"))
         //
         if writable then
             db.freelist.rollback(id)
@@ -123,6 +136,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
             // Read free page list from freelist page.
 			// tx.db.freelist.reload(tx.db.page(tx.db.meta().freelist))
         close()
+        Success(true)
     // user call rollback directly，because not write any change to db file, so we do nothing except rollback freelist.
     def rollback():Try[Boolean] =
         if closed then
@@ -155,69 +169,59 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
         blocks.clear()
 
     // write freelist to db file
-    private def writeFreelist():Try[Boolean] = 
+    private def writeFreelist():Unit = 
         // allocate new pages for freelist
-        val maxId = meta.pageId
+        val tailId = meta.pageId
         val sz = db.freelist.size()
-        allocate(sz) match
-            case None => 
-                rollbackTx()
-                return Failure(new Exception(s"tx ${id} allocate block space failed"))
-            case Some(id) =>
-                var bk = db.blockBuffer.get(sz)
-                bk.setid(id)
-                db.freelist.writeTo(bk)
-                // write new freelsit to file
-                db.blockBuffer.write(bk) match
-                    case Failure(e) => return Failure(e)
-                    case Success(flag) =>
-                        if !flag then
-                            rollbackTx()
-                            return Failure(new Exception(s"tx ${id} write freelist to db file failed"))
-                        meta.freelistId = id 
-                        db.blockBuffer.revert(bk.uid)
-                        /*
-                        // If the high water mark has moved up then attempt to grow the database.
-                        if tx.meta.pgid > opgid {
-                            if err := tx.db.grow(int(tx.meta.pgid+1) * tx.db.pageSize); err != nil {
-                                tx.rollback()
-                                return err
-                            }
-                        } 
-                        */
-                        if meta.pageId > maxId then
-                            // TODO grow
-                            return Failure(new Exception("Not implement"))
-                        Success(true)
+        val pgid = allocate(sz)
+        
+        var bk = db.blockBuffer.get(sz)
+        bk.setid(pgid)
+        db.freelist.writeTo(bk)
+        if meta.pageId > tailId then
+            db.growTo((meta.pageId+1)*osPageSize) match
+                case Success(_) => None
+                case Failure(e) => throw new Exception(s"write freelist failed:${e.getMessage()}")
+        // write new freelsit to file
+        db.blockBuffer.write(bk) match
+            case Failure(e) => throw e
+            case Success(flag) =>
+                if !flag then
+                    //rollbackTx()
+                    throw new Exception(s"tx ${id} write freelist to db file failed")
+                meta.freelistId = id
+                db.blockBuffer.revert(bk.uid)
     // write all dirty blocks to db file
-    private def writeBlock():Try[Boolean] =
+    private def writeBlock():Unit =
         var arr = new ArrayBuffer[Block]()
         for (id,bk) <- blocks do
             arr+=bk 
         arr.sortWith((b1:Block,b2:Block) => b1.id < b2.id)
-
-        try 
+        try
             for bk <- arr do
                 db.blockBuffer.write(bk) match
                     case Failure(e) => throw e
                     case Success(flag) =>
                         if !flag then
                             throw new Exception(s"tx ${id} commit dirty blcok ${bk.id} failed")
-            Success(true)
         catch
-            case e:Exception => return Failure(e)
+            case e:Exception => throw e
+        finally
+            for (_,bk) <- blocks do
+                db.blockBuffer.revert(bk.uid)
  
     // write meta blocks to db file
-    private def writeMeta():Try[Boolean]  =
+    private def writeMeta():Unit  =
         var bk = db.blockBuffer.get(meta.size())
         bk.setid(meta.id)
-        try 
+        try
             db.blockBuffer.write(bk) match
-                case Failure(e) => return Failure(e)
+                case Failure(e) => throw e
                 case Success(flag) =>
                     if !flag then
-                        return Failure( new Exception(s"tx ${id} commit meta ${bk.id} failed"))
-            Success(true)
+                        throw new Exception(s"tx ${id} commit meta ${bk.id} failed")
+        catch
+            case e:Exception => throw e
         finally
             db.blockBuffer.revert(bk.uid)
     // return the max pageid
@@ -241,10 +245,16 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
             case Success(bk) => 
                 db.freelist.free(id,bk.header.pgid,bk.header.overflow)
     // allocate page space according size 
-    private[platdb] def allocate(size:Int):Option[Int] =
+    private[platdb] def allocate(size:Int):Int =
         var n = size/osPageSize
         if size%osPageSize!=0 then n+=1
-        Some(db.freelist.allocate(id,n))
+        // try to allocate space from frreelist
+        var pgid = db.freelist.allocate(id,n)
+        // if freelist not have space,we need allocate from db tail and grow the db file
+        if pgid == 0 then
+            pgid = meta.pageId
+            meta.pageId+=n
+        pgid
     
     // construct a block object according size, then set its id
     private[platdb] def makeBlock(id:Int,size:Int):Block = 

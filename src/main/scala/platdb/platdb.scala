@@ -10,13 +10,21 @@ import scala.util.control.Breaks._
 import scala.util.{Try,Failure,Success}
 import java.util.concurrent.locks.ReentrantLock
 
-// global options
-object PlatDB:
-    @main def main(args: String*) =
-        println("hello,platdb")
-
 //
 case class Options(val timeout:Int,val bufSize:Int,val readonly:Boolean)
+
+// global options
+object DB:
+    val maxKeySize = 10000
+    val maxValueSize = 10000
+    var pageSize:Int = osPageSize
+
+    val exceptionTxClosed = new Exception("transaction is closed")
+    val exceptionOpNotAllow = new Exception("readonly transaction not allow current operation")
+    val exceptionKeyIsNull = new Exception("param key is null")
+    val exceptionKeyTooLarge = new Exception(s"key is too large,limit $maxKeySize")
+    val exceptionValueTooLager = new Exception(s"value is too large,limit $maxValueSize")
+    val exceptionValueNotFound = new Exception("value not found")
 
 //
 class DB(val path:String,val ops:Options):
@@ -65,11 +73,35 @@ class DB(val path:String,val ops:Options):
     // 初始化数据文件
     private def init():Unit =
         // 1.创建空的meta并写入文件
+        for i<- 0 to 1 do
+            var m = new Meta(i)
+            m.flags = metaType
+            m.pageSize = osPageSize
+            m.txid = 0
+            m.freelistId = 2
+            m.root = new bucketValue(3,0,0)
+
+            var bk = blockBuffer.get(osPageSize)
+            m.writeTo(bk)
+            blockBuffer.write(bk) match
+                case Success(_) => None
+                case Failure(e) => throw e 
 
         // 2.创建空的freelist并写入文件
+        var fl = new Freelist(new BlockHeader(2,freelistType,0,0,0))
+        var fbk = blockBuffer.get(osPageSize)
+        fl.writeTo(fbk)
+        blockBuffer.write(fbk) match
+            case Success(_) => None
+            case Failure(e) => throw e 
 
         // 3.创建空的root bucket并写入文件
-
+        var root = new Node(new BlockHeader(3,leafType,0,0,0))
+        var rbk = blockBuffer.get(osPageSize)
+        root.writeTo(rbk)
+        blockBuffer.write(rbk) match
+            case Success(_) => None
+            case Failure(e) => throw e
         None
     // 可能返回异常
     private def loadMeta(id:Int):Meta =
@@ -118,7 +150,7 @@ class DB(val path:String,val ops:Options):
             beginRTx()
         
     // 执行一个读写事务
-    def update(op:(Tx)=>Unit):Try[Boolean] =
+    def update(op:(Transaction)=>Unit):Try[Boolean] =
         beginRWTx() match
             case Failure(e) => Failure(e)
             case Success(tx) =>
@@ -135,9 +167,8 @@ class DB(val path:String,val ops:Options):
                         Failure(e)
                 finally
                     tx.rollbackTx()
-        
     // 执行一个只读事务
-    def view(op:(Tx)=>Unit):Try[Boolean] =
+    def view(op:(Transaction)=>Unit):Try[Boolean] =
         beginRTx() match
             case Failure(exception) => Failure(exception)
             case Success(tx) =>
@@ -202,8 +233,13 @@ class DB(val path:String,val ops:Options):
         freelist.unleash(minid,tx.id-1)
         minid = tx.id+1
       freelist.unleash(minid,Int.MaxValue)
-    // TODO
-    private[platdb] def grow(sz:Int):Try[Boolean] = Failure(new Exception("not implement grow now"))
+    // 
+    private[platdb] def growTo(sz:Long):Try[Boolean] = 
+        try
+            fileManager.grow(sz)
+            Success(true)
+        catch
+            case e:Exception => return Failure(new Exception(s"grow db failed:${e.getMessage()}"))
     //
     private[platdb] def removeTx(txid:Int):Unit =
       var idx = -1

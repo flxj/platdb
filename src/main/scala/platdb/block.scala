@@ -187,24 +187,9 @@ protected class FileManager(val path:String,val readonly:Boolean):
         lock.release()
         opend = false
 
-    def grow(size:Int):Unit = 
-        if !opend then
-            throw new Exception("db file closed")
-        if size<0 then 
-            return None // TODO shrink the file
-        if size == 0 then
-            return None
-
-        var w:FileOutputStream = null
-        try 
-            val arr = new Array[Byte](size)
-            val idx = file.length().intValue()
-
-            w = new FileOutputStream(file) // TODO:
-            w.write(arr,idx,arr.length)
-        finally 
-            if w!=null then
-                w.close()
+    def grow(sz:Long):Unit = 
+        if sz <= size then return None
+        channel.truncate(sz)
     
     def readAt(id:Int,size:Int):Array[Byte] =
         if !opend then

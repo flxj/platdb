@@ -58,7 +58,7 @@ private[platdb] object Meta:
 
 private[platdb] class Meta(val id:Int) extends Persistence:
     var pageSize:Int = 0
-    var flags:Int = -1
+    var flags:Int = metaType
     var freelistId:Int = -1// 记录freelist block的pgid
     var pageId:Int = -1
     var txid:Int = -1
@@ -97,11 +97,10 @@ private[platdb] case class FreeFragment(start:Int,end:Int,length:Int)
 private[platdb] case class FreeClaim(txid:Int, ids:ArrayBuffer[FreeFragment])
 
 // freelist implement
-private[platdb] class Freelist extends Persistence:
-    var header:BlockHeader = null
-    var idle:ArrayBuffer[FreeFragment] = null
-    var unleashing:ArrayBuffer[FreeClaim] = null
-    var allocated:Map[Int,ArrayBuffer[FreeFragment]] = null // 记录事务的page分配情况
+private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
+    var idle:ArrayBuffer[FreeFragment] = new ArrayBuffer[FreeFragment]()
+    var unleashing:ArrayBuffer[FreeClaim] = new ArrayBuffer[FreeClaim]()
+    var allocated:Map[Int,ArrayBuffer[FreeFragment]] = Map[Int,ArrayBuffer[FreeFragment]]() // 记录事务的page分配情况
 
     def size():Int = 
         var sz = blockHeaderSize + freelistHeaderSize + idle.length*freelistElementSize
@@ -242,7 +241,7 @@ private[platdb] object Freelist:
         bk.tail match
             case None => None 
             case Some(data) => 
-                var freelist = new Freelist()
+                var freelist = new Freelist(bk.header)
                 freelist.header = bk.header
                 if data.length < freelistHeaderSize then
                     throw new Exception("illegal freelist header data") 

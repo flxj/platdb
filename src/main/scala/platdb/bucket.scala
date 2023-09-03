@@ -7,18 +7,20 @@ import scala.util.Try
 import scala.util.Success
 import scala.util.Failure
 
-val bucketValueSize = 16
 
-// count表示当前bucket中key的个数
+// count is the number of keys in current bucket
 private[platdb] class bucketValue(var root:Int,var count:Int,var sequence:Long):
-    // 作为bucket类型的blockElement的value内容: NodeIndex --> (key: bucketName, value:bucketValue)
-    def content: String = new String(Bucket.marshal(this))
+    def getBytes:Array[Byte] = Bucket.marshal(this)
+    override def toString(): String = new String(Bucket.marshal(this))
     override def clone:bucketValue = new bucketValue(root,count,sequence)
 
 //
 private[platdb] object Bucket:
+    /** bucket value size when convert byte array.  */
+    val valueSize:Int = 16
+    //
     def read(data:Array[Byte]):Option[bucketValue] =
-        if data.length!=bucketValueSize then
+        if data.length!=valueSize then
             return None 
         var r = 0
         var c = 0
@@ -32,59 +34,82 @@ private[platdb] object Bucket:
             s = s << 8
             s = s | (data(8+i) & 0xff)
         Some(new bucketValue(r,c,s))
-    //     
+    // convert bucket value to byte array
     def marshal(bkv:bucketValue):Array[Byte] = 
-        var buf:ByteBuffer = ByteBuffer.allocate(bucketValueSize)
+        var buf:ByteBuffer = ByteBuffer.allocate(valueSize)
         buf.putInt(bkv.root)
         buf.putInt(bkv.count)
         buf.putLong(bkv.sequence)
         buf.array()
 
+//
 class Bucket(val name:String,private[platdb] var tx:Tx):
-    private[platdb] var bkv:bucketValue = _
-    private[platdb] var root:Option[Node] = _
-    private[platdb] var nodes:Map[Int,Node] = _  // 缓存的都是写事务相关的node ?
-    private[platdb] var buckets:Map[String,Bucket] = _ // sub-buckets
+    private[platdb] var bkv:bucketValue = null
+    private[platdb] var root:Option[Node] = None
+    /** cache nodes about writeable tx. */
+    private[platdb] var nodes:Map[Int,Node] = null
+    /** cache sub-buckets */
+    private[platdb] var buckets:Map[String,Bucket] = Map[String,Bucket]()
 
-    // 当前bucket中key的个数
+    // keys number
     def length:Int = bkv.count
     private[platdb] def value:bucketValue = bkv 
     def closed:Boolean = tx == null || tx.closed
+    /**
+      * 
+      *
+      * @return BucketIterator
+      */
     def iterator():BucketIterator = new bucketIter(this)
-    // 查询元素对应的值
+    //private[platdb] def size():Int = Bucket.valueSize
+    //private[platdb] def writeTo(bk:Block):Int = 0
+    /**
+      * try to retrieve the value for a key in the bucket.
+      * Returns is Failure if the key does not exist or the key is a subbucket name.
+      * The returned value is only valid for the life of the transaction.
+      * @return value of key
+      */
     def get(key:String):Try[String] = 
         if tx.closed then
-            return Failure(new Exception("tx is closed")) 
+            return Failure(DB.exceptionTxClosed)
         else if key.length == 0 then 
-            return Failure(new Exception("search key is null"))
+            return Failure(DB.exceptionKeyIsNull)
+        
         val c = iterator()
         c.find(key) match 
-            case (None,_) => None
+            case (None,_) => return Failure(new Exception(s"not found key:$key"))
             case (Some(k),v) => 
                 if k == key then 
                     v match
                         case None => return Failure(new Exception("key is a subbucket"))
                         case Some(s) => return Success(s) 
-        Failure(new Exception("not found value"))
-    // 插入元素
+        Failure(DB.exceptionValueNotFound)
+    /**
+      * put method insert or update(overwritten) the value for a key in the bucket.
+      * Put operation will failed if the key is null or too large, or the value is too large.
+      * If the bucket was managed by a readonly transaction, not allow put operation on it.
+      * @param key
+      * @param value
+      * @return success flag
+      */
     def put(key:String,value:String):Try[Boolean] =
         if tx.closed then
-            return Failure(new Exception("tx is closed")) 
+            return Failure(DB.exceptionTxClosed) 
         else if !tx.writable then 
-            return Failure(new Exception("readonly tx not allow put operation")) 
+            return Failure(DB.exceptionOpNotAllow) 
         else if key.length == 0 then
-            return Failure(new Exception("instert key is null"))
+            return Failure(DB.exceptionKeyIsNull)
         else if  key.length>=maxKeySize then
-            return Failure(new Exception(s"key is too large,limit $maxKeySize"))
+            return Failure(DB.exceptionKeyTooLarge)
         else if value.length>=maxValueSize then
-            return Failure(new Exception(s"value is too large,limit $maxValueSize"))
+            return Failure(DB.exceptionValueTooLager)
 
         var c = new bucketIter(this)
         c.search(key) match 
-            case (None,_,_) => return Failure(new Exception("not found value"))
+            case (None,_,_) => return Failure(DB.exceptionValueNotFound)
             case (Some(k),_,f) =>
                 if k == key && f == bucketType then
-                    return Failure(new Exception("the value type is bucket"))
+                    return Failure(new Exception("the value is subbucket,not allow update it by put method"))
         c.node() match 
             case None => None
             case Some(node) =>
@@ -92,13 +117,19 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
                     node.put(key,key,value,leafType,0)
                     bkv.count+=1
                     return Success(true)
-        Failure(new Exception("not found insert node")) 
-    // 从bucket中删除某个key值，返回操作是否成功，注意如果key对应一个子bucket则删除操作被忽略
+        Failure(new Exception(s"not found insert node for key:$key")) 
+    /**
+      * try to remove a key from the bucket.
+      * delete operation will be ignore if the key does not exist.
+      * If the bucket was managed by a readonly transaction, not allow put operation on it.
+      * @param key
+      * @return success flag
+      */
     def delete(key:String):Try[Boolean] = 
         if tx.closed then
-            return Failure(new Exception("tx is closed")) 
+            return Failure(new Exception("transaction is closed")) 
         else if !tx.writable then 
-            return Failure(new Exception("readonly tx not allow delete operation")) 
+            return Failure(new Exception("readonly transaction not allow current operation")) 
         else if key.length <=0 then
             return Failure(new Exception("delete key is null")) 
         
@@ -107,7 +138,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
             case (None,_,_) => return Failure(new Exception("not found value"))
             case (Some(k),_,f) =>
                 if k == key && f == bucketType then
-                    return Failure(new Exception("not allow delete bucket value")) 
+                    return Failure(new Exception("not allow delete subbucket value by delete method")) 
         c.node() match 
             case None => None
             case Some(node) =>
@@ -121,7 +152,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
     // 获取子bucket
     def getBucket(name:String):Try[Bucket] = 
         if tx.closed then
-            return Failure(new Exception("tx is closed")) 
+            return Failure(new Exception("transaction is closed")) 
         else if name.length==0 then 
             return Failure(new Exception("bucket name is null"))
         if buckets.contains(name) then 
@@ -148,9 +179,9 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
     // 创建bucket，如果已经存在，则返回None
     def createBucket(name:String):Try[Bucket] = 
         if tx.closed then
-            return Failure(new Exception("tx is closed")) 
+            return Failure(new Exception("transaction is closed")) 
         else if !tx.writable then 
-            return Failure(new Exception("readonly tx not allow create operation")) 
+            return Failure(new Exception("readonly transaction not allow current operation")) 
         else if name.length()==0 then 
             return Failure(new Exception("bucket name is null"))
         else if buckets.contains(name) then 
@@ -182,16 +213,16 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
         c.node() match 
             case None => Failure(new Exception("bucket create failed: not found create node"))
             case Some(n) =>
-                n.put(name,name,bk.value.content,bucketType,0)
+                n.put(name,name,bk.value.toString(),bucketType,0)
                 bkv.count+=1
                 Success(bk)
 
     // 创建bucket,如果已经存在则返回该bucket
     def createBucketIfNotExists(name:String):Try[Bucket] =
         if tx.closed then
-            return Failure(new Exception("tx is closed")) 
+            return Failure(new Exception("transaction is closed")) 
         else if !tx.writable then 
-            return Failure(new Exception("readonly tx not allow create operation"))  
+            return Failure(new Exception("readonly transaction not allow current operation"))  
         else if name.length()<=0 then 
             return Failure(new Exception("bucket name is null"))
         
@@ -201,9 +232,9 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
     // 删除bucket
     def deleteBucket(name:String):Try[Boolean] =
         if tx.closed then
-            return Failure(new Exception("tx is closed"))  
+            return Failure(new Exception("transaction is closed"))  
         else if !tx.writable then 
-            return Failure(new Exception("readonly tx not allow delete operation"))  
+            return Failure(new Exception("readonly transaction not allow delete operation"))
         else if name.length()<=0 then 
             return Failure(new Exception("bucket name is null"))
         
@@ -313,9 +344,6 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
                 if idx >=1 then 
                     return getNodeChild(p,idx-1)
                 return None
-    private[platdb] def size():Int = bucketValueSize
-    private[platdb] def writeTo(bk:Block):Int = 0
-    
     // rebalance 
     // 错误处理：直接抛异常
     private[platdb] def merge():Unit = 
@@ -419,7 +447,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
                             if flag!=bucketType then 
                                 throw new Exception(s"unexpected bucket header: $name flag:$flag")
                             c.node() match 
-                                case Some(node) => node.put(k,name,v.content,bucketType,0)
+                                case Some(node) => node.put(k,name,v.toString(),bucketType,0)
                                 case None => throw new Exception(s"not found leaf node for bucket element:$name")
         // 切分当前bucket
         root match
@@ -452,15 +480,13 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
                 tx.free(n.id)
                 n.header.pgid = 0
             // 重新分配block并写入节点内容
-            tx.allocate(n.size()) match
-                case None => throw new Exception(s"allocate size ${n.size()} page id failed")
-                case Some(id) => 
-                    if id >= tx.maxPageId then 
-                        throw new Exception(s"pgid $id above high water mark ${tx.maxPageId}")
-                    var bk = tx.makeBlock(id,n.size())  
-                    n.writeTo(bk)
-                    n.header = bk.header
-                    node.spilled = true
+            val id = tx.allocate(n.size()) 
+            if id >= tx.maxPageId then 
+                throw new Exception(s"pgid $id above high water mark ${tx.maxPageId}")
+            var bk = tx.makeBlock(id,n.size())  
+            n.writeTo(bk)
+            n.header = bk.header
+            node.spilled = true
             // 将新切出来的节点信息插入其父亲节点中
             n.parent match
                 case None => None

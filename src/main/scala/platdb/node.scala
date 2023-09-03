@@ -74,18 +74,16 @@ object Node:
 
 // node作为b+树节点的内存表示
 private[platdb] class Node(var header:BlockHeader) extends Persistence:
-    var unbalanced:Boolean = _
-    var spilled:Boolean = _
-    var minKey:String = _
-    var parent:Option[Node] = _ 
-    var children:ArrayBuffer[Node] = _
-    var elements:ArrayBuffer[NodeElement] = _
+    var unbalanced:Boolean = false
+    var spilled:Boolean = false
+    var minKey:String = ""
+    var parent:Option[Node] = None
+    var children:ArrayBuffer[Node] = new ArrayBuffer[Node]()
+    var elements:ArrayBuffer[NodeElement] = new ArrayBuffer[NodeElement]()
 
     def id:Int = header.pgid
     def length:Int = elements.length 
-    // 
     def ntype:Int = header.flag
-    // 
     def isLeaf:Boolean = header.flag == leafType
     def isBranch:Boolean = header.flag == branchType
     def isRoot:Boolean = parent match
