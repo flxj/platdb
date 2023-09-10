@@ -38,7 +38,7 @@ private[platdb] class Record(var node:Option[Node],var block:Option[Block],var i
             case Some(bk) => return bk.header.count
         0
 
-private[platdb] class bucketIter(private var bucket:Bucket) extends BucketIterator:
+private[platdb] class btreeBucketIter(private var bucket:BTreeBucket) extends BucketIterator:
     private var stack:List[Record] = _
     
     /**

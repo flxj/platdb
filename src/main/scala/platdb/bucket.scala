@@ -7,15 +7,28 @@ import scala.util.Try
 import scala.util.Success
 import scala.util.Failure
 
+trait Bucket:
+    def name:String
+    def length:Int
+    def closed:Boolean
+    def iterator:BucketIterator
+    def contains(key:String):Try[Boolean]
+    def get(key:String):Try[String]
+    def put(key:String,value:String):Try[Boolean]
+    def delete(key:String):Try[Boolean]
+    def getBucket(name:String):Try[Bucket]
+    def createBucket(name:String):Try[Bucket]
+    def createBucketIfNotExists(name:String):Try[Bucket] 
+    def deleteBucket(name:String):Try[Boolean]
 
 // count is the number of keys in current bucket
 private[platdb] class bucketValue(var root:Int,var count:Int,var sequence:Long):
-    def getBytes:Array[Byte] = Bucket.marshal(this)
-    override def toString(): String = new String(Bucket.marshal(this))
+    def getBytes:Array[Byte] = BTreeBucket.marshal(this)
+    override def toString(): String = new String(BTreeBucket.marshal(this))
     override def clone:bucketValue = new bucketValue(root,count,sequence)
 
 //
-private[platdb] object Bucket:
+private[platdb] object BTreeBucket:
     /** bucket value size when convert byte array.  */
     val valueSize:Int = 16
     //
@@ -43,26 +56,26 @@ private[platdb] object Bucket:
         buf.array()
 
 //
-class Bucket(val name:String,private[platdb] var tx:Tx):
-    private[platdb] var bkv:bucketValue = null
-    private[platdb] var root:Option[Node] = None
+private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
+    var bkv:bucketValue = null
+    var root:Option[Node] = None
     /** cache nodes about writeable tx. */
-    private[platdb] var nodes:Map[Int,Node] = null
+    var nodes:Map[Int,Node] = null
     /** cache sub-buckets */
-    private[platdb] var buckets:Map[String,Bucket] = Map[String,Bucket]()
+    var buckets:Map[String,BTreeBucket] = Map[String,BTreeBucket]()
 
     // keys number
+    def name:String = bkname 
     def length:Int = bkv.count
-    private[platdb] def value:bucketValue = bkv 
+    def value:bucketValue = bkv 
     def closed:Boolean = tx == null || tx.closed
     /**
       * 
       *
       * @return BucketIterator
       */
-    def iterator():BucketIterator = new bucketIter(this)
-    //private[platdb] def size():Int = Bucket.valueSize
-    //private[platdb] def writeTo(bk:Block):Int = 0
+    def iterator:BucketIterator = new btreeBucketIter(this)
+    def contains(key:String):Try[Boolean] = Failure(throw new Exception("Not implement now"))
     /**
       * try to retrieve the value for a key in the bucket.
       * Returns is Failure if the key does not exist or the key is a subbucket name.
@@ -75,7 +88,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
         else if key.length == 0 then 
             return Failure(DB.exceptionKeyIsNull)
         
-        val c = iterator()
+        val c = iterator
         c.find(key) match 
             case (None,_) => return Failure(new Exception(s"not found key:$key"))
             case (Some(k),v) => 
@@ -104,7 +117,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
         else if value.length>=DB.maxValueSize then
             return Failure(DB.exceptionValueTooLarge)
 
-        var c = new bucketIter(this)
+        var c = new btreeBucketIter(this)
         c.search(key) match 
             case (None,_,_) => return Failure(DB.exceptionValueNotFound)
             case (Some(k),_,f) =>
@@ -133,7 +146,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
         else if key.length <=0 then
             return Failure(DB.exceptionKeyIsNull) 
         
-        var c = new bucketIter(this)
+        var c = new btreeBucketIter(this)
         c.search(key) match 
             case (None,_,_) => return Failure(DB.exceptionValueNotFound)
             case (Some(k),_,f) =>
@@ -155,7 +168,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
       * @param name: subbucket name
       * @return subbucket
       */
-    def getBucket(name:String):Try[Bucket] = 
+    def getBucket(name:String):Try[BTreeBucket] = 
         if tx.closed then
             return Failure(DB.exceptionTxClosed) 
         else if name.length==0 then 
@@ -166,7 +179,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
                 case Some(bk) => return Success(bk)
                 case None =>  return Failure(new Exception(s"buckets cache failed,not found $name"))
 
-        var c = new bucketIter(this)
+        var c = new btreeBucketIter(this)
         c.search(name) match
             case (None,_,_) => return Failure(new Exception(s"not found bucket $name"))
             case (Some(k),v,f) => 
@@ -175,10 +188,10 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
                 v match 
                     case None => return Failure(new Exception(s"query bucket $name value failed"))
                     case Some(data) =>
-                        Bucket.read(data.getBytes()) match
+                        BTreeBucket.read(data.getBytes()) match
                             case None => return Failure(new Exception(s"parse bucket $name value failed")) 
                             case Some(value) =>
-                                var bk = new Bucket(name,tx)
+                                var bk = new BTreeBucket(name,tx)
                                 bk.bkv = value 
                                 buckets.addOne((name,bk))
                                 return Success(bk)
@@ -189,7 +202,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
       * @param name: bucket name
       * @return subbucket
       */
-    def createBucket(name:String):Try[Bucket] = 
+    def createBucket(name:String):Try[BTreeBucket] = 
         if tx.closed then
             return Failure(DB.exceptionTxClosed) 
         else if !tx.writable then 
@@ -201,7 +214,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
         else if buckets.contains(name) then 
             return Failure(new Exception(s"bucket $name is already exists"))
         
-        var c = new bucketIter(this)
+        var c = new btreeBucketIter(this)
         c.search(name) match
             case (None,_,_) => return Failure(new Exception("bucket create failed: not found create node"))
             case (Some(k),v,f) => 
@@ -211,16 +224,16 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
                     v match 
                         case None => None
                         case Some(data) =>
-                            Bucket.read(data.getBytes()) match
+                            BTreeBucket.read(data.getBytes()) match
                                 case None => return Failure(new Exception(s"parse bucket $name value failed"))  
                                 case Some(value) =>
-                                    var bk = new Bucket(name,tx)
+                                    var bk = new BTreeBucket(name,tx)
                                     bk.bkv = value 
                                     bk.root = node(value.root)
                                     buckets.addOne((name,bk))
                     return Failure(new Exception(s"bucket create failed: bucket $name is already exists"))
         // create a new bucket
-        var bk = new Bucket(name,tx)
+        var bk = new BTreeBucket(name,tx)
         bk.bkv = new bucketValue(-1,0,0) // null bkv
         bk.root = Some(new Node(new BlockHeader(-1,leafType,0,0,0))) // null root node
         buckets.addOne((name,bk))
@@ -237,7 +250,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
       * @param name: bucket name
       * @return subbucket
       */
-    def createBucketIfNotExists(name:String):Try[Bucket] =
+    def createBucketIfNotExists(name:String):Try[BTreeBucket] =
         if tx.closed then
             return Failure(DB.exceptionTxClosed) 
         else if !tx.writable then 
@@ -266,7 +279,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
         else if name.length() >= DB.maxKeySize then
             return Failure(DB.exceptionKeyTooLarge)
         
-        var c = new bucketIter(this)
+        var c = new btreeBucketIter(this)
         c.search(name) match 
             case (None,_,_) => return Failure(new Exception(s"not found key $name")) 
             case (Some(k),_,f) => 
@@ -281,7 +294,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
                     case Failure(e) => return Failure(new Exception(s"query bucket $name failed:${e.getMessage()}")) 
                     case Success(childBk) => 
                         try 
-                            for (k,v) <- childBk.iterator() do
+                            for (k,v) <- childBk.iterator do
                                 k match
                                     case None => throw new Exception(s"query get null key in bucket ${childBk.name}")
                                     case Some(key) =>
@@ -305,7 +318,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
                                 bkv.count-=1
                 Success(true)
     /** try to get node or block by block id. */
-    private[platdb] def nodeOrBlock(id:Int):(Option[Node],Option[Block]) = 
+    def nodeOrBlock(id:Int):(Option[Node],Option[Block]) = 
         if nodes.contains(id) then 
             (nodes.get(id),None)
         else 
@@ -314,7 +327,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
                 case Failure(_) =>  (None,None)
 
     /** parse node elements info from block */
-    private[platdb] def nodeElements(bk:Option[Block]):Option[ArrayBuffer[NodeElement]] = 
+    def nodeElements(bk:Option[Block]):Option[ArrayBuffer[NodeElement]] = 
         bk match
             case None => return None 
             case Some(block) => 
@@ -324,7 +337,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
                         nodes.addOne(node.id,node)
                         return Some(node.elements)
     /** try to get the idx node element from the block. */
-    private[platdb] def getNodeElement(bk:Option[Block],idx:Int):Option[NodeElement] = 
+    def getNodeElement(bk:Option[Block],idx:Int):Option[NodeElement] = 
         nodeElements(bk) match
             case None => None
             case Some(elems) =>
@@ -332,7 +345,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
                     return Some(elems(idx))
         None
     /** convert block to node. */
-    private[platdb] def getNodeByBlock(bk:Try[Block]):Option[Node] = 
+    def getNodeByBlock(bk:Try[Block]):Option[Node] = 
         bk match
             case Failure(_) => return None 
             case Success(block) => 
@@ -344,17 +357,17 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
                         nodes.addOne((node.id,node))
                         return Some(node) 
     /** get node by id, search from cache -> disk. */
-    private[platdb] def node(id:Int):Option[Node] = 
+    def node(id:Int):Option[Node] = 
         if nodes.contains(id) then 
             return nodes.get(id)
         getNodeByBlock(tx.block(id))
     /** try to get a child node by index. */
-    private[platdb] def getNodeChild(n:Node,idx:Int):Option[Node] = 
+    def getNodeChild(n:Node,idx:Int):Option[Node] = 
         if n.isLeaf || idx<0 || idx>= n.length then
             return None
         node(n.elements(idx).child)
     /** try to get right brother node. */
-    private[platdb] def getNodeRightSibling(node:Node):Option[Node] = 
+    private def getNodeRightSibling(node:Node):Option[Node] = 
         node.parent match
             case None => return None 
             case Some(p) =>
@@ -363,7 +376,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
                     return getNodeChild(p,idx+1)
                 return None 
     /** try to get node left brother node. */
-    private[platdb] def getNodeLeftSibling(node:Node):Option[Node] =
+    private def getNodeLeftSibling(node:Node):Option[Node] =
         node.parent match
             case None => return None 
             case Some(p) =>
@@ -374,7 +387,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
     /**
      * rebalance the bucket,merge some small nodes.
      */
-    private[platdb] def merge():Unit = 
+    def merge():Unit = 
         for (_,node) <- nodes do 
             mergeOnNode(node)
         for (_,bucket) <- buckets do 
@@ -457,7 +470,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
     /**
       * rebalance bucket,split too large nodes.
       */
-    private[platdb] def split():Unit =
+    def split():Unit =
         // split all cache subbuckets.
         for (name,bucket) <- buckets do 
             bucket.split()
@@ -466,7 +479,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
             bucket.root match 
                 case None => None // Skip writing the bucket if there are no materialized nodes.
                 case Some(n) =>
-                    var c = new bucketIter(bucket)
+                    var c = new btreeBucketIter(bucket)
                     c.search(name) match 
                         case (None,_,_) => throw new Exception(s"misplaced bucket header:$name")
                         case (Some(k),_,flag) =>
@@ -594,13 +607,13 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
         (node,nodeB)
 
     /** release pages of node. */
-    private[platdb] def freeNode(node:Node):Unit = 
+    private def freeNode(node:Node):Unit = 
         if node.id > 1 then
             tx.free(node.id)
             node.header.pgid = -1
 
     /** release all pages of  node and its child nodes. */
-    private[platdb] def freeFrom(id:Int):Unit = 
+    private def freeFrom(id:Int):Unit = 
         if id <= 0 then return None 
         nodeOrBlock(id) match
             case (None,None) => return None 
@@ -620,7 +633,7 @@ class Bucket(val name:String,private[platdb] var tx:Tx):
         None 
 
     /** release all pages about current bucket. */
-    private[platdb] def freeAll():Unit =
+    private def freeAll():Unit =
         if bkv.root == 0 then return None 
         freeFrom(bkv.root)
         bkv.root = 0

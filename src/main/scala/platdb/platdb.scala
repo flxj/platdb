@@ -17,6 +17,7 @@ case class Options(val timeout:Int,val bufSize:Int,val readonly:Boolean)
 object DB:
     val maxKeySize = 10000
     val maxValueSize = 10000
+    val defaultBufSize = 128
     var pageSize:Int = osPageSize
 
     val exceptionTxClosed = new Exception("transaction is closed")

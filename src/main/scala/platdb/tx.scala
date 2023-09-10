@@ -59,14 +59,14 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
     var sysCommit:Boolean = false 
     var db:DB = null
     var meta:Meta = null
-    var root:Bucket = null
+    var root:BTreeBucket = null
     var blocks:Map[Int,Block] = null // cache dirty blocks,rebalance(merge/split) bucket maybe product them
     
     private[platdb] def init(db:DB):Unit =
         this.db = db
         meta = db.meta.clone
         blocks = Map[Int,Block]()
-        root = new Bucket("",this)
+        root = new BTreeBucket("",this)
         root.bkv = meta.root.clone
         if !readonly then
             meta.txid+=1
@@ -165,7 +165,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
             db.blockBuffer.revert(bk.id)
         db = null
         meta = null
-        root = new Bucket("",this)
+        root = new BTreeBucket("",this)
         blocks.clear()
 
     // write freelist to db file
