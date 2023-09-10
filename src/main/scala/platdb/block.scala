@@ -13,71 +13,82 @@ import java.nio.channels.FileLock
 import java.nio.channels.FileChannel
 import java.util.Timer
 import java.util.Date
+import java.util.concurrent.locks.ReentrantReadWriteLock
+import scala.util.control.Breaks._
+import scala.collection.mutable.Map
+import scala.collection.mutable.ArrayDeque
 
 private[platdb] trait Persistence:
+    /** return object bytes size. */
     def size():Int
-    def writeTo(block:Block):Int // 返回写入的字节数
-
-/* node
-+------------------+-----------------------------------------+
-|     header       |                data                     |
-+------------------+-----------------+------------+----------+
-| block header     |     block index |      block data       |
-+------------------+-----------------+------------+----------+
-*/
-val maxKeySize:Int = 0
-val maxValueSize:Int = 0
+    /**
+      * write object content to block.
+      *
+      * @param block
+      * @return size of writed into
+      */
+    def writeTo(block:Block):Int
 
 val osPageSize:Int = 64 // 4096
-val blockHeaderSize:Int = 20
 
+// block/node type
 val metaType:Int = 1
 val branchType:Int = 2
 val leafType:Int = 3
 val freelistType:Int = 4
+
+// node element type
 val bucketType:Int = 5
 
-@SerialVersionUID(100L)
-class BlockHeader(var pgid:Int,var flag:Int,var count:Int,var overflow:Int,var size:Int)
+//
+private[platdb] class BlockHeader(var pgid:Int,var flag:Int,var count:Int,var overflow:Int,var size:Int)
 
 // uid 可能会用于blockBuffer pool管理block用
-private[platdb] class Block(val uid:Int,val sz:Int): // header对象应该是可变的，因为可能需要为其分配id
-    var header:BlockHeader = _
-    var data:ArrayBuffer[Byte] = new ArrayBuffer[Byte](sz) // header 和实际data都放到data中
-    private var idx:Int = 0 // idx总是指向下一个写入位置
+private[platdb] class Block(val cap:Int):
+    var header:BlockHeader = null
+    private var data:ArrayBuffer[Byte] = new ArrayBuffer[Byte](cap) // TODO:use Array[Byte] ?
+    private var idx:Int = 0 // index of the data tail.
      
     def id:Int = header.pgid
-    // 返回实际已经使用的容量
+    // the actual length of data that has been used.
     def size:Int = idx
-    // 容量：data字段的物理长度
+    // total capacity.
     def capacity:Int = data.length
-    // block类型
+    // block type.
     def btype:Int = header.flag 
     def setid(id:Int):Unit = header.pgid = id 
     def reset():Unit = idx = 0
     def write(offset:Int,d:Array[Byte]):Unit =
         if offset<0 || d.length == 0 then 
             return None
-        if offset+d.length >= capacity then 
+        if offset+d.length > capacity then 
             data++=new Array[Byte](offset+d.length-capacity)
-        for i <- 0 until d.length do
+        for i <- 0 until d.length do  // TODO: use copy
             data(offset+i) = d(i)
         if d.length+offset > idx then
             idx = d.length+offset
-    // 追加data
+    // write data to tail.
     def append(d:Array[Byte]):Unit = write(idx,d)
-    // 所有数据
-    def all:ArrayBuffer[Byte] = data.slice(0,idx)
-    // 返回除了header外的数据
+    // all data.
+    def all:Array[Byte] = data.toArray
+    // user data.
+    def getBytes():Option[Array[Byte]] = 
+        if header.size >= Block.headerSize then
+            return Some(data.slice(Block.headerSize,header.size).toArray)
+        else if idx>= Block.headerSize then
+            return Some(data.slice(Block.headerSize,idx).toArray)
+        None
+    // all data except header.
     def tail:Option[Array[Byte]] = 
-        if size>blockHeaderSize then
-            Some(data.slice(blockHeaderSize,size).toArray)
+        if capacity > Block.headerSize then
+            Some(data.takeRight(Block.headerSize).toArray)
         else
             None 
 
-protected object Block:
+private[platdb] object Block:
+    val headerSize = 20
     def marshalHeader(pg:BlockHeader):Array[Byte] =
-        var buf:ByteBuffer = ByteBuffer.allocate(blockHeaderSize)
+        var buf:ByteBuffer = ByteBuffer.allocate(headerSize)
         buf.putInt(pg.pgid)
         buf.putInt(pg.flag)
         buf.putInt(pg.count)
@@ -85,14 +96,14 @@ protected object Block:
         buf.putInt(pg.size)
         buf.array()
     def unmarshalHeader(bs:Array[Byte]):Option[BlockHeader] =
-        if bs.length != blockHeaderSize then 
+        if bs.length != headerSize then 
             None 
         else
-            var arr = new Array[Int](blockHeaderSize/4)
+            var arr = new Array[Int](headerSize/4)
             var i = 0
-            while i<blockHeaderSize/4 do 
+            while i<headerSize/4 do 
                 var n = 0
-                for j <- 0 to 3 do
+                for j <- 0 to 3 do // TODO: not use loop here.
                     n = n << 8
                     n = n | (bs(4*i+j) & 0xff)
                 arr(i) = n
@@ -100,51 +111,154 @@ protected object Block:
             Some(new BlockHeader(arr(0),arr(1),arr(2),arr(3),arr(4)))
 
 // blockBuffer 不用考虑数据的一致性，只要调用就尝试返回即可
-protected class BlockBuffer(val size:Int,var fm:FileManager):
-    private var id = new AtomicInteger(1)
-    var idle:Map[Int,Block] = _ // 保存一些被从缓存队列中踢出来的无用block,便于快速创建block结构
-    var pool:ArrayBuffer[Block] = _  // block缓存
-    var pinned:Map[Int,Int] = _ // 记录缓存队列中配pinned的block, key为block pgid, value为计数器
+private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
+    //private var id = new AtomicInteger(1)
 
-    // TODO: 获取一个满足空间大小的空block
+    // Save some useless blocks that have been kicked out of the cache queue to speed up the creation of block structures.
+    val poolsize:Int = 16
+    var idleLock:ReentrantReadWriteLock = new ReentrantReadWriteLock()
+    var idle:ArrayBuffer[Block] = new ArrayBuffer[Block]() // TODO: 加入一些统计，对get频率高的size多缓存几个
+    
+    // Records the blocks that are currently in use and maintains a reference count of them.
+    var lock:ReentrantReadWriteLock = new ReentrantReadWriteLock()
+    var count:Int = 0
+    var blocks:Map[Int,Block] = Map[Int,Block]()
+    var pinned:Map[Int,Int] = Map[Int,Int]() 
+    // LRU
+    var link:ArrayDeque[Int] = new ArrayDeque[Int]()
+
+    private def full:Boolean = count>=maxsize
+    private def drop(bk:Block):Unit=
+        if idle.length <= poolsize then
+            try 
+                idleLock.writeLock().lock()
+                idle+=bk
+            finally
+                idleLock.writeLock().unlock()
     def get(size:Int):Block =
-        val bid = id.getAndIncrement()
-        var bk = new Block(bid,size)
-        return bk 
-    // TODO: 从缓存中read的block,需要归还
-    def revert(uid:Int):Unit = None 
+        try 
+            idleLock.writeLock().lock()
+            var idx:Int = -1
+            breakable(
+                for i <- 0 until idle.length do
+                    if idle(i).capacity >= size then
+                        idx = i
+                        break()
+            )
+            var bk:Block = null
+            if idx >= 0 then
+                bk = idle.remove(idx)
+            else
+                bk = new Block(size)
+            bk 
+        finally
+            idleLock.writeLock().unlock()
+
+    def revert(id:Int):Unit =
+        try 
+            lock.writeLock().lock()
+
+            val n = pinned.getOrElse(id,0)
+            if n>1 then
+                pinned(id) = n-1
+            else
+                pinned.remove(id)
+        finally
+            lock.writeLock().unlock()
     // 
     def read(pgid:Int):Try[Block] = 
-        // TODO: 先查看缓存有没有
         try 
-            fm.read(pgid) match
-                case (None,_) => 
-                    return Failure(new Exception(s"not found block header for pgid ${pgid}"))
-                case (Some(hd),None) => 
-                    return Failure(new Exception(s"not found block data for pgid ${pgid}"))
-                case (Some(hd),Some(data)) =>
-                    // get a block from idle
-                    var bk = get(hd.size)
-                    bk.header = hd 
-                    bk.write(0,data)
-                    return Success(bk)
-                    // TODO: 是否缓存读到的block
+            lock.writeLock().lock()
+            // query cache.
+            var bk:Block = null
+            var cached:Boolean = false
+            blocks.get(pgid) match
+                case Some(bk) => 
+                    val n = pinned.getOrElse(pgid,0)
+                    pinned(pgid)=n+1
+                    cached = true
+                case None => 
+                    fm.read(pgid) match
+                        case (None,_) => 
+                            return Failure(new Exception(s"not found block header for pgid ${pgid}"))
+                        case (Some(hd),None) => 
+                            return Failure(new Exception(s"not found block data for pgid ${pgid}"))
+                        case (Some(hd),Some(data)) =>
+                            // get a block from idle.
+                            bk = get(hd.size)
+                            bk.header = hd 
+                            bk.write(0,data)
+        
+            var idx:Int = -1 // will remove the element from link.
+            var ignore:Boolean = false
+            if !cached then
+                // cache not full, so cache the block directly.
+                if !full then
+                     blocks(bk.id) = bk
+                     count+=1
+                else
+                    // cache already full, so try to select a element to eliminate.
+                    breakable(
+                        for i <- Range(link.length-1,-1,-1) do
+                            if !pinned.contains(link(i)) then
+                                idx = i
+                                break()
+                    )
+                    if idx < 0 then // cache is busy
+                        ignore = true
+            else
+                // the block has cached, so just move it to head of link.
+                breakable(
+                    for i <- Range(0,link.length,1) do
+                        if link(i) == bk.id then
+                            idx = i
+                            break()
+                )
+
+            if idx >= 0 then
+                val id = link(idx)
+                if !cached then
+                    // remove the selected block from blocks, and throw it to idle list.
+                    blocks.remove(id) match
+                        case None => None
+                        case Some(blk) => drop(blk)
+                    blocks+=(bk.id,bk)
+                link.remove(id)
+            
+            if !ignore then
+                link.prepend(bk.id)
+            
+            Success(bk)      
         catch
             case e:Exception => return Failure(e)
+        finally
+            lock.writeLock().unlock()
 
     def write(bk:Block):Try[Boolean] = 
-        // TODO: 是否缓存该block？ 是否延迟写入文件？
+        var writed:Boolean = false 
         try 
             fm.write(bk)
-            Success(true)
+            lock.writeLock().lock()
+            writed = true
+
+            if !full then
+                if !blocks.contains(bk.id) then
+                    blocks(bk.id) = bk
+                    count+=1
+            else
+                None // TODO 
+            Success(writed)
         catch
             case e:Exception => return Failure(e)
+        finally
+            if writed then
+                lock.writeLock().unlock()
         
     // TODO: sync将所有脏block写入文件？
     def sync():Unit = None
 
 // 
-protected class FileManager(val path:String,val readonly:Boolean):
+private[platdb] class FileManager(val path:String,val readonly:Boolean):
     var opend:Boolean = false
     var file:File = null
     var writer:RandomAccessFile = null // writer
@@ -155,13 +269,12 @@ protected class FileManager(val path:String,val readonly:Boolean):
         if !opend then 
             throw new Exception(s"file ${path} not open")
         file.length()
-    // open and lock 
+    // open and lock.
     def open(timeout:Int):Unit =
         if opend then return None 
         file = new File(path)
         if !file.exists() then
             file.createNewFile()
-        //
         var mode:String = "rw"
         if readonly then
             mode = "r"
@@ -178,7 +291,7 @@ protected class FileManager(val path:String,val readonly:Boolean):
                 val d = now.getTime() - start.getTime()
                 if d/1000 > timeout then
                     throw new Exception(s"open database timeout:${timeout}s")
-    // close and unlock
+    // close and unlock.
     def close():Unit =
         if !opend then
             return None
@@ -186,7 +299,7 @@ protected class FileManager(val path:String,val readonly:Boolean):
         writer.close()
         lock.release()
         opend = false
-
+    // grow file.
     def grow(sz:Long):Unit = 
         if sz <= size then return None
         channel.truncate(sz)
@@ -222,8 +335,8 @@ protected class FileManager(val path:String,val readonly:Boolean):
             // 1. use pgid to seek block header location in file
             reader.seek(offset)
             // 2. read the block header content
-            var hd = new Array[Byte](blockHeaderSize)
-            if reader.read(hd,0,blockHeaderSize)!= blockHeaderSize then
+            var hd = new Array[Byte](Block.headerSize)
+            if reader.read(hd,0,Block.headerSize)!= Block.headerSize then
               throw new Exception(s"read block header ${bid} error")
             
             Block.unmarshalHeader(hd) match
@@ -247,6 +360,6 @@ protected class FileManager(val path:String,val readonly:Boolean):
         if bk.id <=1 && bk.btype != metaType then // TODO remove this check to tx
             throw new Exception(s"block type error ${bk.btype}")
         writer.seek(bk.id*osPageSize)
-        writer.write(bk.data.toArray)
+        writer.write(bk.all)
         true
         

@@ -23,7 +23,7 @@ object DB:
     val exceptionOpNotAllow = new Exception("readonly transaction not allow current operation")
     val exceptionKeyIsNull = new Exception("param key is null")
     val exceptionKeyTooLarge = new Exception(s"key is too large,limit $maxKeySize")
-    val exceptionValueTooLager = new Exception(s"value is too large,limit $maxValueSize")
+    val exceptionValueTooLarge = new Exception(s"value is too large,limit $maxValueSize")
     val exceptionValueNotFound = new Exception("value not found")
 
 //
@@ -41,38 +41,46 @@ class DB(val path:String,val ops:Options):
     def name:String = path
     def isReadonly:Boolean = ops.readonly
     def isClosed:Boolean = !openFlag
+    /**
+      * open database.
+      *
+      * @return
+      */
     def open():Try[Boolean] =
         try
             if openFlag then
                 return Success(true)
 
-            // 尝试打开文件,如果超时则抛出一个异常
+            // try to open db file, if get lock timeout,then return an exception.
             fileManager = new FileManager(path,ops.readonly)
             fileManager.open(ops.timeout)
+            // init block buffer.
             blockBuffer = new BlockBuffer(ops.bufSize,fileManager)
 
-            // TODO: 如果是第一次open db, 如何初始化？！
+            // if is the first time opened db, need init db file.
             if fileManager.size ==0 then
                 init()
           
-            // read meta 
+            // read meta info.
             meta = loadMeta(0)
             metaLock = new ReentrantLock()
           
             rTx = new ArrayBuffer[Tx]()
             if !ops.readonly then
-                // read freelist
+                // read freelist info.
                 freelist = loadFreelist(meta.freelistId)
                 rwLock = new ReentrantReadWriteLock()
           
             openFlag = true
-            Success(true)
+            Success(openFlag)
         catch
             case ex:Exception => Failure(ex)
             case er:Error => Failure(er)
-    // 初始化数据文件
+    /**
+      * init db file.
+      */
     private def init():Unit =
-        // 1.创建空的meta并写入文件
+        // 1.create two null meta object and write to file.
         for i<- 0 to 1 do
             var m = new Meta(i)
             m.flags = metaType
@@ -87,7 +95,7 @@ class DB(val path:String,val ops:Options):
                 case Success(_) => None
                 case Failure(e) => throw e 
 
-        // 2.创建空的freelist并写入文件
+        // 2.create a null freelist and write to file.
         var fl = new Freelist(new BlockHeader(2,freelistType,0,0,0))
         var fbk = blockBuffer.get(osPageSize)
         fl.writeTo(fbk)
@@ -95,7 +103,7 @@ class DB(val path:String,val ops:Options):
             case Success(_) => None
             case Failure(e) => throw e 
 
-        // 3.创建空的root bucket并写入文件
+        // 3.craete null root bucket.
         var root = new Node(new BlockHeader(3,leafType,0,0,0))
         var rbk = blockBuffer.get(osPageSize)
         root.writeTo(rbk)
@@ -103,27 +111,41 @@ class DB(val path:String,val ops:Options):
             case Success(_) => None
             case Failure(e) => throw e
         None
-    // 可能返回异常
+    /**
+      * read meta info from page.
+      *
+      * @param id
+      * @return
+      */
     private def loadMeta(id:Int):Meta =
       val data = fileManager.readAt(id,meta.size())
       Meta.readFromBytes(data) match
         case None => throw new Exception(s"not found meta data from page ${id}")
         case Some(m) => return m
 
-    // 可能返回异常
+    /**
+      * read freelist info from page.
+      *
+      * @param id
+      * @return
+      */
     private def loadFreelist(id:Int):Freelist =
-      val hd = fileManager.readAt(id,blockHeaderSize)
+      val hd = fileManager.readAt(id,Block.headerSize)
       Block.unmarshalHeader(hd) match
         case None => throw new Exception(s"not found freelist header from page ${id}")
         case Some(h) => 
           val data = fileManager.readAt(id,h.size)
-          val bk = new Block(0,data.length)
+          val bk = new Block(data.length)
           bk.header = h
           Freelist.read(bk) match
             case None => throw new Exception(s"not found freelist data from page ${id}")
             case Some(fl) => return fl
     
-    // 关闭数据库,调用该函数会阻塞直到所有已经打开的事务被提交
+    /**
+      * close database. this method will block until all opended transaction be commited or rollbacked.
+      *
+      * @return
+      */
     def close(): Try[Boolean] =
         try 
             rwLock.writeLock().lock()
@@ -142,14 +164,25 @@ class DB(val path:String,val ops:Options):
     //
     def sync():Unit = None
 
-    // 打开一个事务
+    /**
+      * open a transaction.
+      *
+      * @param writable
+      * @return
+      */
     def begin(writable:Boolean):Try[Transaction] =
         if writable then
             beginRWTx()
         else
             beginRTx()
+    def tryBegin(writable:Boolean,timeout:Int):Try[Transaction] = Success(null)
         
-    // 执行一个读写事务
+    /**
+      * try to exec a read-write transaction.
+      *
+      * @param op
+      * @return
+      */
     def update(op:(Transaction)=>Unit):Try[Boolean] =
         beginRWTx() match
             case Failure(e) => Failure(e)
@@ -167,7 +200,12 @@ class DB(val path:String,val ops:Options):
                         Failure(e)
                 finally
                     tx.rollbackTx()
-    // 执行一个只读事务
+    /**
+      * try to exec a read-only transaction.
+      *
+      * @param op
+      * @return
+      */
     def view(op:(Transaction)=>Unit):Try[Boolean] =
         beginRTx() match
             case Failure(exception) => Failure(exception)
@@ -187,7 +225,11 @@ class DB(val path:String,val ops:Options):
     // 创建一个数据库快照
     def snapshot(path:String):Try[Int] = Failure(new Exception("not implement snapshot now"))
 
-    // 打开一个读写事务
+    /**
+      * open a read-write transaction.
+      *
+      * @return
+      */
     private def beginRWTx():Try[Tx] =
         if ops.readonly then
             return Failure(new Exception("readonly mode,cannot create read write transaction"))
@@ -205,7 +247,11 @@ class DB(val path:String,val ops:Options):
             case e:Exception => Failure(e)
         finally
             metaLock.unlock()
-    // 打开一个只读事务
+    /**
+      * open a read-only transcation.
+      *
+      * @return
+      */
     private def beginRTx():Try[Tx] =
         try 
           metaLock.lock()
@@ -219,7 +265,10 @@ class DB(val path:String,val ops:Options):
           case e:Exception => Failure(e)
         finally
           metaLock.unlock()
-    // 释放已经关闭的读事务持有的pages
+    
+    /**
+      * release all pages,that has no more need by current opened transactions.
+      */
     private def free():Unit =
       rTx.sortWith((t1:Tx,t2:Tx) => t1.id < t2.id)
       var minid:Int = Int.MaxValue

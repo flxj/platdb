@@ -162,7 +162,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
             db.removeRTx()
 
         for (id,bk)<- blocks do
-            db.blockBuffer.revert(bk.uid)
+            db.blockBuffer.revert(bk.id)
         db = null
         meta = null
         root = new Bucket("",this)
@@ -190,7 +190,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
                     //rollbackTx()
                     throw new Exception(s"tx ${id} write freelist to db file failed")
                 meta.freelistId = id
-                db.blockBuffer.revert(bk.uid)
+                db.blockBuffer.revert(bk.id)
     // write all dirty blocks to db file
     private def writeBlock():Unit =
         var arr = new ArrayBuffer[Block]()
@@ -208,7 +208,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
             case e:Exception => throw e
         finally
             for (_,bk) <- blocks do
-                db.blockBuffer.revert(bk.uid)
+                db.blockBuffer.revert(bk.id)
  
     // write meta blocks to db file
     private def writeMeta():Unit  =
@@ -223,7 +223,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
         catch
             case e:Exception => throw e
         finally
-            db.blockBuffer.revert(bk.uid)
+            db.blockBuffer.revert(bk.id)
     // return the max pageid
     private[platdb] def maxPageId:Int = meta.pageId
     // get block by bid
@@ -250,8 +250,8 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
         if size%osPageSize!=0 then n+=1
         // try to allocate space from frreelist
         var pgid = db.freelist.allocate(id,n)
-        // if freelist not have space,we need allocate from db tail and grow the db file
-        if pgid == 0 then
+        // if freelist not have space,we need allocate from db tail and grow the db file.
+        if pgid < 0 then
             pgid = meta.pageId
             meta.pageId+=n
         pgid

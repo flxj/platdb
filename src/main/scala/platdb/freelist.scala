@@ -3,17 +3,17 @@ package platdb
 import java.nio.ByteBuffer
 import scala.collection.mutable.{ArrayBuffer,Map}
 import scala.util.control.Breaks._
-
-val metaElementSize = 32
+import platdb.Meta.elementSize
 
 private[platdb] object Meta:
+    val elementSize = 32
     def readFromBytes(data:Array[Byte]):Option[Meta] =
-        if data.length < blockHeaderSize+metaElementSize then
+        if data.length < Block.headerSize+ elementSize then
             throw new Exception("illegal meta data")
-        Block.unmarshalHeader(data.slice(0,blockHeaderSize)) match
+        Block.unmarshalHeader(data.slice(0,Block.headerSize)) match
             case None => throw new Exception("parse block header data failed")
             case Some(hd) =>
-                var bk = new Block(0,data.length)
+                var bk = new Block(data.length)
                 bk.header = hd
                 bk.write(0,data)
                 return read(bk)
@@ -21,11 +21,11 @@ private[platdb] object Meta:
     def read(bk:Block):Option[Meta] =
         if bk.header.flag!= metaType then 
             return None 
-        bk.tail match
+        bk.getBytes() match
             case None => None 
             case Some(data) => 
                 var meta = new Meta(bk.id)
-                if data.length!=metaElementSize then
+                if data.length!= elementSize then
                     return None 
                 var arr = new Array[Int](6)
                 var s:Long = 0
@@ -46,7 +46,7 @@ private[platdb] object Meta:
                 Some(meta)
 
     def marshal(meta:Meta):Array[Byte] =
-        var buf:ByteBuffer = ByteBuffer.allocate(metaElementSize)
+        var buf:ByteBuffer = ByteBuffer.allocate(elementSize)
         buf.putInt(meta.pageSize)
         buf.putInt(meta.freelistId)
         buf.putInt(meta.pageId)
@@ -64,7 +64,7 @@ private[platdb] class Meta(val id:Int) extends Persistence:
     var txid:Int = -1
     var root:bucketValue = null
 
-    def size():Int = blockHeaderSize+metaElementSize
+    def size():Int = Block.headerSize+ elementSize
     def writeTo(bk:Block):Int =
         bk.header.pgid = id 
         bk.header.flag = flags
@@ -84,34 +84,38 @@ private[platdb] class Meta(val id:Int) extends Persistence:
         m.root = new bucketValue(root.root,root.count,root.sequence)
         m
 
-val freelistHeaderSize = 8
-val freelistElementSize = 8
-val freelistTypeList = 0
-val freelistTypeHash = 1
-
 // record freelist basic info, for example, count | type
 private[platdb] case class FreelistHeader(count:Int,ftype:Int)
-// record a file free page fragement
+// record a file free page fragement.
 private[platdb] case class FreeFragment(start:Int,end:Int,length:Int)
-// record a file pages free claim about a version txid
+// record a file pages free claim about a version txid.
 private[platdb] case class FreeClaim(txid:Int, ids:ArrayBuffer[FreeFragment])
 
-// freelist implement
+// freelist implement.
 private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
     var idle:ArrayBuffer[FreeFragment] = new ArrayBuffer[FreeFragment]()
     var unleashing:ArrayBuffer[FreeClaim] = new ArrayBuffer[FreeClaim]()
-    var allocated:Map[Int,ArrayBuffer[FreeFragment]] = Map[Int,ArrayBuffer[FreeFragment]]() // 记录事务的page分配情况
+    // trace allocated pages for tx.
+    var allocated:Map[Int,ArrayBuffer[FreeFragment]] = Map[Int,ArrayBuffer[FreeFragment]]() 
 
     def size():Int = 
-        var sz = blockHeaderSize + freelistHeaderSize + idle.length*freelistElementSize
+        var sz = Block.headerSize + Freelist.headerSize + idle.length*Freelist.elementSize
         for fc <- unleashing do
-            sz+= fc.ids.length*freelistElementSize
+            sz+= fc.ids.length*Freelist.elementSize
         sz 
     
-    // 将unleashing集合中所有txid值在区间[start,end]中的freeClaim的ids移动到idle队列
-    // 下一个写事务在开始执行之前会尝试调用freelist释放pending中的page, 只要pending中待释放的版本小于当前打开的只读事务持有的最小版本
-    // ，那末就可以释放这些pending元素 （表示当前肯定已经没有只读事务在持有这些待释放pages了）
-    // 同时当前已经打开的只读事务持有的版本可能跨度较大， 那末对于两个相邻版本之间的版本， 如果已经没有事务在持有它，那末也是可以释放的
+    /**
+      * Release page: move all pages about txid from pending queue to idle queue.
+      * 
+      * the next write transaction will try to call the Freelist Unleash method to free the pages in the pending before starting execution, 
+      * and as long as the version to be released in the pending is less than the minimum version held by the currently open read-only transaction, 
+      * then the pending elements can be released (indicating that there are definitely no read-only transactions holding the pending pages anymore)
+      * at the same time, the version held by the currently open read-only transaction may span a large span, so for pages between two adjacent versions, 
+      * if no transaction is already holding it, then it can also be released
+      *
+      * @param start
+      * @param end
+      */
     def unleash(start:Int,end:Int):Unit =
         if start > end then return None
         unleashing.sortWith((c1:FreeClaim,c2:FreeClaim) => c1.txid < c2.txid)
@@ -126,8 +130,15 @@ private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
         unleashing = unleashing.slice(0,i) ++ unleashing.takeRight(j+1)
         idle = reform()
 
-    // 释放以startid为起始pageid的(tail+1)个连续的page空间
-    // 写事务提交后可能会释放一些page, 这会在freelist的pending中添加一条记录 'txid: pageids' 表示txid版本的这些pageids需要释放
+    /**
+      * Free up (tail+1) consecutive page spaces starting with startid.
+      * Some pages may be released after a write transaction commited, 
+      * and these pages will add a record 'txid: pageids' to the freelist's pending list to indicate that these pages with version number txid need to be freed.
+      *
+      * @param txid
+      * @param startid
+      * @param tail
+      */
     def free(txid:Int,startid:Int,tail:Int):Unit = 
         val ff = FreeFragment(startid,startid+tail,tail+1)
         var idx = -1
@@ -144,13 +155,20 @@ private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
             fc.ids+=ff
             unleashing+=fc 
 
-    // 分配大小为n*pageSize的连续空间，并返回第一个page空间的pgid, 如果当前idle列表内没有满足条件的空间，那么应该尝试增长文件，并将新增长的
+    /**
+      * Allocate contiguous space of size n*osPageSize and return the id of the first page, 
+      * if there is no space in the current idle list that meets the conditions, it will return -1
+      * (in this case, you need to allocate space from the end of the file and grow the file)
+      *
+      * @param txid
+      * @param n
+      * @return pgid
+      */
     def allocate(txid:Int,n:Int):Int = 
         var i = 0
         while i<idle.length && n>idle(i).length do
             i+=1
         if i>=idle.length then
-            // TODO 应该将最大的pgid+1分配给当前请求
             return -1
         val ff = idle(i)
         if n == ff.length then
@@ -166,16 +184,16 @@ private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
             allocated(txid) +=  FreeFragment(ff.start,start-1,n)
         ff.start  
 
-    // 回滚对txid相关的释放/分配操作
+    // rollback pages release/allocate operations about txid.
     def rollback(txid:Int):Unit =
-        // 归还已经分配的pages到idle
+        // return the assigned pages to the idle list.
         allocated.remove(txid) match
             case None => None
             case Some(fs) =>
                 idle++=fs
                 idle = reform()
         
-        // 撤销已经释放的声明
+        // retract the statement about the release of pages.
         var idx = -1
         breakable(
             for i <- 0 until unleashing.length do
@@ -186,20 +204,21 @@ private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
         if idx >=0 then
             unleashing = unleashing.slice(0,idx)++unleashing.takeRight(idx+1)
 
-    // 当释放一个版本的page,需要将对应的freefragment 插入idle，并排序
     private def reform():ArrayBuffer[FreeFragment] =
         var arr = new Array[FreeFragment](idle.length)
         idle.copyToArray(arr,0)
         arr.sortWith((f1:FreeFragment,f2:FreeFragment) => f1.start < f2.start)
         makeIdle(arr)
-    // merge unleashing and idle:
+
+    // merge unleashing and idle list.
     private def merge():ArrayBuffer[FreeFragment] = 
         var arr = new Array[FreeFragment](idle.length)
         idle.copyToArray(arr,0)
         for fc <- unleashing do
             arr++=fc.ids 
         makeIdle(arr) 
-    // merge FreeFragment array and sort it by pgid
+    
+    // merge FreeFragment array elements and sort it by pgid.
     private def makeIdle(arr:Array[FreeFragment]):ArrayBuffer[FreeFragment] =
         arr.sortWith((f1:FreeFragment,f2:FreeFragment) => f1.start < f2.start)
         // merge
@@ -228,48 +247,53 @@ private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
 
         val ids = merge() 
         bk.append(Block.marshalHeader(bk.header))
-        bk.append(Freelist.marshalHeader(new FreelistHeader(ids.length,freelistTypeList)))
+        bk.append(Freelist.marshalHeader(new FreelistHeader(ids.length,Freelist.listType)))
         for ff <- ids do
             bk.append(Freelist.marshalElement(ff))
         size()
 
 private[platdb] object Freelist:
-    def headerSize:Int = blockHeaderSize + freelistHeaderSize
+    val headerSize = 8
+    val elementSize = 8
+    val listType = 0
+    val hashType = 1
+    
     def read(bk:Block):Option[Freelist] = 
         if bk.header.flag!=freelistType then 
             throw new Exception(s"block type is not freelist ${bk.header.flag}") 
-        bk.tail match
+        
+        bk.getBytes() match
             case None => None 
             case Some(data) => 
                 var freelist = new Freelist(bk.header)
                 freelist.header = bk.header
-                if data.length < freelistHeaderSize then
+                if data.length < Freelist.headerSize then
                     throw new Exception("illegal freelist header data") 
-                unmarshalHeader(data.slice(0,freelistHeaderSize)) match
+                unmarshalHeader(data.slice(0,Freelist.headerSize)) match
                     case None => throw new Exception("illegal freelist header data")
                     case Some(hd) =>
-                        if data.length != freelistHeaderSize+(hd.count*freelistElementSize) then
+                        if data.length != Freelist.headerSize+(hd.count*Freelist.elementSize) then
                             throw new Exception("illegal freelist data") 
                         freelist.idle = new ArrayBuffer[FreeFragment]()
                         freelist.unleashing = new ArrayBuffer[FreeClaim]()
                         freelist.allocated = Map[Int,ArrayBuffer[FreeFragment]]()
 
-                        var idx = freelistHeaderSize+freelistElementSize
+                        var idx = Freelist.headerSize+Freelist.elementSize
                         while idx <= data.length do
-                            unmarshalElement(data.slice(idx-freelistElementSize,idx)) match
+                            unmarshalElement(data.slice(idx-Freelist.elementSize,idx)) match
                                 case None => throw new Exception("illegal freelist element data")
                                 case Some(ff) =>
                                     freelist.idle+=ff 
                         return Some(freelist)
         None 
-    // 从原始data
+    // parse freelist from raw bytes data.
     def readFromBytes(data:Array[Byte]):Option[Freelist] =
-        if data.length < headerSize then
+        if data.length < Block.headerSize + Freelist.headerSize then
             throw new Exception("illegal freelist data")
-        Block.unmarshalHeader(data.slice(0,blockHeaderSize)) match
+        Block.unmarshalHeader(data.slice(0,Block.headerSize)) match
             case None => throw new Exception("parse block header data failed")
             case Some(hd) =>
-                var bk = new Block(0,data.length)
+                var bk = new Block(data.length)
                 bk.header = hd
                 bk.write(0,data)
                 return read(bk)
@@ -285,12 +309,22 @@ private[platdb] object Freelist:
         Some(FreelistHeader(count,ftype))
 
     def marshalHeader(hd:FreelistHeader):Array[Byte] = 
-        // TODO not use bytebuffer
-        var buf:ByteBuffer = ByteBuffer.allocate(freelistHeaderSize)
+        /*
+        var buf:ByteBuffer = ByteBuffer.allocate(Freelist.headerSize)
         buf.putInt(hd.count)
         buf.putInt(hd.ftype)
         buf.array()
-    //
+        */
+        var c = hd.count
+        var t = hd.ftype
+        var arr = new Array[Byte](headerSize)
+        for i <- 0 to 3 do
+            arr(3-i) = (c & 0xff).toByte
+            arr(7-i) = (t & 0xff).toByte
+            c = c >> 8
+            t = t >> 8
+        arr
+
     def unmarshalElement(data:Array[Byte]):Option[FreeFragment] =
         var s = 0
         var e = 0
@@ -302,8 +336,20 @@ private[platdb] object Freelist:
         Some(FreeFragment(s,e,e-s+1))
     //
     def marshalElement(ff:FreeFragment):Array[Byte] = 
-        // TODO not use bytebuffer
-        var buf:ByteBuffer = ByteBuffer.allocate(freelistElementSize)
+        /*
+        var buf:ByteBuffer = ByteBuffer.allocate(elementSize)
         buf.putInt(ff.start)
         buf.putInt(ff.end)
         buf.array()
+        */
+        var s = ff.start
+        var e = ff.end
+        var arr = new Array[Byte](elementSize)
+        for i <- 0 to 3 do
+            arr(3-i) = (s & 0xff).toByte
+            arr(7-i) = (e & 0xff).toByte
+            s = s >> 8
+            e = e >> 8
+        arr
+
+

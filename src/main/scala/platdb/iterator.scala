@@ -38,12 +38,18 @@ private[platdb] class Record(var node:Option[Node],var block:Option[Block],var i
             case Some(bk) => return bk.header.count
         0
 
-// TODO private
-class bucketIter(private var bucket:Bucket) extends BucketIterator:
+private[platdb] class bucketIter(private var bucket:Bucket) extends BucketIterator:
     private var stack:List[Record] = _
-    // 将迭代器移动到第一个元素上，并返回key-value值
+    
+    /**
+      * moves the iterator to the first item in the bucket and returns its key and value.
+      * If the bucket is empty then a None key and None value are returned.
+      * The returned key and value are only valid for the life of the transaction.
+      *
+      * @return
+      */
     def first():(Option[String],Option[String]) = 
-        if bucket.closed then return (None,None) // TODO: bucket已经关闭的情况下，考虑直接抛出异常
+        if bucket.closed then return (None,None)
         stack = List[Record]()
         
         val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
@@ -51,7 +57,7 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
         moveToFirst()
         
         val r = stack.last
-        if r.count == 0 then // 如果定位到一个空节点，则需要移动到下一个节点
+        if r.count == 0 then // if located to a null node, need move to next item.
             moveToNext()
         
         current() match
@@ -60,8 +66,10 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
                 if f == bucketType then 
                     return (k,None)
                 return (k,v)
-        
-    // 移动到当前stack顶部元素所指向的子树的最右叶子节点
+    
+    /**
+      * from stack top element, top-down move to the rightest leaf node of the subtree. 
+      */
     private def moveToFirst():Unit = 
         var r = stack.last
         while r.isBranch do
@@ -79,22 +87,29 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
                 val (n,b) = bucket.nodeOrBlock(child) 
                 stack ::= new Record(n,b,0)
                 r = stack.last
-    // 移动到下一个叶子节点处，与next方法不同的一点是不会返回节点的值
+    /**
+      * move to next leaf node.
+      */
     private def moveToNext():Unit = 
-        if stack.length == 0 then return
+        if stack.length == 0 then return None
         var r = stack.last 
-        while r.count == 0 || r.index == r.count do // 退栈
+        while r.count == 0 || r.index == r.count do // back to upper level.
             stack = stack.init
             if stack.length == 0 then 
                 return 
             r = stack.last
-        r.index = r.index+1 // 移动index到下一个位置
+        r.index = r.index+1 // index move to next location,point to next subtree.
         stack = stack.init
         stack::=r
 
         moveToFirst()
 
-    // iter移动到下一个元素位置，并返回该节点key-value, 如果该元素是个嵌套子bucket,那么value为None
+    /**
+      * iterator move to next leaf node element, return the key and value.
+      * if the element is a subbucket,then the value is None.
+      *
+      * @return
+      */
     def next():(Option[String],Option[String]) = 
         if bucket.closed then return (None,None)
         moveToNext()
@@ -105,7 +120,6 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
                     return (k,None)
                 return (k,v)
 
-    // 判断是否还有下一个元素
     def hasNext(): Boolean =
         if bucket.closed || stack.length == 0 then 
             return false 
@@ -114,12 +128,19 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
         tmpStack :::=stack
         while tmpStack.length > 0 do 
             val r = tmpStack.last
-            if r.index < r.count then // 不论是叶节点还是分支节点，只要index还没有遍历完所有元素，就说明还有下一个
+            // whenever leaf node and branch node, as long as the index not traverse all element,then there must be successor elements.
+            if r.index < r.count then 
                 return true 
             tmpStack = tmpStack.init
         false 
 
-    // iter移动到最后一个元素位置，并返回该元素的key-vaklue,如果该元素是个嵌套子bucket,那么value为None
+    /**
+      * moves the iterator to the latest item in the bucket and returns its key and value.
+      * If the bucket is empty then a None key and None value are returned.
+      * The returned key and value are only valid for the life of the transaction.
+      *
+      * @return
+      */
     def last():(Option[String],Option[String])  = 
         if bucket.closed then return (None,None)
         stack = List[Record]()
@@ -138,7 +159,13 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
                 if f == bucketType then 
                     return (k,None)
                 return (k,v)
-    // iter移动到前一个元素位置，并返回该元素的key-vaklue,如果该元素是个嵌套子bucket,那么value为None
+    
+    /**
+      * iterator move to prev leaf node element, return the key and value.
+      * if the element is a subbucket,then the value is None.
+      *
+      * @return
+      */
     def prev():(Option[String],Option[String]) = 
         if bucket.closed then return (None,None) 
         moveToPrev()
@@ -157,7 +184,8 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
         tmpStack :::=stack
         while tmpStack.length > 0 do 
             val r = tmpStack.last
-            if r.index > 0 then // 不论是叶节点还是分支节点，只要index还没有逆序遍历完所有元素，就说明还有前一个
+            // whenever leaf node and branch node, as long as the index not reverse traverse all element,then there must be precursor  elements.
+            if r.index > 0 then 
                 return true
             tmpStack = tmpStack.init
         false 
@@ -177,7 +205,7 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
                         case Some(e) => child = e.child 
                         case None => return 
             if child>1 then 
-                val (n,b) = bucket.nodeOrBlock(child)  // pageId等于0或1的位置是为meta预留的
+                val (n,b) = bucket.nodeOrBlock(child)  // page id 0 or 1 reserved for meta.
                 var r = new Record(n,b,0)
                 r.index = r.count -1 
                 stack ::= r
@@ -185,27 +213,32 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
     private def moveToPrev():Unit =
         if stack.length == 0 then return
         var r = stack.last 
-        while r.count == 0 || r.index == 0 do // 退栈
+        while r.count == 0 || r.index == 0 do
             stack = stack.init
             if stack.length == 0 then 
                 return 
             r = stack.last
-        r.index = r.index-1 // 移动index到前一个位置(前一个子树)
+        r.index = r.index-1 // index point to prev subtree. 
         stack = stack.init
         stack ::= r  
         
-        moveToLast() // 移动到当前子树的最大节点处
-     
-    // 尝试将游标移动到key对应的元素上，并返回元素的值
-    // 如果key不存在，则返回下一个元素（如果下一个元素为空，则返回空值）
-    // 如果key是嵌套bucket，那末也返回None
+        moveToLast() // move to current subtree rightest element.
+    
+    /**
+      * moves the iterator to a given key and returns it.
+      * If the key does not exist then the next key is used. If no keys follow, a None key is returned.
+      * The returned key and value are only valid for the life of the transaction.
+      *
+      * @param key
+      * @return
+      */
     def find(key:String):(Option[String],Option[String]) = 
         if bucket.closed then return (None,None)
         stack = List[Record]()
         seek(key,bucket.bkv.root)
         
         val r = stack.last
-        if r.index >= r.count then // 一直定位到了当前叶子节点的最大值处，需要移动到下一个位置处
+        if r.index >= r.count then
             moveToNext()
         
         current() match 
@@ -260,7 +293,7 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
             case None =>
                 seekOnBlock(key,r.block)
     
-    // 在叶节点上搜索
+    // search in leaf node.
     private def seekOnLeaf(key:String):Unit =
         var r = stack.last
         r.node match 
@@ -278,7 +311,7 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
                         stack ::= r
                     case None => return None
     
-    // 在分支节点上搜索
+    // search in branch node.
     private def seekOnNode(key:String,node:Node):Unit =
         var hit:Boolean = false
         var idx = node.elements.indexWhere((e:NodeElement)=> e.key>=key)
@@ -294,7 +327,7 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
         stack ::= r
         seek(key,node.elements(idx).child)
     
-    // 在分支block上搜索
+    // search in branch block.
     private def seekOnBlock(key:String,block:Option[Block]):Unit =
         bucket.nodeElements(block) match
             case None => return None
@@ -313,7 +346,7 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
                 stack ::= r
                 seek(key,elems(idx).child)
                 
-    // 返回当前栈顶节点
+    // return current stack top node.
     private[platdb] def node():Option[Node] = 
         if stack.length == 0 then return None 
         var r= stack.last
@@ -337,7 +370,7 @@ class bucketIter(private var bucket:Bucket) extends BucketIterator:
                                 r.node = Some(node)
                                 n = node 
                             case None => return None 
-        // 自根节点向下搜索
+        // top-down search from root.
         breakable(
             for r <- stack.tail do 
                 bucket.getNodeChild(n,r.index) match
