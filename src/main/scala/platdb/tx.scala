@@ -179,7 +179,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
         bk.setid(pgid)
         db.freelist.writeTo(bk)
         if meta.pageId > tailId then
-            db.growTo((meta.pageId+1)*osPageSize) match
+            db.growTo((meta.pageId+1)*DB.pageSize) match
                 case Success(_) => None
                 case Failure(e) => throw new Exception(s"write freelist failed:${e.getMessage()}")
         // write new freelsit to file
@@ -246,8 +246,8 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
                 db.freelist.free(id,bk.header.pgid,bk.header.overflow)
     // allocate page space according size 
     private[platdb] def allocate(size:Int):Int =
-        var n = size/osPageSize
-        if size%osPageSize!=0 then n+=1
+        var n = size/DB.pageSize
+        if size%DB.pageSize!=0 then n+=1
         // try to allocate space from frreelist
         var pgid = db.freelist.allocate(id,n)
         // if freelist not have space,we need allocate from db tail and grow the db file.

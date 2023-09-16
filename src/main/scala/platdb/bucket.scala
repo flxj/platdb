@@ -27,7 +27,16 @@ private[platdb] class bucketValue(var root:Int,var count:Int,var sequence:Long):
     override def toString(): String = new String(BTreeBucket.marshal(this))
     override def clone:bucketValue = new bucketValue(root,count,sequence)
 
-//
+/*
+const (
+	minFillPercent = 0.1
+	maxFillPercent = 1.0
+)
+
+// DefaultFillPercent is the percentage that split pages are filled.
+// This value can be changed by setting Bucket.FillPercent.
+const DefaultFillPercent = 0.5
+*/
 private[platdb] object BTreeBucket:
     /** bucket value size when convert byte array.  */
     val valueSize:Int = 16
@@ -521,7 +530,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         // We no longer need the child list because it's only used for spill tracking.
         node.children = new ArrayBuffer[Node]()
         // split current node.
-        for n <- splitNode(node,osPageSize) do 
+        for n <- splitNode(node,DB.pageSize) do 
             if n.id > 0 then 
                 tx.free(n.id)
                 n.header.pgid = 0

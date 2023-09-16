@@ -15,10 +15,12 @@ case class Options(val timeout:Int,val bufSize:Int,val readonly:Boolean)
 
 // global options
 object DB:
-    val maxKeySize = 10000
-    val maxValueSize = 10000
+    val maxKeySize = 32768
+    val maxValueSize = (1 << 31) - 2
     val defaultBufSize = 128
-    var pageSize:Int = osPageSize
+    val defaultPageSize = 4096
+    val defaultTimeout = 50000
+    var pageSize = defaultPageSize
 
     val exceptionTxClosed = new Exception("transaction is closed")
     val exceptionOpNotAllow = new Exception("readonly transaction not allow current operation")
@@ -26,9 +28,10 @@ object DB:
     val exceptionKeyTooLarge = new Exception(s"key is too large,limit $maxKeySize")
     val exceptionValueTooLarge = new Exception(s"value is too large,limit $maxValueSize")
     val exceptionValueNotFound = new Exception("value not found")
-
 //
-class DB(val path:String,val ops:Options):
+given defaultOptions:Options = Options(DB.defaultTimeout,DB.defaultBufSize,false) 
+//
+class DB(val path:String)(using ops:Options):
     private[platdb] var fileManager:FileManager = null
     private[platdb] var freelist:Freelist = null
     private[platdb] var blockBuffer:BlockBuffer = null
@@ -64,6 +67,7 @@ class DB(val path:String,val ops:Options):
           
             // read meta info.
             meta = loadMeta(0)
+            DB.pageSize = meta.pageSize
             metaLock = new ReentrantLock()
           
             rTx = new ArrayBuffer[Tx]()
@@ -85,12 +89,12 @@ class DB(val path:String,val ops:Options):
         for i<- 0 to 1 do
             var m = new Meta(i)
             m.flags = metaType
-            m.pageSize = osPageSize
+            m.pageSize = DB.defaultPageSize
             m.txid = 0
             m.freelistId = 2
             m.root = new bucketValue(3,0,0)
 
-            var bk = blockBuffer.get(osPageSize)
+            var bk = blockBuffer.get(DB.defaultPageSize)
             m.writeTo(bk)
             blockBuffer.write(bk) match
                 case Success(_) => None
@@ -98,7 +102,7 @@ class DB(val path:String,val ops:Options):
 
         // 2.create a null freelist and write to file.
         var fl = new Freelist(new BlockHeader(2,freelistType,0,0,0))
-        var fbk = blockBuffer.get(osPageSize)
+        var fbk = blockBuffer.get(DB.defaultPageSize)
         fl.writeTo(fbk)
         blockBuffer.write(fbk) match
             case Success(_) => None
@@ -106,7 +110,7 @@ class DB(val path:String,val ops:Options):
 
         // 3.craete null root bucket.
         var root = new Node(new BlockHeader(3,leafType,0,0,0))
-        var rbk = blockBuffer.get(osPageSize)
+        var rbk = blockBuffer.get(DB.defaultPageSize)
         root.writeTo(rbk)
         blockBuffer.write(rbk) match
             case Success(_) => None

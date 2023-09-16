@@ -174,7 +174,7 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
             bk.header.flag = branchType
         bk.header.count = elements.length
         bk.header.size = size()
-        bk.header.overflow = (size()+osPageSize)/osPageSize - 1
+        bk.header.overflow = (size()+DB.pageSize)/DB.pageSize - 1
         // update data.
         bk.append(Block.marshalHeader(bk.header))
         var idx = bk.size

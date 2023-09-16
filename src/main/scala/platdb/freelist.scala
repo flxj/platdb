@@ -240,8 +240,8 @@ private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
         bk.header.flag = freelistType
         bk.header.count = 1
         bk.header.size = size()
-        var ovf = (size()/osPageSize)-1
-        if size()%osPageSize!=0 then 
+        var ovf = (size()/DB.pageSize)-1
+        if size()%DB.pageSize!=0 then 
             ovf+=1
         bk.header.overflow = ovf
 

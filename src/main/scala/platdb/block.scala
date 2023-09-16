@@ -29,8 +29,6 @@ private[platdb] trait Persistence:
       */
     def writeTo(block:Block):Int
 
-val osPageSize:Int = 64 // 4096
-
 // block/node type
 val metaType:Int = 1
 val branchType:Int = 2
@@ -312,7 +310,7 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
         var reader:RandomAccessFile = null
         try 
             reader = new RandomAccessFile(file,"r")
-            reader.seek(id*osPageSize)
+            reader.seek(id*DB.pageSize)
             var data = new Array[Byte](size)
             if reader.read(data,0,size)!= size then
               throw new Exception("read size is unexpected")
@@ -328,7 +326,7 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
             throw new Exception("db file closed")
         if bid<0 then 
             throw new Exception(s"illegal block id ${bid}")
-        val offset = bid*osPageSize
+        val offset = bid*DB.pageSize
         var reader:RandomAccessFile = null
         try
             reader = new RandomAccessFile(file,"r")
@@ -343,7 +341,7 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
                 case None => throw new Exception(s"parse block header ${bid} error")
                 case Some(bhd) =>
                     // 3. get overflow value, then read continue pages of number overflow 
-                    val sz = (bhd.overflow+1)*osPageSize
+                    val sz = (bhd.overflow+1)*DB.pageSize
                     var data = new Array[Byte](sz)
                     if reader.read(data,0,sz) != sz then
                         throw new Exception("read block data size unexpected")
@@ -359,7 +357,7 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
             return true
         if bk.id <=1 && bk.btype != metaType then // TODO remove this check to tx
             throw new Exception(s"block type error ${bk.btype}")
-        writer.seek(bk.id*osPageSize)
+        writer.seek(bk.id*DB.pageSize)
         writer.write(bk.all)
         true
         
