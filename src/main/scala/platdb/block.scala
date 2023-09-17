@@ -17,6 +17,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock
 import scala.util.control.Breaks._
 import scala.collection.mutable.Map
 import scala.collection.mutable.ArrayDeque
+import java.nio.channels.OverlappingFileLockException
 
 private[platdb] trait Persistence:
     /** return object bytes size. */
@@ -30,20 +31,20 @@ private[platdb] trait Persistence:
     def writeTo(block:Block):Int
 
 // block/node type
-val metaType:Int = 1
-val branchType:Int = 2
-val leafType:Int = 3
-val freelistType:Int = 4
+private[platdb] val metaType:Int = 1
+private[platdb] val branchType:Int = 2
+private[platdb] val leafType:Int = 3
+private[platdb] val freelistType:Int = 4
 
 // node element type
-val bucketType:Int = 5
+private[platdb] val bucketType:Int = 5
 
 //
 private[platdb] class BlockHeader(var pgid:Int,var flag:Int,var count:Int,var overflow:Int,var size:Int)
 
 // uid 可能会用于blockBuffer pool管理block用
 private[platdb] class Block(val cap:Int):
-    var header:BlockHeader = null
+    var header:BlockHeader = new BlockHeader(-1,0,0,0,0)
     private var data:ArrayBuffer[Byte] = new ArrayBuffer[Byte](cap) // TODO:use Array[Byte] ?
     private var idx:Int = 0 // index of the data tail.
      
@@ -54,7 +55,7 @@ private[platdb] class Block(val cap:Int):
     def capacity:Int = data.length
     // block type.
     def btype:Int = header.flag 
-    def setid(id:Int):Unit = header.pgid = id 
+    def setid(id:Int):Unit = header.pgid = id
     def reset():Unit = idx = 0
     def write(offset:Int,d:Array[Byte]):Unit =
         if offset<0 || d.length == 0 then 
@@ -258,50 +259,95 @@ private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
 // 
 private[platdb] class FileManager(val path:String,val readonly:Boolean):
     var opend:Boolean = false
+    var lockpath:String = ""
+    var lockfile:File = null
+    var lock:Option[FileLock] = None
+
     var file:File = null
-    var writer:RandomAccessFile = null // writer
-    var channel:FileChannel = null
-    var lock:FileLock = null
+    var writer:Option[RandomAccessFile] = None // writer
+    
     //
     def size:Long = 
         if !opend then 
             throw new Exception(s"file ${path} not open")
         file.length()
+    
     // open and lock.
     def open(timeout:Int):Unit =
         if opend then return None 
-        file = new File(path)
-        if !file.exists() then
-            file.createNewFile()
+        val i = path.lastIndexOf("\\") // TODO windows
+        if i>=0 then
+            lockpath = path.substring(0,i) +"\\db.lock"
+        else
+            throw new Exception(s"illegal db file path ${path}")
+        
         var mode:String = "rw"
         if readonly then
             mode = "r"
-        writer = new RandomAccessFile(file,mode)
-        channel = writer.getChannel()
+        lockfile = new File(lockpath)
+        if !lockfile.exists() then
+            lockfile.createNewFile()
         
+        var accesser:RandomAccessFile = null
         val start = new Date()
         while !opend do
-            lock = channel.tryLock(0L,Long.MaxValue,readonly)
-            if lock != null then
-                opend = true
-            else
-                val now = new Date()
-                val d = now.getTime() - start.getTime()
-                if d/1000 > timeout then
-                    throw new Exception(s"open database timeout:${timeout}s")
+            try 
+                accesser = new RandomAccessFile(lockfile,mode)
+                var channel = accesser.getChannel()
+                val lk = channel.tryLock(0L,Long.MaxValue,readonly)
+                if lk != null then
+                    file = new File(path)
+                    if !file.exists() then
+                        if readonly then
+                            lk.release()
+                            throw new Exception(s"db file not exists ${path}")
+                        file.createNewFile()
+                    lock = Some(lk)
+                    opend = true
+                    if !readonly then
+                        writer = Some(new RandomAccessFile(file,mode))
+                else
+                    val now = new Date()
+                    if  now.getTime() - start.getTime() > timeout then
+                        throw new Exception(s"open database timeout:${timeout}ms")
+            catch
+                case e:OverlappingFileLockException =>
+                    val now = new Date()
+                    if  now.getTime() - start.getTime() > timeout then
+                        throw new Exception(s"open database timeout:${timeout}ms")
+                case e:Exception => throw e
+    
     // close and unlock.
     def close():Unit =
         if !opend then
             return None
-        channel.close()
-        writer.close()
-        lock.release()
+        lock match
+            case Some(lk) => lk.release()
+            case None => None 
+        writer match
+            case Some(w) => w.close()
+            case None => None
+        lock = None
+        writer = None
         opend = false
+    
     // grow file.
     def grow(sz:Long):Unit = 
-        if sz <= size then return None
+        if readonly then
+            throw new Exception("readonly mode not allow grow file.")
+        if sz <= size then 
+            return None
+        var w:RandomAccessFile = null
+        writer match
+            case Some(wr) => w = wr
+            case None => 
+                w = new RandomAccessFile(file,"rw")
+                writer = Some(w)
+        var channel = w.getChannel()
         channel.truncate(sz)
-    
+        channel.close()
+
+    //
     def readAt(id:Int,size:Int):Array[Byte] =
         if !opend then
             throw new Exception("db file closed")
@@ -313,7 +359,7 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
             reader.seek(id*DB.pageSize)
             var data = new Array[Byte](size)
             if reader.read(data,0,size)!= size then
-              throw new Exception("read size is unexpected")
+                throw new Exception("read size is unexpected")
             data
         catch
             case e:Exception => throw e
@@ -353,11 +399,22 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
     def write(bk:Block):Boolean = 
         if !opend then
             throw new Exception("db file closed")
+        if readonly then
+            throw new Exception("readonly mode not allow write.")
         if bk.size == 0 then 
             return true
+        if bk.id < 0 then
+            throw new Exception(s"block type error: block id is ${bk.id}")
         if bk.id <=1 && bk.btype != metaType then // TODO remove this check to tx
-            throw new Exception(s"block type error ${bk.btype}")
-        writer.seek(bk.id*DB.pageSize)
-        writer.write(bk.all)
+            throw new Exception(s"block type error: block id is ${bk.id} type is ${bk.btype}")
+        
+        var w:RandomAccessFile = null
+        writer match
+            case Some(wr) => w = wr 
+            case None =>
+                w = new RandomAccessFile(file,"rw")
+                writer = Some(w)
+        w.seek(bk.id*DB.pageSize)
+        w.write(bk.all)
         true
         

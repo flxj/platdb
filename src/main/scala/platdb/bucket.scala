@@ -118,7 +118,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         if tx.closed then
             return Failure(DB.exceptionTxClosed) 
         else if !tx.writable then 
-            return Failure(DB.exceptionOpNotAllow) 
+            return Failure(DB.exceptionNotAllowOp) 
         else if key.length == 0 then
             return Failure(DB.exceptionKeyIsNull)
         else if  key.length>=DB.maxKeySize then
@@ -151,7 +151,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         if tx.closed then
             return Failure(DB.exceptionTxClosed) 
         else if !tx.writable then 
-            return Failure(DB.exceptionOpNotAllow) 
+            return Failure(DB.exceptionNotAllowOp) 
         else if key.length <=0 then
             return Failure(DB.exceptionKeyIsNull) 
         
@@ -215,7 +215,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         if tx.closed then
             return Failure(DB.exceptionTxClosed) 
         else if !tx.writable then 
-            return Failure(DB.exceptionOpNotAllow) 
+            return Failure(DB.exceptionNotAllowOp) 
         else if name.length()<=0 then 
             return Failure(DB.exceptionKeyIsNull)
         else if name.length() >= DB.maxKeySize then
@@ -263,7 +263,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         if tx.closed then
             return Failure(DB.exceptionTxClosed) 
         else if !tx.writable then 
-            return Failure(DB.exceptionOpNotAllow)  
+            return Failure(DB.exceptionNotAllowOp)  
         else if name.length()<=0 then 
             return Failure(DB.exceptionKeyIsNull)
         else if name.length() >= DB.maxKeySize then
@@ -282,7 +282,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         if tx.closed then
             return Failure(DB.exceptionTxClosed)  
         else if !tx.writable then 
-            return Failure(DB.exceptionOpNotAllow)
+            return Failure(DB.exceptionNotAllowOp)
         else if name.length()<=0 then 
             return Failure(DB.exceptionKeyIsNull)
         else if name.length() >= DB.maxKeySize then

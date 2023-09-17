@@ -168,6 +168,7 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
         idx
     def writeTo(bk:Block):Int =
         // update header.
+        bk.header.pgid = id
         if isLeaf then 
             bk.header.flag = leafType
         else 

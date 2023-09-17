@@ -19,15 +19,17 @@ object DB:
     val maxValueSize = (1 << 31) - 2
     val defaultBufSize = 128
     val defaultPageSize = 4096
-    val defaultTimeout = 50000
+    val defaultTimeout = 2000 // 2s
     var pageSize = defaultPageSize
 
     val exceptionTxClosed = new Exception("transaction is closed")
-    val exceptionOpNotAllow = new Exception("readonly transaction not allow current operation")
+    val exceptionNotAllowOp = new Exception("readonly transaction not allow current operation")
     val exceptionKeyIsNull = new Exception("param key is null")
     val exceptionKeyTooLarge = new Exception(s"key is too large,limit $maxKeySize")
     val exceptionValueTooLarge = new Exception(s"value is too large,limit $maxValueSize")
     val exceptionValueNotFound = new Exception("value not found")
+    val exceptionDBClosed = new Exception("db is closed")
+    val exceptionNotAllowRWTx = new Exception("readonly mode,cannot create read write transaction")
 //
 given defaultOptions:Options = Options(DB.defaultTimeout,DB.defaultBufSize,false) 
 //
@@ -36,11 +38,11 @@ class DB(val path:String)(using ops:Options):
     private[platdb] var freelist:Freelist = null
     private[platdb] var blockBuffer:BlockBuffer = null
     private[platdb] var meta:Meta = null
-    private var rTx:ArrayBuffer[Tx] = null
+    private var rTx:ArrayBuffer[Tx] = new ArrayBuffer[Tx]()
     private var rwTx:Option[Tx] = None 
     private var openFlag:Boolean = false
-    private var rwLock:ReentrantReadWriteLock = null
-    private var metaLock:ReentrantLock = null
+    private var rwLock:ReentrantReadWriteLock = new ReentrantReadWriteLock()
+    private var metaLock:ReentrantLock = new ReentrantLock()
 
     def name:String = path
     def isReadonly:Boolean = ops.readonly
@@ -68,13 +70,13 @@ class DB(val path:String)(using ops:Options):
             // read meta info.
             meta = loadMeta(0)
             DB.pageSize = meta.pageSize
-            metaLock = new ReentrantLock()
+            //metaLock = new ReentrantLock()
           
             rTx = new ArrayBuffer[Tx]()
             if !ops.readonly then
                 // read freelist info.
                 freelist = loadFreelist(meta.freelistId)
-                rwLock = new ReentrantReadWriteLock()
+                //rwLock = new ReentrantReadWriteLock()
           
             openFlag = true
             Success(openFlag)
@@ -103,7 +105,7 @@ class DB(val path:String)(using ops:Options):
         // 2.create a null freelist and write to file.
         var fl = new Freelist(new BlockHeader(2,freelistType,0,0,0))
         var fbk = blockBuffer.get(DB.defaultPageSize)
-        fl.writeTo(fbk)
+        val n = fl.writeTo(fbk) 
         blockBuffer.write(fbk) match
             case Success(_) => None
             case Failure(e) => throw e 
@@ -116,6 +118,7 @@ class DB(val path:String)(using ops:Options):
             case Success(_) => None
             case Failure(e) => throw e
         None
+    
     /**
       * read meta info from page.
       *
@@ -123,10 +126,10 @@ class DB(val path:String)(using ops:Options):
       * @return
       */
     private def loadMeta(id:Int):Meta =
-      val data = fileManager.readAt(id,meta.size())
-      Meta.readFromBytes(data) match
-        case None => throw new Exception(s"not found meta data from page ${id}")
-        case Some(m) => return m
+        val data = fileManager.readAt(id,Meta.size)
+        Meta.readFromBytes(data) match
+            case None => throw new Exception(s"not found meta data from page ${id}")
+            case Some(m) => return m
 
     /**
       * read freelist info from page.
@@ -142,6 +145,7 @@ class DB(val path:String)(using ops:Options):
           val data = fileManager.readAt(id,h.size)
           val bk = new Block(data.length)
           bk.header = h
+          bk.append(data)
           Freelist.read(bk) match
             case None => throw new Exception(s"not found freelist data from page ${id}")
             case Some(fl) => return fl
@@ -237,12 +241,12 @@ class DB(val path:String)(using ops:Options):
       */
     private def beginRWTx():Try[Tx] =
         if ops.readonly then
-            return Failure(new Exception("readonly mode,cannot create read write transaction"))
+            return Failure(DB.exceptionNotAllowRWTx)
         try 
             rwLock.writeLock().lock()
             metaLock.lock()
             if isClosed then
-                throw new Exception("db closed")
+                throw DB.exceptionDBClosed
             var tx = new Tx(false)
             tx.init(this)
             rwTx = Some(tx)
@@ -259,34 +263,34 @@ class DB(val path:String)(using ops:Options):
       */
     private def beginRTx():Try[Tx] =
         try 
-          metaLock.lock()
-          if isClosed then
-            throw new Exception("db closed")
-          var tx = new Tx(true)
-          tx.init(this)
-          rTx.addOne(tx)
-          Success(tx)
+            metaLock.lock()
+            if isClosed then
+                throw DB.exceptionDBClosed
+            var tx = new Tx(true)
+            tx.init(this)
+            rTx.addOne(tx)
+            Success(tx)
         catch
-          case e:Exception => Failure(e)
+            case e:Exception => Failure(e)
         finally
-          metaLock.unlock()
+            metaLock.unlock()
     
     /**
       * release all pages,that has no more need by current opened transactions.
       */
     private def free():Unit =
-      rTx.sortWith((t1:Tx,t2:Tx) => t1.id < t2.id)
-      var minid:Int = Int.MaxValue
-      if rTx.length > 0 then
-        minid = rTx(0).id
+        rTx.sortWith((t1:Tx,t2:Tx) => t1.id < t2.id)
+        var minid:Int = Int.MaxValue
+        if rTx.length > 0 then
+            minid = rTx(0).id
       
-      if minid >0 then
-        freelist.unleash(0,minid-1)
+        if minid >0 then
+            freelist.unleash(0,minid-1)
       
-      for tx <- rTx do
-        freelist.unleash(minid,tx.id-1)
-        minid = tx.id+1
-      freelist.unleash(minid,Int.MaxValue)
+        for tx <- rTx do
+            freelist.unleash(minid,tx.id-1)
+            minid = tx.id+1
+        freelist.unleash(minid,Int.MaxValue)
     // 
     private[platdb] def growTo(sz:Long):Try[Boolean] = 
         try
@@ -296,22 +300,22 @@ class DB(val path:String)(using ops:Options):
             case e:Exception => return Failure(new Exception(s"grow db failed:${e.getMessage()}"))
     //
     private[platdb] def removeTx(txid:Int):Unit =
-      var idx = -1
-      breakable(
-        for i <- 0 until rTx.length do
-            if txid == rTx(i).id then
-                idx = i
-                break()
-      )
-      if idx >=0 then
-        rTx.remove(idx,1)
-      else
-        rwTx match
-          case None => None
-          case Some(tx) => 
-            if tx.id == txid then
-              rwTx = None
-        None
+        var idx = -1
+        breakable(
+            for i <- 0 until rTx.length do
+                if txid == rTx(i).id then
+                    idx = i
+                    break()
+        )
+        if idx >=0 then
+            rTx.remove(idx,1)
+        else
+            rwTx match
+                case None => None
+                case Some(tx) => 
+                    if tx.id == txid then
+                        rwTx = None
+            None
     private[platdb] def removeRTx():Unit =
         rwTx = None
         rwLock.writeLock().unlock()

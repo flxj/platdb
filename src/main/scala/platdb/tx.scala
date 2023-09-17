@@ -259,6 +259,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
     // construct a block object according size, then set its id
     private[platdb] def makeBlock(id:Int,size:Int):Block = 
         var bk = db.blockBuffer.get(size)
+        bk.reset()
         bk.setid(id)
         blocks.addOne((id,bk))
         bk 

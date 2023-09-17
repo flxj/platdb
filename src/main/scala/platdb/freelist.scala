@@ -7,6 +7,7 @@ import platdb.Meta.elementSize
 
 private[platdb] object Meta:
     val elementSize = 32
+    def size:Int = Block.headerSize+elementSize
     def readFromBytes(data:Array[Byte]):Option[Meta] =
         if data.length < Block.headerSize+ elementSize then
             throw new Exception("illegal meta data")
@@ -59,7 +60,7 @@ private[platdb] object Meta:
 private[platdb] class Meta(val id:Int) extends Persistence:
     var pageSize:Int = 0
     var flags:Int = metaType
-    var freelistId:Int = -1// 记录freelist block的pgid
+    var freelistId:Int = -1
     var pageId:Int = -1
     var txid:Int = -1
     var root:bucketValue = null
@@ -71,6 +72,7 @@ private[platdb] class Meta(val id:Int) extends Persistence:
         bk.header.overflow = 0
         bk.header.count = 1
         bk.header.size = size()
+
         bk.append(Block.marshalHeader(bk.header))
         bk.write(bk.size,Meta.marshal(this))
         bk.size
@@ -237,6 +239,7 @@ private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
         mg
     //
     def writeTo(bk:Block):Int =
+        bk.header.pgid = header.pgid
         bk.header.flag = freelistType
         bk.header.count = 1
         bk.header.size = size()
@@ -266,21 +269,21 @@ private[platdb] object Freelist:
             case None => None 
             case Some(data) => 
                 var freelist = new Freelist(bk.header)
-                freelist.header = bk.header
-                if data.length < Freelist.headerSize then
-                    throw new Exception("illegal freelist header data") 
-                unmarshalHeader(data.slice(0,Freelist.headerSize)) match
+                //freelist.header = bk.header
+                if data.length < headerSize then
+                    throw new Exception(s"illegal freelist header data length ${data.length}") 
+                unmarshalHeader(data.slice(0,headerSize)) match
                     case None => throw new Exception("illegal freelist header data")
                     case Some(hd) =>
-                        if data.length != Freelist.headerSize+(hd.count*Freelist.elementSize) then
-                            throw new Exception("illegal freelist data") 
+                        if data.length != headerSize+(hd.count*elementSize) then
+                            throw new Exception(s"illegal freelist data length ${data.length}") 
                         freelist.idle = new ArrayBuffer[FreeFragment]()
                         freelist.unleashing = new ArrayBuffer[FreeClaim]()
                         freelist.allocated = Map[Int,ArrayBuffer[FreeFragment]]()
 
-                        var idx = Freelist.headerSize+Freelist.elementSize
+                        var idx = headerSize+elementSize
                         while idx <= data.length do
-                            unmarshalElement(data.slice(idx-Freelist.elementSize,idx)) match
+                            unmarshalElement(data.slice(idx-elementSize,idx)) match
                                 case None => throw new Exception("illegal freelist element data")
                                 case Some(ff) =>
                                     freelist.idle+=ff 
@@ -288,10 +291,10 @@ private[platdb] object Freelist:
         None 
     // parse freelist from raw bytes data.
     def readFromBytes(data:Array[Byte]):Option[Freelist] =
-        if data.length < Block.headerSize + Freelist.headerSize then
-            throw new Exception("illegal freelist data")
+        if data.length < Block.headerSize + headerSize then
+            throw new Exception(s"illegal freelist data length ${data.length}")
         Block.unmarshalHeader(data.slice(0,Block.headerSize)) match
-            case None => throw new Exception("parse block header data failed")
+            case None => throw new Exception("parse freelist block header data failed")
             case Some(hd) =>
                 var bk = new Block(data.length)
                 bk.header = hd
