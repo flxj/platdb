@@ -4,25 +4,38 @@ import java.nio.ByteBuffer
 import scala.collection.mutable.{ArrayBuffer}
 import scala.util.control.Breaks._
 
-/* node block construct:
+/* node storage construct on block:
 +------------------+-----------------------------------------+
 |     header       |                data                     |
 +------------------+-----------------+------------+----------+
 | block header     |    node indexs  |      node elements    |
 +------------------+-----------------+------------+----------+
 *
-* 一个节点元素将被转换为一个NodeIndex和一个Ayrray[Byte],其中NodeIndex存放到block的indexs区,array存放到elements区
 */
 
-// for branch node, the valSize field will be set as pgid.
+/** 
+  * for branch node, the valSize field will be set as pgid.
+  *
+  * @param flag
+  * @param offset
+  * @param keySize
+  * @param valSize
+  */
 private[platdb] case class NodeIndex(flag:Int,offset:Int,keySize:Int,valSize:Int)
 
-// for branch node element, its value filed is null,its falg field is 0;
-// for leaf node element, its child field is -1;
-// if the element is a bucketValue then its flag field is branchType otherwise is 0.
-private[platdb] class NodeElement(var flag:Int,var child:Int,var key:String,var value:String):
+/**
+  * for branch node element, its value filed is null,its falg field is 0;
+  * for leaf node element, its child field is -1;
+  * if the element is a bucketValue then its flag field is branchType otherwise is 0.
+  *
+  * @param flag
+  * @param child
+  * @param key
+  * @param value
+  */
+private[platdb] class NodeElement(var flag:Int,var child:Int,var key:String,var value:String): // TODO: use Array[Byte] as key,value type
     def keySize:Int = key.getBytes.length
-    def valueSize:Int = value.getBytes.length // TODO: 使用Array[Byte] 作为key,value字段类型
+    def valueSize:Int = value.getBytes.length
 
 /* Node is the representation of B+ tree nodes in memory.
 

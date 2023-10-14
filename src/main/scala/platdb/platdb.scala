@@ -21,7 +21,7 @@ import java.util.concurrent.locks.ReentrantLock
 case class Options(val timeout:Int,val bufSize:Int,val readonly:Boolean,val fillPercent:Double)
 
 /**
-  * 
+  * The DB object contains some default constant information as well as exception information.
   */
 object DB:
     val maxKeySize = 32768 // 32k
@@ -53,25 +53,33 @@ object DB:
     def isAlreadyExists(e:Exception):Boolean = false
 
 /**
-  * 
+  * Default DB configuration.
   */
 given defaultOptions:Options = Options(DB.defaultTimeout,DB.defaultBufSize,false,DB.defaultFillPercent)
 
 /**
-  * DB is
-  *
+  * DB represents a database object consisting of several buckets, each of which is a collection of key-value pairs (nested buckets are supported).
+  * All operations performed by users on buckets are performed in transactions.
   * 
   */
 class DB(val path:String)(using ops:Options):
+    // fileManager provides operations for reading and writing DB files.
     private[platdb] var fileManager:FileManager = null
+    // freeList provides the ability to manage db file pages.
     private[platdb] var freelist:Freelist = null
+    // blockBuffer provides the function of caching the page of db files.
     private[platdb] var blockBuffer:BlockBuffer = null
+    // the latest meta information for the current DB.
     private[platdb] var meta:Meta = null
+    // records read-only, read-write transaction objects that are currently open.
     private var rTx:ArrayBuffer[Tx] = new ArrayBuffer[Tx]()
     private var rwTx:Option[Tx] = None 
-    private var openFlag:Boolean = false
+    // Locks are used to control the execution of read and write transactions. 
+    // PlatDB allows multiple read-only transactions and at most one read-write transaction to execute concurrently at the same time.
     private var rwLock:ReentrantReadWriteLock = new ReentrantReadWriteLock()
+    // Used to protect meta information.
     private var metaLock:ReentrantLock = new ReentrantLock()
+    private var openFlag:Boolean = false
 
     def name:String = path
     def readonly:Boolean = ops.readonly
@@ -79,7 +87,11 @@ class DB(val path:String)(using ops:Options):
     def pageSize:Int = DB.pageSize
     def fillPercent:Double = DB.fillPercent
     /**
-      * open database.
+      * The open method is used to open the DB, and if any exception is encountered, 
+      * it will cause the opening to fail and return an error message. 
+      * Currently, platdb does not support multiple processes opening the same DB at the same time, 
+      * if a process wants to open a DB that is already held by another process,
+      * the opening process will be blocked until the holder closes the DB or throws a timeout exception.
       *
       * @return
       */
@@ -87,7 +99,6 @@ class DB(val path:String)(using ops:Options):
         try
             if openFlag then
                 return Success(true)
-
             // try to open db file, if get lock timeout,then return an exception.
             fileManager = new FileManager(path,ops.readonly)
             fileManager.open(ops.timeout)
@@ -97,7 +108,6 @@ class DB(val path:String)(using ops:Options):
             // if is the first time opened db, need init db file.
             if fileManager.size ==0 then
                 init()
-          
             // read meta info.
             meta = loadMeta(0)
             DB.pageSize = meta.pageSize
@@ -156,7 +166,6 @@ class DB(val path:String)(using ops:Options):
         blockBuffer.write(rbk) match
             case Success(_) => None
             case Failure(e) => throw e
-        None
     
     /**
       * read meta info from page.
@@ -208,25 +217,25 @@ class DB(val path:String)(using ops:Options):
         finally
             metaLock.unlock()
             rwLock.writeLock().unlock()
-    //
-    def sync():Unit = None
+
+    def sync():Try[Boolean] = Failure(new Exception("not implement now"))
 
     /**
-      * open a transaction.
+      * Opens and returns a transactional object, or exception information if the opening fails.
+      * If the writable parameter is true, the method creates a read-write transaction, and if false, it creates a read-only transaction. 
+      * Note that due to the transaction concurrency control mechanism, if a user wants to open a read-write transaction, 
+      * the method blocks until the previous read-write transaction is closed.
       *
       * @param writable
       * @return
       */
-    def begin(writable:Boolean):Try[Transaction] =
-        if writable then
-            beginRWTx()
-        else
-            beginRTx()
+    def begin(writable:Boolean):Try[Transaction] = if writable then beginRWTx() else beginRTx()
     /**
-      * 
+      * This method is the same as the begin method, 
+      * except that a timeout parameter is provided to prevent constant blocking when opening a read-write transaction.
       *
       * @param writable
-      * @param timeout
+      * @param timeout The unit is milliseconds
       * @return
       */
     def tryBegin(writable:Boolean,timeout:Int):Try[Transaction] = Failure(new Exception("not implement now"))
@@ -504,5 +513,3 @@ class DB(val path:String)(using ops:Options):
     private[platdb] def removeRTx():Unit =
         rwTx = None
         rwLock.writeLock().unlock()
-
-

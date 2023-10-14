@@ -3,16 +3,22 @@ package platdb
 import scala.util.Try
 import scala.util.control.Breaks._
 
+/**
+  * 
+  */
 trait BucketIterator extends Iterator[(Option[String],Option[String])]:
+    def find(key:String):(Option[String],Option[String])
     def first():(Option[String],Option[String]) 
     def last():(Option[String],Option[String]) 
-    def prev():(Option[String],Option[String]) 
-    def find(key:String):(Option[String],Option[String])
-    def next():(Option[String],Option[String])
     def hasNext():Boolean
+    def next():(Option[String],Option[String])
     def hasPrev():Boolean 
+    def prev():(Option[String],Option[String]) 
 
-//
+/**
+  * 
+  *
+  */
 private[platdb] class Record(var node:Option[Node],var block:Option[Block],var index:Int):
     def isLeaf:Boolean =
         (node,block) match
