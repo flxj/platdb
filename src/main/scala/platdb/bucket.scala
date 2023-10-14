@@ -7,6 +7,9 @@ import scala.util.Try
 import scala.util.Success
 import scala.util.Failure
 
+/**
+  * 
+  */
 trait Bucket:
     def name:String
     def length:Int
@@ -21,55 +24,96 @@ trait Bucket:
     def createBucketIfNotExists(name:String):Try[Bucket] 
     def deleteBucket(name:String):Try[Boolean]
 
+    def apply(key:String):String
+    def +(key:String,value:String):Unit
+    def +(elems:Seq[(String,String)]):Unit
+    def -(key:String):Unit
+    def -(keys:Seq[String]):Unit
+
+/**
+  * some bucket methods with transaction parameter.
+  */
+object Bucket:
+    def openBucket(name:String)(using tx:Transaction):Bucket =
+        tx.openBucket(name) match
+            case Success(bk) => bk
+            case Failure(e) => throw e 
+    def createBucket(name:String)(using tx:Transaction):Bucket =
+        tx.createBucket(name) match
+            case Success(bk) => bk
+            case Failure(e) => throw e
+    def createBucketIfNotExists(name:String)(using tx:Transaction):Bucket =
+        tx.createBucketIfNotExists(name) match
+            case Success(bk) => bk
+            case Failure(e) => throw e
+    def deleteBucket(name:String)(using tx:Transaction):Boolean = 
+        tx.deleteBucket(name) match
+            case Success(_) => true
+            case Failure(e) => throw e
+
 // count is the number of keys in current bucket
 private[platdb] class bucketValue(var root:Int,var count:Int,var sequence:Long):
     def getBytes:Array[Byte] = BTreeBucket.marshal(this)
     override def toString(): String = new String(BTreeBucket.marshal(this))
     override def clone:bucketValue = new bucketValue(root,count,sequence)
 
-/*
-const (
-	minFillPercent = 0.1
-	maxFillPercent = 1.0
-)
-
-// DefaultFillPercent is the percentage that split pages are filled.
-// This value can be changed by setting Bucket.FillPercent.
-const DefaultFillPercent = 0.5
-*/
+//
 private[platdb] object BTreeBucket:
-    /** bucket value size when convert byte array.  */
+    // bucket value size when convert byte array.
     val valueSize:Int = 16
     //
-    def read(data:Array[Byte]):Option[bucketValue] =
+    def apply(data:Array[Byte]):Option[bucketValue] =
         if data.length!=valueSize then
             return None 
-        var r = 0
-        var c = 0
+        val r = (data(0) & 0xff) << 24 | (data(1) & 0xff) << 16 | (data(2) & 0xff) << 8 | (data(3) & 0xff)
+        val c = (data(4) & 0xff) << 24 | (data(5) & 0xff) << 16 | (data(6) & 0xff) << 8 | (data(7) & 0xff)
+
+        var s:Long = (data(8) & 0xff) << 56 | (data(9) & 0xff) << 48 | (data(10) & 0xff) << 40 | (data(11) & 0xff) << 32
+        s = s | (data(12) & 0xff) << 24 | (data(13) & 0xff) << 16 | (data(14) & 0xff) << 8 | (data(15) & 0xff)
+        /*
         var s:Long = 0
-        for i <- 0 to 3 do
-            r = r << 8
-            r = r | (data(i) & 0xff)
-            c = c << 8
-            c = c | (data(4+i) & 0xff)
         for i <- 0 to 7 do
             s = s << 8
             s = s | (data(8+i) & 0xff)
+        */
         Some(new bucketValue(r,c,s))
-    // convert bucket value to byte array
+    // convert bucket value to byte array.
     def marshal(bkv:bucketValue):Array[Byte] = 
+        /*
         var buf:ByteBuffer = ByteBuffer.allocate(valueSize)
         buf.putInt(bkv.root)
         buf.putInt(bkv.count)
         buf.putLong(bkv.sequence)
         buf.array()
+        */
+        var r:Int = bkv.root
+        var c:Int = bkv.count
+        var s1:Long = bkv.sequence >> 32
+        var s2:Long = bkv.sequence
+        var arr = new Array[Byte](valueSize)
+        for i <- 0 to 3 do
+            arr(3-i) = (r & 0xff).toByte
+            arr(7-i) = (c & 0xff).toByte
+            arr(11-i) = (s1 & 0xff).toByte
+            arr(15-i) = (s2 & 0xff).toByte
+            r = r >> 8
+            c = c >> 8
+            s1 = s1 >> 8
+            s2 = s2 >> 8
+        arr
+            
 
-//
+/**
+  * bucket trait implement by b+ tree.
+  *
+  * @param bkname
+  * @param tx
+  */
 private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
     var bkv:bucketValue = null
     var root:Option[Node] = None
     /** cache nodes about writeable tx. */
-    var nodes:Map[Int,Node] = null
+    var nodes:Map[Int,Node] = Map[Int,Node]()
     /** cache sub-buckets */
     var buckets:Map[String,BTreeBucket] = Map[String,BTreeBucket]()
 
@@ -79,12 +123,75 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
     def value:bucketValue = bkv 
     def closed:Boolean = tx == null || tx.closed
     /**
-      * 
+      * return a bucket iterator.
       *
       * @return BucketIterator
       */
     def iterator:BucketIterator = new btreeBucketIter(this)
-    def contains(key:String):Try[Boolean] = Failure(throw new Exception("Not implement now"))
+    /**
+      * 
+      *
+      * @param key
+      * @param value
+      */
+    def +(key:String,value:String):Unit = 
+        put(key,value) match
+            case Success(_) => None
+            case Failure(e) => throw e
+    /**
+      * 
+      *
+      * @param elems
+      */ 
+    def +(elems:Seq[(String,String)]):Unit =
+        for (k,v) <- elems do
+            put(k,v) match
+                case Success(_) => None
+                case Failure(e) =>  throw e
+    /**
+      * 
+      *
+      * @param key
+      */
+    def -(key:String):Unit = 
+        delete(key) match
+            case Success(_) => None
+            case Failure(e) => throw e
+    def -(keys:Seq[String]):Unit =
+        for k <- keys do
+            delete(k) match
+                case Success(_) => None
+                case Failure(e) => throw e
+    /**
+      * 
+      *
+      * @param key
+      * @return
+      */
+    def apply(key:String):String = 
+        get(key) match
+            case Success(v) => v
+            case Failure(e) => throw e 
+    /**
+      * 
+      *
+      * @param key
+      * @return
+      */
+    def contains(key:String):Try[Boolean] = 
+        if tx.closed then
+            return Failure(DB.exceptionTxClosed)
+        else if key.length == 0 then 
+            return Failure(DB.exceptionKeyIsNull)
+        
+        val c = iterator
+        c.find(key) match 
+            case (None,_) => Failure(new Exception(s"not found key:$key"))
+            case (Some(k),v) => 
+                if k == key then 
+                    Success(true)
+                else
+                    Failure(DB.exceptionValueNotFound)
     /**
       * try to retrieve the value for a key in the bucket.
       * Returns is Failure if the key does not exist or the key is a subbucket name.
@@ -128,18 +235,18 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
 
         var c = new btreeBucketIter(this)
         c.search(key) match 
-            case (None,_,_) => return Failure(DB.exceptionValueNotFound)
+            //case (None,_,_) => return Failure(DB.exceptionValueNotFound) // TODO use Try
+            case (None,_,_) => None
             case (Some(k),_,f) =>
                 if k == key && f == bucketType then
                     return Failure(new Exception("the value is subbucket,not allow update it by put method"))
         c.node() match 
-            case None => None
+            case None => Failure(new Exception(s"not found insert node for key:$key"))
             case Some(node) =>
-                if node.isLeaf then 
-                    node.put(key,key,value,leafType,0)
-                    bkv.count+=1
-                    return Success(true)
-        Failure(new Exception(s"not found insert node for key:$key")) 
+                node.put(key,key,value,leafType,0)
+                bkv.count+=1
+                Success(true)
+         
     /**
       * try to remove a key from the bucket.
       * delete operation will be ignore if the key does not exist.
@@ -162,14 +269,12 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                 if k == key && f == bucketType then
                     return Failure(new Exception("not allow delete subbucket value by delete method")) 
         c.node() match 
-            case None => None
+            case None => Failure(new Exception("not found delete object"))
             case Some(node) =>
-                if node.isLeaf then
-                    node.del(key) 
-                    bkv.count-=1
-                    buckets.remove(key)
-                    return Success(true)
-        Failure(new Exception("not found delete object"))
+                node.del(key) 
+                bkv.count-=1
+                buckets.remove(key)
+                Success(true)
     
     /**
       * getBucket method retrieve a sub bucket in current bucket.
@@ -195,15 +300,16 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                 if k!=name || f!=bucketType then 
                     return Failure(new Exception(s"not found bucket $name"))
                 v match 
-                    case None => return Failure(new Exception(s"query bucket $name value failed"))
+                    case None => Failure(new Exception(s"query bucket $name value failed"))
                     case Some(data) =>
-                        BTreeBucket.read(data.getBytes()) match
-                            case None => return Failure(new Exception(s"parse bucket $name value failed")) 
+                        val bytes = data.getBytes()
+                        BTreeBucket(bytes) match
+                            case None => return Failure(new Exception(s"parse bucket $name value failed,expect data length is 16 but actual get ${bytes.length}")) 
                             case Some(value) =>
                                 var bk = new BTreeBucket(name,tx)
                                 bk.bkv = value 
-                                buckets.addOne((name,bk))
-                                return Success(bk)
+                                buckets(name) = bk
+                                Success(bk)
     /**
       * createBucket try to create a new bucket and return it.
       * The create operation will failed if the key is already exists,or the name parameter is null or too large
@@ -225,27 +331,28 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         
         var c = new btreeBucketIter(this)
         c.search(name) match
-            case (None,_,_) => return Failure(new Exception("bucket create failed: not found create node"))
+            //case (None,_,_) => return Failure(new Exception("bucket create failed: not found create node"))
+            case (None,_,_) => None
             case (Some(k),v,f) => 
-                if k==name && f!=bucketType then
+                if k == name && f != bucketType then
                     return Failure(new Exception(s"bucket create failed: key $name is already exists")) 
                 if k == name && f == bucketType then
                     v match 
                         case None => None
                         case Some(data) =>
-                            BTreeBucket.read(data.getBytes()) match
+                            BTreeBucket(data.getBytes()) match
                                 case None => return Failure(new Exception(s"parse bucket $name value failed"))  
                                 case Some(value) =>
                                     var bk = new BTreeBucket(name,tx)
                                     bk.bkv = value 
-                                    bk.root = node(value.root)
-                                    buckets.addOne((name,bk))
+                                    bk.root = getNode(value.root)
+                                    buckets(name) = bk
                     return Failure(new Exception(s"bucket create failed: bucket $name is already exists"))
         // create a new bucket
         var bk = new BTreeBucket(name,tx)
         bk.bkv = new bucketValue(-1,0,0) // null bkv
         bk.root = Some(new Node(new BlockHeader(-1,leafType,0,0,0))) // null root node
-        buckets.addOne((name,bk))
+        buckets(name) = bk
         c.node() match 
             case None => Failure(new Exception("bucket create failed: not found create node"))
             case Some(n) =>
@@ -323,78 +430,132 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                         c.node() match 
                             case None => return Failure(new Exception(s"not found bucket $name node")) 
                             case Some(node) => 
-                                node.del(name) // delete bucket record from the node
+                                node.del(name) // delete bucket record from the node.
                                 bkv.count-=1
                 Success(true)
-    /** try to get node or block by block id. */
+    /** 
+     * try to get node or block by block id.
+     * 
+     */
     def nodeOrBlock(id:Int):(Option[Node],Option[Block]) = 
         if nodes.contains(id) then 
             (nodes.get(id),None)
         else 
+            if id < 0 then
+                // if id <0 means the bucket is a new created in memory, not loaded from disk.
+                return (root,None)
             tx.block(id) match
                 case Success(bk) => (None,Some(bk))
-                case Failure(_) =>  (None,None)
-
-    /** parse node elements info from block */
+                case Failure(e) => (None,None)
+    /**
+      * parse node elements info from block.
+      *
+      * @param bk
+      * @return
+      */
     def nodeElements(bk:Option[Block]):Option[ArrayBuffer[NodeElement]] = 
         bk match
-            case None => return None 
+            case None => None 
             case Some(block) => 
-                Node.read(block) match
-                    case None => return None 
-                    case Some(node) => 
-                        nodes.addOne(node.id,node)
-                        return Some(node.elements)
-    /** try to get the idx node element from the block. */
+                if nodes.contains(block.id) then
+                    return Some(nodes(block.id).elements)
+                else
+                    Node.elements(block)
+    /**
+      * try to get the idx node element from the block. 
+      *
+      * @param bk
+      * @param idx
+      * @return
+      */
     def getNodeElement(bk:Option[Block],idx:Int):Option[NodeElement] = 
         nodeElements(bk) match
             case None => None
             case Some(elems) =>
                 if idx>=0 && elems.length>idx then 
                     return Some(elems(idx))
-        None
-    /** convert block to node. */
+                None
+    /**
+      * convert block to node. 
+      *
+      * @param bk
+      * @return
+      */
     def getNodeByBlock(bk:Try[Block]):Option[Node] = 
         bk match
-            case Failure(_) => return None 
+            case Failure(_) => None 
             case Success(block) => 
                 if nodes.contains(block.id) then 
                     return nodes.get(block.id)
-                Node.read(block) match
-                    case None => return None 
+                Node(block) match
+                    case None => None 
                     case Some(node) => 
-                        nodes.addOne((node.id,node))
-                        return Some(node) 
-    /** get node by id, search from cache -> disk. */
-    def node(id:Int):Option[Node] = 
+                        nodes(node.id) = node
+                        Some(node)
+    /**
+      *  get node by id, search from cache -> disk.
+      *
+      * @param id
+      * @return
+      */
+    def getNode(id:Int):Option[Node] = 
         if nodes.contains(id) then 
             return nodes.get(id)
         getNodeByBlock(tx.block(id))
-    /** try to get a child node by index. */
-    def getNodeChild(n:Node,idx:Int):Option[Node] = 
-        if n.isLeaf || idx<0 || idx>= n.length then
-            return None
-        node(n.elements(idx).child)
-    /** try to get right brother node. */
+    
+    /**
+      * try to get a child node by index. 
+      *
+      * @param n
+      * @param idx
+      * @return
+      */
+    def getNodeChild(n:Option[Node],idx:Int):Option[Node] = 
+        n match
+            case None => None
+            case Some(node) =>
+                if node.isLeaf || idx<0 || idx>=node.length then
+                    return None
+                getNode(node.elements(idx).child) match
+                    case None => None
+                    case Some(child) =>
+                        child.parent = Some(node)
+                        node.children += child
+                        Some(child)
+    /**
+      * try to get right brother node. 
+      *
+      * @param node
+      * @return
+      */
     private def getNodeRightSibling(node:Node):Option[Node] = 
         node.parent match
-            case None => return None 
+            case None => None 
             case Some(p) =>
                 val idx = p.childIndex(node)
                 if idx >=0 && idx < p.length-1 then 
-                    return getNodeChild(p,idx+1)
-                return None 
-    /** try to get node left brother node. */
+                    getNodeChild(Some(p),idx+1)
+                else
+                    None
+
+    /**
+      *  try to get node left brother node. 
+      *
+      * @param node
+      * @return
+      */
     private def getNodeLeftSibling(node:Node):Option[Node] =
         node.parent match
-            case None => return None 
+            case None => None 
             case Some(p) =>
                 val idx = p.childIndex(node)
                 if idx >=1 then 
-                    return getNodeChild(p,idx-1)
-                return None
+                    getNodeChild(Some(p),idx-1)
+                else
+                    None
     /**
      * rebalance the bucket,merge some small nodes.
+     * 
      */
     def merge():Unit = 
         for (_,node) <- nodes do 
@@ -402,8 +563,10 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         for (_,bucket) <- buckets do 
             bucket.merge() 
     /**
-     * try to merge the node.
-     */     
+      * try to merge the node.
+      *
+      * @param node
+      */  
     private def mergeOnNode(node:Node):Unit =
         if !node.unbalanced then return None
         node.unbalanced = false
@@ -419,7 +582,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                   * (obviously, if the root node is a leaf node, even if it contains one element, it does not need to be processed)
                   */
                 if !node.isLeaf && node.length == 1 then 
-                    getNodeChild(node,0) match
+                    getNodeChild(Some(node),0) match
                         case None => throw new Exception("merge root node failed: query child error")
                         case Some(child) => 
                             child.parent = None // set the child as new root and release old root
@@ -450,7 +613,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                                 if nodes.contains(elem.child) then
                                     var child = nodes(elem.child)
                                     mergeFrom.removeChild(child)
-                                    node.children.append(child)
+                                    node.children+=child
                                     child.parent = Some(node)
                             // remove all elements from mergeFrom to current node.
                             node.elements ++= mergeFrom.elements
@@ -466,10 +629,10 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                                 if nodes.contains(elem.child) then 
                                     var child = nodes(elem.child)
                                     node.removeChild(child)
-                                    mergeTo.children.append(child)
+                                    mergeTo.children+=child
                                     child.parent = Some(mergeTo)
                             // remove all elements from current node to mergeTo.
-                            mergeTo.elements  ++= node.elements
+                            mergeTo.elements ++= node.elements
                             p.del(node.minKey)
                             p.removeChild(node)
                             nodes.remove(node.id)
@@ -488,7 +651,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
             bucket.root match 
                 case None => None // Skip writing the bucket if there are no materialized nodes.
                 case Some(n) =>
-                    var c = new btreeBucketIter(bucket)
+                    var c = new btreeBucketIter(this)
                     c.search(name) match 
                         case (None,_,_) => throw new Exception(s"misplaced bucket header:$name")
                         case (Some(k),_,flag) =>
@@ -511,11 +674,12 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                 var r = node.root
                 if r.id >= tx.maxPageId then
                     throw new Exception(s"pgid ${r.id} above high water mark ${tx.maxPageId}")
-                bkv.root = r.id
+                bkv.root = r.id 
                 root = Some(r)
-
     /**
       * split node recursively.
+      *
+      * @param node
       */
     private def splitOnNode(node:Node):Unit =
         if node.spilled then return None
@@ -528,20 +692,22 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
             splitOnNode(node.children(i))
         
         // We no longer need the child list because it's only used for spill tracking.
-        node.children = new ArrayBuffer[Node]()
+        if node.children.length!=0 then
+            node.children = new ArrayBuffer[Node]()
         // split current node.
         for n <- splitNode(node,DB.pageSize) do 
             if n.id > 0 then 
                 tx.free(n.id)
                 n.header.pgid = 0
+            
             // allocate a new block and write node content to it.
-            val id = tx.allocate(n.size()) 
-            if id >= tx.maxPageId then 
-                throw new Exception(s"pgid $id above high water mark ${tx.maxPageId}")
-            var bk = tx.makeBlock(id,n.size())  
+            val nid = tx.allocate(n.size()) 
+            if nid >= tx.maxPageId then 
+                throw new Exception(s"pgid $nid above high water mark ${tx.maxPageId}")
+            var bk = tx.makeBlock(nid,n.size())
+            n.header.pgid = bk.id
             n.writeTo(bk)
-            n.header = bk.header
-            node.spilled = true
+            n.spilled = true
             // insert the new node info to its parent.
             n.parent match
                 case None => None
@@ -555,82 +721,81 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         node.parent match
             case None => None
             case Some(p) => 
-                if p.id == 0 then
+                if p.id <= 0 then
                     node.children = new ArrayBuffer[Node]()
                     splitOnNode(p)
     /**
       * Divide the node into several nodes according to the size.
       */
-    private def splitNode(node:Node,size:Int):List[Node] = 
-        if node.size() <= size || node.length <= Node.minKeysPerBlock*2 then 
-            return List[Node](node)
-        // 将当前节点切成两个， 递归切分第二个节点
-        var (headNode,tailNode) = cutNode(node,size)
-        var listn = List(headNode)
-        listn:::splitNode(tailNode,size)
-
-    private def cutNode(node:Node,size:Int):(Node,Node) =
-        /* 
-        sz = pageHeaderSize
-
-	// Loop until we only have the minimum number of keys required for the second page.
-	for i := 0; i < len(n.inodes)-minKeysPerPage; i++ {
-		index = uintptr(i)
-		inode := n.inodes[i]
-		elsize := n.pageElementSize() + uintptr(len(inode.key)) + uintptr(len(inode.value))
-
-		// If we have at least the minimum number of keys and adding another
-		// node would put us over the threshold then exit and return.
-		if index >= minKeysPerPage && sz+elsize > uintptr(threshold) {
-			break
-		}
-
-		// Add the element size to the total size.
-		sz += elsize
-	} 
-        */
+    private def splitNode(node:Node,sz:Int):List[Node] = 
+        // split current node to two nodes, then split the second recursively.
+        cutNode(node,sz) match
+            case (head,None) => List(head)
+            case (head,Some(tail)) => List(head):::splitNode(tail,sz)
+    /**
+      * split node to two nodes.
+      *
+      * @param node
+      * @param sz
+      * @return
+      */
+    private def cutNode(node:Node,sz:Int):(Node,Option[Node]) =
+        if node.size() <= sz || node.length <= Node.minKeysPerBlock*2 then 
+            return (node,None)
         
-        var sz = Block.headerSize
-        var idx = 0
+        val threshold = (sz*DB.fillPercent).toInt
+        var n = Block.headerSize
+        var idx = -1
         breakable(
-            for i <- 0 until node.elements.length do
-                sz = sz+Node.indexSize+node.elements(i).keySize+node.elements(i).valueSize
-                if sz >= size then 
+            for i <- 0 until node.length do
+                n += Node.indexSize+node.elements(i).keySize+node.elements(i).valueSize
+                if n >= threshold then 
                     idx = i 
                     break()
         )
-        var nodeB = new Node(new BlockHeader(0,0,0,0,0))
-        nodeB.elements = node.elements.slice(idx+1,node.elements.length)
-        nodeB.header.flag = node.header.flag
+        if idx < 0 then
+            return (node,None)
+         
+        var nodeB = new Node(new BlockHeader(-1,node.header.flag,0,0,0))
+        nodeB.elements = node.elements.slice(idx,node.elements.length)
 
         node.elements = node.elements.slice(0,idx)
-
         // if current node's parent is null, then create a new one.
         node.parent match
-            case Some(p) => p.children.addOne(nodeB)
+            case Some(p) => 
+                nodeB.parent = Some(p)
+                p.children+=nodeB
             case None =>
-                var parent = new Node(new BlockHeader(0,0,0,0,0))
-                parent.children.addOne(node)
-                parent.children.addOne(nodeB)
+                var parent = new Node(new BlockHeader(-1,branchType,0,0,0))
+                parent.children+=node
+                parent.children+=nodeB
                 node.parent = Some(parent)
-        (node,nodeB)
+                nodeB.parent = Some(parent)
+        (node,Some(nodeB))
 
-    /** release pages of node. */
+    /** 
+     * release pages of node. 
+     * 
+     */
     private def freeNode(node:Node):Unit = 
-        if node.id > 1 then
+        if node.id > DB.meta1Page then
             tx.free(node.id)
-            node.header.pgid = -1
+            node.header.pgid = 0
+            nodes.remove(node.id)
 
-    /** release all pages of  node and its child nodes. */
+    /** 
+     * release all pages of  node and its child nodes. 
+     * 
+     */
     private def freeFrom(id:Int):Unit = 
         if id <= 0 then return None 
         nodeOrBlock(id) match
-            case (None,None) => return None 
+            case (None,None) => None 
             case (Some(node),_) =>
                 freeNode(node)
                 if !node.isLeaf then 
                     for elem <- node.elements do
-                        freeFrom(elem.child) 
+                        freeFrom(elem.child)
             case (None,Some(bk)) =>
                 tx.free(bk.id)
                 if bk.header.flag != leafType then 
@@ -641,8 +806,11 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                                 freeFrom(elem.child)
         None 
 
-    /** release all pages about current bucket. */
+    /** 
+     * release all pages about current bucket. 
+     *
+     */
     private def freeAll():Unit =
-        if bkv.root == 0 then return None 
-        freeFrom(bkv.root)
-        bkv.root = 0
+        if bkv.root != 0 then
+            freeFrom(bkv.root)
+            bkv.root = 0

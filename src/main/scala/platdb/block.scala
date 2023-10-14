@@ -3,10 +3,7 @@ package platdb
 import java.nio.ByteBuffer
 import java.io.File
 import java.io.IOError
-import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.io.RandomAccessFile
-import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
 import scala.util.{Try,Success,Failure}
 import java.nio.channels.FileLock
@@ -39,14 +36,28 @@ private[platdb] val freelistType:Int = 4
 // node element type
 private[platdb] val bucketType:Int = 5
 
-//
+/**
+  * 
+  *
+  * @param pgid
+  * @param flag
+  * @param count
+  * @param overflow
+  * @param size
+  */
 private[platdb] class BlockHeader(var pgid:Int,var flag:Int,var count:Int,var overflow:Int,var size:Int)
 
-// uid 可能会用于blockBuffer pool管理block用
+/**
+  * 
+  *
+  * @param cap
+  */
 private[platdb] class Block(val cap:Int):
     var header:BlockHeader = new BlockHeader(-1,0,0,0,0)
-    private var data:ArrayBuffer[Byte] = new ArrayBuffer[Byte](cap) // TODO:use Array[Byte] ?
-    private var idx:Int = 0 // index of the data tail.
+    //
+    private var data:Array[Byte] = new Array[Byte](cap)
+    // index of the data tail.
+    private var idx:Int = 0 
      
     def id:Int = header.pgid
     // the actual length of data that has been used.
@@ -55,32 +66,36 @@ private[platdb] class Block(val cap:Int):
     def capacity:Int = data.length
     // block type.
     def btype:Int = header.flag 
+    //
     def setid(id:Int):Unit = header.pgid = id
+    //
     def reset():Unit = idx = 0
+    //
     def write(offset:Int,d:Array[Byte]):Unit =
         if offset<0 || d.length == 0 then 
             return None
         if offset+d.length > capacity then 
             data++=new Array[Byte](offset+d.length-capacity)
-        for i <- 0 until d.length do  // TODO: use copy
-            data(offset+i) = d(i)
-        if d.length+offset > idx then
-            idx = d.length+offset
+        val n = d.copyToArray(data,offset)
+        if n!=d.length then
+            throw new Exception("write data to block failed")
+        if n+offset > idx then
+            idx = n+offset
     // write data to tail.
     def append(d:Array[Byte]):Unit = write(idx,d)
     // all data.
-    def all:Array[Byte] = data.toArray
+    def all:Array[Byte] = data
     // user data.
     def getBytes():Option[Array[Byte]] = 
         if header.size >= Block.headerSize then
-            return Some(data.slice(Block.headerSize,header.size).toArray)
-        else if idx>= Block.headerSize then
-            return Some(data.slice(Block.headerSize,idx).toArray)
+            return Some(data.slice(Block.headerSize,header.size))
+        else if idx>=Block.headerSize then
+            return Some(data.slice(Block.headerSize,idx))
         None
     // all data except header.
     def tail:Option[Array[Byte]] = 
         if capacity > Block.headerSize then
-            Some(data.takeRight(Block.headerSize).toArray)
+            Some(data.slice(Block.headerSize,data.length))
         else
             None 
 
@@ -98,21 +113,17 @@ private[platdb] object Block:
         if bs.length != headerSize then 
             None 
         else
-            var arr = new Array[Int](headerSize/4)
-            var i = 0
-            while i<headerSize/4 do 
-                var n = 0
-                for j <- 0 to 3 do // TODO: not use loop here.
-                    n = n << 8
-                    n = n | (bs(4*i+j) & 0xff)
-                arr(i) = n
-                i = i+1
+            val arr = for i <- 0 to 4 yield
+                (bs(4*i) & 0xff) << 24 | (bs(4*i+1) & 0xff) << 16 | (bs(4*i+2) & 0xff) << 8 | (bs(4*i+3) & 0xff)
             Some(new BlockHeader(arr(0),arr(1),arr(2),arr(3),arr(4)))
 
-// blockBuffer 不用考虑数据的一致性，只要调用就尝试返回即可
+/**
+  * 
+  *
+  * @param maxsize
+  * @param fm
+  */
 private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
-    //private var id = new AtomicInteger(1)
-
     // Save some useless blocks that have been kicked out of the cache queue to speed up the creation of block structures.
     val poolsize:Int = 16
     var idleLock:ReentrantReadWriteLock = new ReentrantReadWriteLock()
@@ -127,13 +138,24 @@ private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
     var link:ArrayDeque[Int] = new ArrayDeque[Int]()
 
     private def full:Boolean = count>=maxsize
+    /**
+      * 
+      *
+      * @param bk
+      */
     private def drop(bk:Block):Unit=
-        if idle.length <= poolsize then
+        if idle.length < poolsize then
             try 
                 idleLock.writeLock().lock()
                 idle+=bk
             finally
                 idleLock.writeLock().unlock()
+    /**
+      * 
+      *
+      * @param size
+      * @return
+      */
     def get(size:Int):Block =
         try 
             idleLock.writeLock().lock()
@@ -149,10 +171,15 @@ private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
                 bk = idle.remove(idx)
             else
                 bk = new Block(size)
-            bk 
+            bk.reset()
+            bk
         finally
             idleLock.writeLock().unlock()
-
+    /**
+      * 
+      *
+      * @param id
+      */
     def revert(id:Int):Unit =
         try 
             lock.writeLock().lock()
@@ -164,75 +191,91 @@ private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
                 pinned.remove(id)
         finally
             lock.writeLock().unlock()
-    // 
+    /**
+      * 
+      *
+      * @param pgid
+      * @return
+      */
     def read(pgid:Int):Try[Block] = 
         try 
             lock.writeLock().lock()
-            // query cache.
-            var bk:Block = null
+           
+            var block:Option[Block] = None
             var cached:Boolean = false
+            // query cache.
             blocks.get(pgid) match
                 case Some(bk) => 
-                    val n = pinned.getOrElse(pgid,0)
-                    pinned(pgid)=n+1
+                    pinned(pgid)=pinned.getOrElse(pgid,0)+1
                     cached = true
+                    block = Some(bk)
                 case None => 
                     fm.read(pgid) match
                         case (None,_) => 
-                            return Failure(new Exception(s"not found block header for pgid ${pgid}"))
+                            throw new Exception(s"not found block header for pgid ${pgid}")
                         case (Some(hd),None) => 
-                            return Failure(new Exception(s"not found block data for pgid ${pgid}"))
+                            throw new Exception(s"not found block data for pgid ${pgid}")
                         case (Some(hd),Some(data)) =>
-                            // get a block from idle.
-                            bk = get(hd.size)
+                            var bk = get(hd.size)  // get a block from idle.
                             bk.header = hd 
-                            bk.write(0,data)
-        
-            var idx:Int = -1 // will remove the element from link.
-            var ignore:Boolean = false
-            if !cached then
-                // cache not full, so cache the block directly.
-                if !full then
-                     blocks(bk.id) = bk
-                     count+=1
-                else
-                    // cache already full, so try to select a element to eliminate.
-                    breakable(
-                        for i <- Range(link.length-1,-1,-1) do
-                            if !pinned.contains(link(i)) then
-                                idx = i
-                                break()
-                    )
-                    if idx < 0 then // cache is busy
-                        ignore = true
-            else
-                // the block has cached, so just move it to head of link.
-                breakable(
-                    for i <- Range(0,link.length,1) do
-                        if link(i) == bk.id then
-                            idx = i
-                            break()
-                )
+                            bk.append(data)
+                            block = Some(bk)
+            block match
+                case None => Failure(new Exception(s"not found block for paid $pgid"))
+                case Some(bk) =>
+                    var idx:Int = -1 // try to remove the element link(idx) from link.
+                    var ignore:Boolean = false
+                    if !cached then
+                        // cache not full, so cache the block directly.
+                        if !full then
+                            blocks(bk.id) = bk
+                            count+=1
+                            pinned(bk.id) = pinned.getOrElse(bk.id,0)+1
+                            cached = true
+                        else
+                            // cache already full, so try to select a element to eliminate.
+                            breakable(
+                                for i <- Range(link.length-1,-1,-1) do
+                                    if !pinned.contains(link(i)) then
+                                        idx = i
+                                        break()
+                            )
+                            if idx < 0 then // cache is busy,so we just ignore current block.
+                                ignore = true
+                    else
+                        // the block has cached, so just move it to head of link.
+                        breakable(
+                            for i <- Range(0,link.length,1) do
+                                if link(i) == bk.id then
+                                    idx = i
+                                    break()
+                        )
+                    // update lru queue.
+                    if idx >= 0 then
+                        val id = link(idx)
+                        if !cached then
+                            // remove the selected block from blocks, and throw it to idle list.
+                            blocks.remove(id) match
+                                case None => None
+                                case Some(blk) => drop(blk)
+                            blocks(bk.id) = bk
+                        
+                        link.remove(idx)
+            
+                    if !ignore then
+                        link.prepend(bk.id)
 
-            if idx >= 0 then
-                val id = link(idx)
-                if !cached then
-                    // remove the selected block from blocks, and throw it to idle list.
-                    blocks.remove(id) match
-                        case None => None
-                        case Some(blk) => drop(blk)
-                    blocks+=(bk.id,bk)
-                link.remove(id)
-            
-            if !ignore then
-                link.prepend(bk.id)
-            
-            Success(bk)      
+                    Success(bk)
         catch
-            case e:Exception => return Failure(e)
+            case e:Exception => Failure(e)
         finally
             lock.writeLock().unlock()
-
+    /**
+      * 
+      *
+      * @param bk
+      * @return
+      */
     def write(bk:Block):Try[Boolean] = 
         var writed:Boolean = false 
         try 
@@ -266,18 +309,26 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
     var file:File = null
     var writer:Option[RandomAccessFile] = None // writer
     
-    //
+    /**
+      * file size.
+      *
+      * @return
+      */
     def size:Long = 
         if !opend then 
             throw new Exception(s"file ${path} not open")
         file.length()
     
-    // open and lock.
+    /**
+      * open db file.
+      *
+      * @param timeout
+      */
     def open(timeout:Int):Unit =
         if opend then return None 
-        val i = path.lastIndexOf("\\") // TODO windows
+        val i = path.lastIndexOf(File.separator)
         if i>=0 then
-            lockpath = path.substring(0,i) +"\\db.lock"
+            lockpath = path.substring(0,i) +File.separator+"db.lock"
         else
             throw new Exception(s"illegal db file path ${path}")
         
@@ -310,14 +361,19 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
                     val now = new Date()
                     if  now.getTime() - start.getTime() > timeout then
                         throw new Exception(s"open database timeout:${timeout}ms")
+                    else 
+                        Thread.sleep(50)
             catch
                 case e:OverlappingFileLockException =>
                     val now = new Date()
                     if  now.getTime() - start.getTime() > timeout then
                         throw new Exception(s"open database timeout:${timeout}ms")
+                    else 
+                        Thread.sleep(50)
                 case e:Exception => throw e
-    
-    // close and unlock.
+    /**
+      * close file and release resource.
+      */
     def close():Unit =
         if !opend then
             return None
@@ -330,8 +386,11 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
         lock = None
         writer = None
         opend = false
-    
-    // grow file.
+    /**
+      * grow file to size.
+      *
+      * @param sz
+      */
     def grow(sz:Long):Unit = 
         if readonly then
             throw new Exception("readonly mode not allow grow file.")
@@ -345,9 +404,14 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
                 writer = Some(w)
         var channel = w.getChannel()
         channel.truncate(sz)
-        channel.close()
 
-    //
+    /**
+      * read bytes at file offset.
+      *
+      * @param id
+      * @param size
+      * @return
+      */
     def readAt(id:Int,size:Int):Array[Byte] =
         if !opend then
             throw new Exception("db file closed")
@@ -359,14 +423,19 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
             reader.seek(id*DB.pageSize)
             var data = new Array[Byte](size)
             if reader.read(data,0,size)!= size then
-                throw new Exception("read size is unexpected")
+                throw new Exception(s"read size is unexpected,except $size bytes")
             data
         catch
             case e:Exception => throw e
         finally
             if reader!=null then
                 reader.close()
-    //
+    /**
+      * read data from file.
+      *
+      * @param bid
+      * @return
+      */
     def read(bid:Int):(Option[BlockHeader],Option[Array[Byte]]) = 
         if !opend then
             throw new Exception("db file closed")
@@ -379,23 +448,29 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
             // 1. use pgid to seek block header location in file
             reader.seek(offset)
             // 2. read the block header content
-            var hd = new Array[Byte](Block.headerSize)
-            if reader.read(hd,0,Block.headerSize)!= Block.headerSize then
-              throw new Exception(s"read block header ${bid} error")
+            var d = new Array[Byte](Block.headerSize)
+            if reader.read(d,0,Block.headerSize)!= Block.headerSize then
+                throw new Exception(s"read block header ${bid} error")
             
-            Block.unmarshalHeader(hd) match
+            Block.unmarshalHeader(d) match
                 case None => throw new Exception(s"parse block header ${bid} error")
-                case Some(bhd) =>
-                    // 3. get overflow value, then read continue pages of number overflow 
-                    val sz = (bhd.overflow+1)*DB.pageSize
+                case Some(hd) =>
+                    // 3. read data.
+                    val sz = hd.size
                     var data = new Array[Byte](sz)
+                    reader.seek(offset)
                     if reader.read(data,0,sz) != sz then
-                        throw new Exception("read block data size unexpected")
-                    (Some(bhd),Some(data)) 
+                        throw new Exception(s"read block data size unexpected,expect $sz bytes.")
+                    (Some(hd),Some(data)) 
         finally
             if reader!=null then
                 reader.close()
-    //  
+    /**
+      * write block to file.
+      *
+      * @param bk
+      * @return
+      */ 
     def write(bk:Block):Boolean = 
         if !opend then
             throw new Exception("db file closed")
@@ -414,7 +489,7 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
             case None =>
                 w = new RandomAccessFile(file,"rw")
                 writer = Some(w)
+
         w.seek(bk.id*DB.pageSize)
         w.write(bk.all)
         true
-        

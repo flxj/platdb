@@ -6,6 +6,26 @@ import scala.util.Success
 import scala.util.Try
 import scala.util.control.Breaks._
 
+trait Transaction:
+    // return current transactions identity.
+    def id:Int
+    // readonly or read-write transaction.
+    def writable:Boolean
+    // if the transaction is closed.
+    def closed:Boolean
+    // commit transaction,if its already closed then throw an exception.
+    def commit():Try[Boolean]
+    // rollback transaction,if its already closed then throw an exception.
+    def rollback():Try[Boolean]
+    // open a bucket,if not exists will throw an exception.
+    def openBucket(name:String):Try[Bucket]
+    // create a bucket,if already exists will throw an exception.
+    def createBucket(name:String):Try[Bucket]
+    // create a bucket,if exists then return the bucket.
+    def createBucketIfNotExists(name:String):Try[Bucket]
+    // delete a bucket,if bucket not exists will throw an exception.
+    def deleteBucket(name:String):Try[Boolean]
+
 /*
 A: 
     Reads and writes to transactions occur in memory, so if a transaction fails before committing, it does not affect the contents of the disk
@@ -14,7 +34,7 @@ A:
     The meta information contains the current DB version and root node information, 
     and only the successful writing of meta indicates that the transaction is committed successfully, 
     so if the transaction fails before writing meta, only writing dirty pages or freelist will not affect the consistency of db content
-    So how to guarantee atomicity if writing meta error? ———> boltdb does this
+    So how to guarantee atomicity if writing meta error?
 C:
     Write transactions are performed serially, 
     so each open read or write transaction is operating on a DB object that is an updated version of the previous write transaction.
@@ -33,40 +53,17 @@ D:
     Modifications to the DB by a successfully committed write transaction are persisted to the disk file,
     and an uncommitted transaction does not affect the contents of the DB
 */
-
-trait Transaction:
-    // return current transactions identity
-    def id:Int
-    // readonly or read-write transaction
-    def writable:Boolean
-    // if the transaction is closed
-    def closed:Boolean
-    // commit transaction,if its already closed then throw an exception
-    def commit():Try[Boolean]
-    // rollback transaction,if its already closed then throw an exception
-    def rollback():Try[Boolean]
-    // open a bucket,if not exists will throw an exception
-    def openBucket(name:String):Try[Bucket]
-    // create a bucket,if already exists will throw an exception
-    def createBucket(name:String):Try[Bucket]
-    // create a bucket,if exists then return the bucket
-    def createBucketIfNotExists(name:String):Try[Bucket]
-    // delete a bucket,if bucket not exists will throw an exception
-    def deleteBucket(name:String):Try[Boolean]
-
-// platdb transaction implement
 private[platdb] class Tx(val readonly:Boolean) extends Transaction:
     var sysCommit:Boolean = false 
     var db:DB = null
     var meta:Meta = null
     var root:BTreeBucket = null
-    var blocks:Map[Int,Block] = null // cache dirty blocks,rebalance(merge/split) bucket maybe product them
+    var blocks:Map[Int,Block] = Map[Int,Block]() // cache dirty blocks,rebalance(merge/split) bucket maybe product them
     
-    private[platdb] def init(db:DB):Unit =
+    def init(db:DB):Unit =
         this.db = db
         meta = db.meta.clone
-        blocks = Map[Int,Block]()
-        root = new BTreeBucket("",this)
+        root = new BTreeBucket("root",this)
         root.bkv = meta.root.clone
         if !readonly then
             meta.txid+=1
@@ -74,7 +71,9 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
     def id:Int = meta.txid
     def closed:Boolean = db == null
     def writable:Boolean = !readonly
-    private[platdb] def rootBucket():Option[Bucket] = Some(root)
+    // return the max pageid
+    def maxPageId:Int = meta.pageId
+    def rootBucket():Option[Bucket] = Some(root)
     // open and return a bucket
     def openBucket(name:String):Try[Bucket] = root.getBucket(name)
     // craete a bucket
@@ -86,13 +85,13 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
     // commit current transaction
     def commit():Try[Boolean] = 
         if closed then
-            return Failure(new Exception("tx closed"))
-        else if db.isClosed then // TODO remove this
-            return Failure(new Exception("db closed"))
+            return Failure(DB.exceptionTxClosed)
+        else if db.closed then
+            return Failure(DB.exceptionDBClosed)
         else if sysCommit then
-            return Failure( new Exception("not allow to rollback system tx manually"))
-        else if !writable then // cannot commit read-only tx
-            return Failure(new Exception("cannot commit read-only tx"))
+            return Failure(DB.exceptionNotAllowCommitSysTx)
+        else if !writable then
+            return Failure(DB.exceptionNotAllowCommitRTx)
         
         try 
             // merge bucket nodes first
@@ -123,12 +122,16 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
         close()
         Success(true)
     
-    //  rollback current tx during commit process
+    /**
+      * rollback current tx during commit process.
+      *
+      * @return
+      */
     private[platdb] def rollbackTx():Try[Boolean] = 
         if closed then 
-            return Failure(throw new Exception("tx closed"))
-        else if db.isClosed then
-            return Failure(throw new Exception("db closed"))
+            return Failure(DB.exceptionTxClosed)
+        else if db.closed then
+            return Failure(DB.exceptionDBClosed)
         //
         if writable then
             db.freelist.rollback(id)
@@ -137,23 +140,31 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
 			// tx.db.freelist.reload(tx.db.page(tx.db.meta().freelist))
         close()
         Success(true)
-    // user call rollback directly，because not write any change to db file, so we do nothing except rollback freelist.
+    
+    /**
+      * user call rollback directly，because not write any change to db file, so we do nothing except rollback freelist.
+      *
+      * @return
+      */
     def rollback():Try[Boolean] =
         if closed then
-            return Failure(new Exception("tx closed"))
-        else if db.isClosed then
-            return Failure(new Exception("db closed"))
+            return Failure(DB.exceptionTxClosed)
+        else if db.closed then
+            return Failure(DB.exceptionDBClosed)
         else if sysCommit then
-            return Failure(new Exception("not allow to rollback system tx manually"))
+            return Failure(DB.exceptionNotAllowRollbackSysTx)
         if writable then
             db.freelist.rollback(id)
         close()
         Success(true)
-    // close current tx: release all object references about the tx 
+
+    /**
+      * close current tx: release all object references about the tx 
+      */
     private def close():Unit = 
         if closed then 
             return None 
-        else if db.isClosed then 
+        else if db.closed then 
             return None 
         
         if !writable then
@@ -168,9 +179,11 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
         root = new BTreeBucket("",this)
         blocks.clear()
 
-    // write freelist to db file
+    /**
+      * write freelist to db file.
+      */
     private def writeFreelist():Unit = 
-        // allocate new pages for freelist
+        // allocate new pages for freelist.
         val tailId = meta.pageId
         val sz = db.freelist.size()
         val pgid = allocate(sz)
@@ -187,16 +200,15 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
             case Failure(e) => throw e
             case Success(flag) =>
                 if !flag then
-                    //rollbackTx()
                     throw new Exception(s"tx ${id} write freelist to db file failed")
-                meta.freelistId = id
+                meta.freelistId = bk.id
                 db.blockBuffer.revert(bk.id)
     // write all dirty blocks to db file
     private def writeBlock():Unit =
         var arr = new ArrayBuffer[Block]()
         for (id,bk) <- blocks do
             arr+=bk 
-        arr.sortWith((b1:Block,b2:Block) => b1.id < b2.id)
+        arr = arr.sortWith((b1:Block,b2:Block) => b1.id < b2.id)
         try
             for bk <- arr do
                 db.blockBuffer.write(bk) match
@@ -207,44 +219,63 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
         catch
             case e:Exception => throw e
         finally
-            for (_,bk) <- blocks do
+            for bk <- arr do
                 db.blockBuffer.revert(bk.id)
  
-    // write meta blocks to db file
+    /**
+      * write meta blocks to db file.
+      */
     private def writeMeta():Unit  =
         var bk = db.blockBuffer.get(meta.size())
         bk.setid(meta.id)
+        meta.writeTo(bk)
         try
             db.blockBuffer.write(bk) match
                 case Failure(e) => throw e
                 case Success(flag) =>
                     if !flag then
                         throw new Exception(s"tx ${id} commit meta ${bk.id} failed")
+                    db.updateMeta(meta)
         catch
             case e:Exception => throw e
         finally
             db.blockBuffer.revert(bk.id)
-    // return the max pageid
-    private[platdb] def maxPageId:Int = meta.pageId
-    // get block by bid
-    private[platdb] def block(id:Int):Try[Block] =
-        if blocks.contains(id) then 
-            blocks.get(id) match
+    /**
+      * get block by bid
+      *
+      * @param pgid
+      * @return
+      */
+    private[platdb] def block(pgid:Int):Try[Block] =
+        if blocks.contains(pgid) then 
+            blocks.get(pgid) match
                 case Some(bk) =>  return Success(bk)
-                case None => return Failure(new Exception(s"null block cache $id"))
-        db.blockBuffer.read(id) match
+                case None => return Failure(new Exception(s"null block cache $pgid"))
+        db.blockBuffer.read(pgid) match
             case Success(bk) => 
-                blocks(id) = bk 
+                blocks(pgid) = bk 
                 Success(bk)
             case Failure(e) => Failure(e)
         
-    // release a block's pages
-    private[platdb] def free(id:Int):Unit =
-        block(id) match
+    /**
+      * release a block's pages.
+      *
+      * @param pgid
+      */
+    private[platdb] def free(pgid:Int):Unit =
+        block(pgid) match
             case Failure(e) => None 
             case Success(bk) => 
                 db.freelist.free(id,bk.header.pgid,bk.header.overflow)
-    // allocate page space according size 
+                db.blockBuffer.revert(pgid)
+                blocks.remove(pgid)
+
+    /**
+      * allocate page space according size 
+      *
+      * @param size
+      * @return
+      */
     private[platdb] def allocate(size:Int):Int =
         var n = size/DB.pageSize
         if size%DB.pageSize!=0 then n+=1
@@ -256,10 +287,16 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
             meta.pageId+=n
         pgid
     
-    // construct a block object according size, then set its id
-    private[platdb] def makeBlock(id:Int,size:Int):Block = 
+    /**
+      * construct a block object according size, then set its id.
+      *
+      * @param pgid
+      * @param size
+      * @return
+      */
+    private[platdb] def makeBlock(pgid:Int,size:Int):Block = 
         var bk = db.blockBuffer.get(size)
         bk.reset()
-        bk.setid(id)
-        blocks.addOne((id,bk))
+        bk.setid(pgid)
+        blocks(pgid) = bk
         bk 
