@@ -240,7 +240,8 @@ class DB(val path:String)(using ops:Options):
       */
     def tryBegin(writable:Boolean,timeout:Int):Try[Transaction] = Failure(new Exception("not implement now"))
     /**
-      * get a element from bucket.
+      * Retrieves the element of the specified key from the specified bucket.
+      * returns a key-value pair if the element exists; If the element is a child bucket, an exception is returned.
       *
       * @param bucket
       * @param key
@@ -269,7 +270,8 @@ class DB(val path:String)(using ops:Options):
                 finally
                     tx.rollbackTx()
     /**
-      * get key-value pairs from a bucket.
+      * Retrieves multiple elements of the specified key from the specified bucket. 
+      * Returns a key-value pair sequence if the element exists; If the element contains subbuckets, an exception is returned.
       *
       * @param bucket
       * @param keys
@@ -288,8 +290,7 @@ class DB(val path:String)(using ops:Options):
                             for key <- keys do
                                 bk.get(key) match
                                     case Failure(e) => throw e 
-                                    case Success(value) => 
-                                        res :+= (key,value)
+                                    case Success(value) => res :+= (key,value)
                     tx.sysCommit = false
                     tx.commit() match
                         case Success(_) => None
@@ -303,7 +304,8 @@ class DB(val path:String)(using ops:Options):
                 finally
                     tx.rollbackTx()
     /**
-      * 
+      * Adds a key-value pair to the specified bucket, 
+      * and its value is overwritten by the new value if the key already exists
       *
       * @param bucket
       * @param key
@@ -329,7 +331,8 @@ class DB(val path:String)(using ops:Options):
                 finally
                     tx.rollbackTx()
     /**
-      * 
+      * Adds multiple key-value pairs to the specified bucket, 
+      * and if some of the keys already exist, their values are overwritten by the new values.
       *
       * @param bucket
       * @param elems
@@ -354,7 +357,8 @@ class DB(val path:String)(using ops:Options):
                 finally
                     tx.rollbackTx()
     /**
-      * try to exec a read-write transaction.
+      * Executes user functions in the context of a read-write transaction. 
+      * If the function does not produce any exceptions, the transaction is automatically committed; Otherwise, automatic rollback.
       *
       * @param op
       * @return
@@ -377,7 +381,9 @@ class DB(val path:String)(using ops:Options):
                 finally
                     tx.rollbackTx()
     /**
-      * try to exec a read-only transaction.
+      * Executes user functions in a read-only transaction context.
+      * If the function does not produce any exceptions, the transaction is automatically committed; Otherwise, automatic rollback.
+      * Performing a change database operation in a read-only transaction results in an exception.
       *
       * @param op
       * @return
@@ -399,7 +405,7 @@ class DB(val path:String)(using ops:Options):
                 finally
                     tx.rollbackTx()
     /**
-      * 
+      *  Hot backup of the current database.
       *
       * @param path
       * @return
