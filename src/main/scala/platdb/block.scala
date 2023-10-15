@@ -27,14 +27,13 @@ private[platdb] trait Persistence:
       */
     def writeTo(block:Block):Int
 
-// block/node type
-private[platdb] val metaType:Int = 1
-private[platdb] val branchType:Int = 2
-private[platdb] val leafType:Int = 3
-private[platdb] val freelistType:Int = 4
+private[platdb] val metaType:Byte = 1 
+private[platdb] val branchType:Byte = 2
+private[platdb] val leafType:Byte = 3
+private[platdb] val freelistType:Byte = 4
 
 // node element type
-private[platdb] val bucketType:Int = 5
+private[platdb] val bucketType:Byte = 5
 
 /**
   * 
@@ -45,7 +44,26 @@ private[platdb] val bucketType:Int = 5
   * @param overflow
   * @param size
   */
-private[platdb] class BlockHeader(var pgid:Int,var flag:Int,var count:Int,var overflow:Int,var size:Int)
+private[platdb] class BlockHeader(var pgid:Long,var flag:Byte,var count:Int,var overflow:Int,var size:Int):
+    def getBytes():Array[Byte] =
+        var buf:ByteBuffer = ByteBuffer.allocate(BlockHeader.size)
+        buf.putLong(pgid)
+        buf.putInt(count)
+        buf.putInt(overflow)
+        buf.putInt(size)
+        buf.put(flag)
+        buf.array()
+
+private[platdb] object BlockHeader:
+    val size = 21
+    def apply(bs:Array[Byte]):Option[BlockHeader] =
+        if bs.length != size then 
+            None 
+        else
+            val arr = for i <- 0 to 4 yield
+                (bs(4*i) & 0xff) << 24 | (bs(4*i+1) & 0xff) << 16 | (bs(4*i+2) & 0xff) << 8 | (bs(4*i+3) & 0xff)
+            val id = (arr(0) & 0x00000000ffffffffL) << 32 | (arr(1) & 0x00000000ffffffffL)
+            Some(new BlockHeader(id,bs(size-1),arr(2),arr(3),arr(4)))
 
 /**
   * 
@@ -53,13 +71,13 @@ private[platdb] class BlockHeader(var pgid:Int,var flag:Int,var count:Int,var ov
   * @param cap
   */
 private[platdb] class Block(val cap:Int):
-    var header:BlockHeader = new BlockHeader(-1,0,0,0,0)
+    var header:BlockHeader = new BlockHeader(-1L,0,0,0,0)
     //
     private var data:Array[Byte] = new Array[Byte](cap)
     // index of the data tail.
     private var idx:Int = 0 
-     
-    def id:Int = header.pgid
+    
+    def id:Long = header.pgid
     // the actual length of data that has been used.
     def size:Int = idx
     // total capacity.
@@ -67,7 +85,7 @@ private[platdb] class Block(val cap:Int):
     // block type.
     def btype:Int = header.flag 
     //
-    def setid(id:Int):Unit = header.pgid = id
+    def setid(id:Long):Unit = header.pgid = id
     //
     def reset():Unit = idx = 0
     //
@@ -87,35 +105,14 @@ private[platdb] class Block(val cap:Int):
     def all:Array[Byte] = data
     // user data.
     def getBytes():Option[Array[Byte]] = 
-        if header.size >= Block.headerSize then
-            return Some(data.slice(Block.headerSize,header.size))
-        else if idx>=Block.headerSize then
-            return Some(data.slice(Block.headerSize,idx))
+        if header.size >= BlockHeader.size then
+            return Some(data.slice(BlockHeader.size,header.size))
+        else if idx>=BlockHeader.size then
+            return Some(data.slice(BlockHeader.size,idx))
         None
     // all data except header.
     def tail:Option[Array[Byte]] = 
-        if capacity > Block.headerSize then
-            Some(data.slice(Block.headerSize,data.length))
-        else
-            None 
-
-private[platdb] object Block:
-    val headerSize = 20
-    def marshalHeader(pg:BlockHeader):Array[Byte] =
-        var buf:ByteBuffer = ByteBuffer.allocate(headerSize)
-        buf.putInt(pg.pgid)
-        buf.putInt(pg.flag)
-        buf.putInt(pg.count)
-        buf.putInt(pg.overflow)
-        buf.putInt(pg.size)
-        buf.array()
-    def unmarshalHeader(bs:Array[Byte]):Option[BlockHeader] =
-        if bs.length != headerSize then 
-            None 
-        else
-            val arr = for i <- 0 to 4 yield
-                (bs(4*i) & 0xff) << 24 | (bs(4*i+1) & 0xff) << 16 | (bs(4*i+2) & 0xff) << 8 | (bs(4*i+3) & 0xff)
-            Some(new BlockHeader(arr(0),arr(1),arr(2),arr(3),arr(4)))
+        if capacity > BlockHeader.size then Some(data.slice(BlockHeader.size,data.length)) else None 
 
 /**
   * 
@@ -132,10 +129,11 @@ private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
     // Records the blocks that are currently in use and maintains a reference count of them.
     var lock:ReentrantReadWriteLock = new ReentrantReadWriteLock()
     var count:Int = 0
-    var blocks:Map[Int,Block] = Map[Int,Block]()
-    var pinned:Map[Int,Int] = Map[Int,Int]() 
+    var blocks:Map[Long,Block] = Map[Long,Block]()
+    var pinned:Map[Long,Int] = Map[Long,Int]() 
+    
     // LRU
-    var link:ArrayDeque[Int] = new ArrayDeque[Int]()
+    var link:ArrayDeque[Long] = new ArrayDeque[Long]()
 
     private def full:Boolean = count>=maxsize
     /**
@@ -180,7 +178,7 @@ private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
       *
       * @param id
       */
-    def revert(id:Int):Unit =
+    def revert(id:Long):Unit = 
         try 
             lock.writeLock().lock()
 
@@ -197,7 +195,7 @@ private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
       * @param pgid
       * @return
       */
-    def read(pgid:Int):Try[Block] = 
+    def read(pgid:Long):Try[Block] = 
         try 
             lock.writeLock().lock()
            
@@ -412,7 +410,7 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
       * @param size
       * @return
       */
-    def readAt(id:Int,size:Int):Array[Byte] =
+    def readAt(id:Long,size:Int):Array[Byte] =
         if !opend then
             throw new Exception("db file closed")
         if id<0 then 
@@ -436,7 +434,7 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
       * @param bid
       * @return
       */
-    def read(bid:Int):(Option[BlockHeader],Option[Array[Byte]]) = 
+    def read(bid:Long):(Option[BlockHeader],Option[Array[Byte]]) = 
         if !opend then
             throw new Exception("db file closed")
         if bid<0 then 
@@ -448,11 +446,11 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
             // 1. use pgid to seek block header location in file
             reader.seek(offset)
             // 2. read the block header content
-            var d = new Array[Byte](Block.headerSize)
-            if reader.read(d,0,Block.headerSize)!= Block.headerSize then
+            var d = new Array[Byte](BlockHeader.size)
+            if reader.read(d,0,BlockHeader.size)!= BlockHeader.size then
                 throw new Exception(s"read block header ${bid} error")
             
-            Block.unmarshalHeader(d) match
+            BlockHeader(d) match
                 case None => throw new Exception(s"parse block header ${bid} error")
                 case Some(hd) =>
                     // 3. read data.

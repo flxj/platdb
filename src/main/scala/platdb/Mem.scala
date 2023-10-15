@@ -5,7 +5,7 @@ import scala.util.{Try}
 class MemDB(val name:String,val path:String):
     var store:DB = null
 
-private[platdb] class MemTx( val id:Int) extends Transaction:
+private[platdb] class MemTx(val id:Long) extends Transaction:
     def closed: Boolean = ???
     def commit(): Try[Boolean] = ???
     def createBucket(name: String): Try[Bucket] = ???
@@ -35,7 +35,7 @@ private[platdb] class MemBucket(val path:String) extends Bucket:
     def deleteBucket(name: String): Try[Boolean] = ???
     def getBucket(name: String): Try[Bucket] = ???
     def iterator: BucketIterator = ???
-    def length: Int = ???
+    def length: Long = ???
     def name: String = ???
 
     // 定义一个新trait

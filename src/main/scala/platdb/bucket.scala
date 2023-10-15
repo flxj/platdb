@@ -12,7 +12,7 @@ import scala.util.Failure
   */
 trait Bucket:
     def name:String
-    def length:Int
+    def length:Long
     def closed:Boolean
     def iterator:BucketIterator
     def contains(key:String):Try[Boolean]
@@ -52,7 +52,7 @@ object Bucket:
             case Failure(e) => throw e
 
 // count is the number of keys in current bucket
-private[platdb] class bucketValue(var root:Int,var count:Int,var sequence:Long):
+private[platdb] class bucketValue(var root:Long,var count:Long,var sequence:Long): // TODO Int-->Long
     def getBytes:Array[Byte] = BTreeBucket.marshal(this)
     override def toString(): String = new String(BTreeBucket.marshal(this))
     override def clone:bucketValue = new bucketValue(root,count,sequence)
@@ -60,48 +60,32 @@ private[platdb] class bucketValue(var root:Int,var count:Int,var sequence:Long):
 //
 private[platdb] object BTreeBucket:
     // bucket value size when convert byte array.
-    val valueSize:Int = 16
+    //val valueSize:Int = 16
+    val valueSize:Int = 24
     //
     def apply(data:Array[Byte]):Option[bucketValue] =
         if data.length!=valueSize then
             return None 
-        val r = (data(0) & 0xff) << 24 | (data(1) & 0xff) << 16 | (data(2) & 0xff) << 8 | (data(3) & 0xff)
-        val c = (data(4) & 0xff) << 24 | (data(5) & 0xff) << 16 | (data(6) & 0xff) << 8 | (data(7) & 0xff)
-
-        var s:Long = (data(8) & 0xff) << 56 | (data(9) & 0xff) << 48 | (data(10) & 0xff) << 40 | (data(11) & 0xff) << 32
-        s = s | (data(12) & 0xff) << 24 | (data(13) & 0xff) << 16 | (data(14) & 0xff) << 8 | (data(15) & 0xff)
-        /*
-        var s:Long = 0
-        for i <- 0 to 7 do
-            s = s << 8
-            s = s | (data(8+i) & 0xff)
-        */
-        Some(new bucketValue(r,c,s))
+        val arr = for i <- 0 to 2 yield
+            var n:Long = (data(8*i) & 0xff) << 56 | (data(8*i+1) & 0xff) << 48 | (data(8*i+2) & 0xff) << 40 | (data(8*i+3) & 0xff) << 32
+            n = n | (data(8*i+4) & 0xff) << 24 | (data(8*i+5) & 0xff) << 16 | (data(8*i+6) & 0xff) << 8 | (data(8*i+7) & 0xff)
+            n
+        Some(new bucketValue(arr(0),arr(1),arr(2)))
+        
     // convert bucket value to byte array.
     def marshal(bkv:bucketValue):Array[Byte] = 
-        /*
-        var buf:ByteBuffer = ByteBuffer.allocate(valueSize)
-        buf.putInt(bkv.root)
-        buf.putInt(bkv.count)
-        buf.putLong(bkv.sequence)
-        buf.array()
-        */
-        var r:Int = bkv.root
-        var c:Int = bkv.count
-        var s1:Long = bkv.sequence >> 32
-        var s2:Long = bkv.sequence
+        var r = bkv.root
+        var c = bkv.count
+        var s = bkv.sequence
         var arr = new Array[Byte](valueSize)
-        for i <- 0 to 3 do
-            arr(3-i) = (r & 0xff).toByte
-            arr(7-i) = (c & 0xff).toByte
-            arr(11-i) = (s1 & 0xff).toByte
-            arr(15-i) = (s2 & 0xff).toByte
+        for i <- 0 to 7 do
+            arr(7-i) = (r & 0xff).toByte
+            arr(15-i) = (c & 0xff).toByte
+            arr(23-i) = (s & 0xff).toByte
             r = r >> 8
             c = c >> 8
-            s1 = s1 >> 8
-            s2 = s2 >> 8
-        arr
-            
+            s = s >> 8
+        arr 
 
 /**
   * bucket trait implement by b+ tree.
@@ -113,13 +97,13 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
     var bkv:bucketValue = null
     var root:Option[Node] = None
     /** cache nodes about writeable tx. */
-    var nodes:Map[Int,Node] = Map[Int,Node]()
+    var nodes:Map[Long,Node] = Map[Long,Node]() 
     /** cache sub-buckets */
     var buckets:Map[String,BTreeBucket] = Map[String,BTreeBucket]()
 
     // keys number
     def name:String = bkname 
-    def length:Int = bkv.count
+    def length:Long = bkv.count
     def value:bucketValue = bkv 
     def closed:Boolean = tx == null || tx.closed
     /**
@@ -351,7 +335,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         // create a new bucket
         var bk = new BTreeBucket(name,tx)
         bk.bkv = new bucketValue(-1,0,0) // null bkv
-        bk.root = Some(new Node(new BlockHeader(-1,leafType,0,0,0))) // null root node
+        bk.root = Some(new Node(new BlockHeader(-1L,leafType,0,0,0))) // null root node
         buckets(name) = bk
         c.node() match 
             case None => Failure(new Exception("bucket create failed: not found create node"))
@@ -437,7 +421,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
      * try to get node or block by block id.
      * 
      */
-    def nodeOrBlock(id:Int):(Option[Node],Option[Block]) = 
+    def nodeOrBlock(id:Long):(Option[Node],Option[Block]) = 
         if nodes.contains(id) then 
             (nodes.get(id),None)
         else 
@@ -498,7 +482,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       * @param id
       * @return
       */
-    def getNode(id:Int):Option[Node] = 
+    def getNode(id:Long):Option[Node] = 
         if nodes.contains(id) then 
             return nodes.get(id)
         getNodeByBlock(tx.block(id))
@@ -744,7 +728,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
             return (node,None)
         
         val threshold = (sz*DB.fillPercent).toInt
-        var n = Block.headerSize
+        var n = BlockHeader.size
         var idx = -1
         breakable(
             for i <- 0 until node.length do
@@ -756,7 +740,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         if idx < 0 then
             return (node,None)
          
-        var nodeB = new Node(new BlockHeader(-1,node.header.flag,0,0,0))
+        var nodeB = new Node(new BlockHeader(-1L,node.header.flag,0,0,0))
         nodeB.elements = node.elements.slice(idx,node.elements.length)
 
         node.elements = node.elements.slice(0,idx)
@@ -766,7 +750,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                 nodeB.parent = Some(p)
                 p.children+=nodeB
             case None =>
-                var parent = new Node(new BlockHeader(-1,branchType,0,0,0))
+                var parent = new Node(new BlockHeader(-1L,branchType,0,0,0))
                 parent.children+=node
                 parent.children+=nodeB
                 node.parent = Some(parent)
@@ -787,7 +771,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
      * release all pages of  node and its child nodes. 
      * 
      */
-    private def freeFrom(id:Int):Unit = 
+    private def freeFrom(id:Long):Unit = 
         if id <= 0 then return None 
         nodeOrBlock(id) match
             case (None,None) => None 

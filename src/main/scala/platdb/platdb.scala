@@ -136,7 +136,7 @@ class DB(val path:String)(using ops:Options):
         // 1.create two null meta object and write to file.
         for i<- 0 to 1 do
             var m = new Meta(i)
-            m.flags = metaType
+            m.flag = metaType
             m.pageSize = DB.defaultPageSize
             m.txid = 0
             m.freelistId = 2
@@ -150,7 +150,7 @@ class DB(val path:String)(using ops:Options):
                 case Failure(e) => throw e 
 
         // 2.create a null freelist and write to file.
-        var fl = new Freelist(new BlockHeader(2,freelistType,0,0,0))
+        var fl = new Freelist(new BlockHeader(2L,freelistType,0,0,0))
         var fbk = blockBuffer.get(DB.defaultPageSize)
         fbk.setid(2)
         val n = fl.writeTo(fbk) 
@@ -159,7 +159,7 @@ class DB(val path:String)(using ops:Options):
             case Failure(e) => throw e 
 
         // 3.craete null root bucket.
-        var root = new Node(new BlockHeader(3,leafType,0,0,0))
+        var root = new Node(new BlockHeader(3L,leafType,0,0,0))
         var rbk = blockBuffer.get(DB.defaultPageSize)
         rbk.setid(3)
         root.writeTo(rbk)
@@ -173,9 +173,9 @@ class DB(val path:String)(using ops:Options):
       * @param id
       * @return
       */
-    private def loadMeta(id:Int):Meta =
+    private def loadMeta(id:Long):Meta =
         val data = fileManager.readAt(id,Meta.size)
-        Meta.readFromBytes(data) match
+        Meta(data) match
             case None => throw new Exception(s"not found meta data from page ${id}")
             case Some(m) => return m
 
@@ -185,9 +185,9 @@ class DB(val path:String)(using ops:Options):
       * @param id
       * @return
       */
-    private def loadFreelist(id:Int):Freelist =
-        val hd = fileManager.readAt(id,Block.headerSize)
-        Block.unmarshalHeader(hd) match
+    private def loadFreelist(id:Long):Freelist =
+        val hd = fileManager.readAt(id,BlockHeader.size)
+        BlockHeader(hd) match
             case None => throw new Exception(s"not found freelist header from page ${id}")
             case Some(h) => 
                 val data = fileManager.readAt(id,h.size)
@@ -452,7 +452,7 @@ class DB(val path:String)(using ops:Options):
       */
     private def free():Unit =
         rTx = rTx.sortWith((t1:Tx,t2:Tx) => t1.id < t2.id)
-        var minid:Int = Int.MaxValue
+        var minid:Long = Long.MaxValue
         if rTx.length > 0 then
             minid = rTx(0).id
       
@@ -462,7 +462,7 @@ class DB(val path:String)(using ops:Options):
         for tx <- rTx do
             freelist.unleash(minid,tx.id-1)
             minid = tx.id+1
-        freelist.unleash(minid,Int.MaxValue)
+        freelist.unleash(minid,Long.MaxValue)
     /**
       * read-write transaction will update the meta info at the end of commit process.
       *
@@ -491,7 +491,7 @@ class DB(val path:String)(using ops:Options):
       *
       * @param txid
       */
-    private[platdb] def removeTx(txid:Int):Unit =
+    private[platdb] def removeTx(txid:Long):Unit =
         var idx = -1
         breakable(
             for i <- 0 until rTx.length do

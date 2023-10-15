@@ -8,7 +8,7 @@ import scala.util.control.Breaks._
 
 trait Transaction:
     // return current transactions identity.
-    def id:Int
+    def id:Long
     // readonly or read-write transaction.
     def writable:Boolean
     // if the transaction is closed.
@@ -58,7 +58,8 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
     var db:DB = null
     var meta:Meta = null
     var root:BTreeBucket = null
-    var blocks:Map[Int,Block] = Map[Int,Block]() // cache dirty blocks,rebalance(merge/split) bucket maybe product them
+    //var blocks:Map[Int,Block] = Map[Int,Block]() // cache dirty blocks,rebalance(merge/split) bucket maybe product them
+    var blocks:Map[Long,Block] = Map[Long,Block]()
     
     def init(db:DB):Unit =
         this.db = db
@@ -68,11 +69,11 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
         if !readonly then
             meta.txid+=1
 
-    def id:Int = meta.txid
+    def id:Long = meta.txid
     def closed:Boolean = db == null
     def writable:Boolean = !readonly
     // return the max pageid
-    def maxPageId:Int = meta.pageId
+    def maxPageId:Long = meta.pageId
     def rootBucket():Option[Bucket] = Some(root)
     // open and return a bucket
     def openBucket(name:String):Try[Bucket] = root.getBucket(name)
@@ -246,7 +247,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
       * @param pgid
       * @return
       */
-    private[platdb] def block(pgid:Int):Try[Block] =
+    private[platdb] def block(pgid:Long):Try[Block] =
         if blocks.contains(pgid) then 
             blocks.get(pgid) match
                 case Some(bk) =>  return Success(bk)
@@ -262,7 +263,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
       *
       * @param pgid
       */
-    private[platdb] def free(pgid:Int):Unit =
+    private[platdb] def free(pgid:Long):Unit =
         block(pgid) match
             case Failure(e) => None 
             case Success(bk) => 
@@ -276,7 +277,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
       * @param size
       * @return
       */
-    private[platdb] def allocate(size:Int):Int =
+    private[platdb] def allocate(size:Int):Long =
         var n = size/DB.pageSize
         if size%DB.pageSize!=0 then n+=1
         // try to allocate space from frreelist
@@ -294,7 +295,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
       * @param size
       * @return
       */
-    private[platdb] def makeBlock(pgid:Int,size:Int):Block = 
+    private[platdb] def makeBlock(pgid:Long,size:Int):Block = 
         var bk = db.blockBuffer.get(size)
         bk.reset()
         bk.setid(pgid)

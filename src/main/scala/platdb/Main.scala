@@ -148,7 +148,7 @@ object PlatDB:
         //deleteBk(db,name)
         //openBk(db,name)
         //openBkAndWrite(db,name,50)
-        //openBkAndTravel(db,name)
+        openBkAndTravel(db,name)
 
         
         

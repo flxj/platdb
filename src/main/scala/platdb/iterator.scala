@@ -249,7 +249,7 @@ private[platdb] class btreeBucketIter(private var bucket:BTreeBucket) extends Bu
         if stack.length == 0 then return
         var r = stack.last
         while r.isBranch do
-            var child:Int = 0  
+            var child:Long = 0 
             r.node match
                 case Some(node) => 
                     if node.elements.length == 0 then 
@@ -272,7 +272,7 @@ private[platdb] class btreeBucketIter(private var bucket:BTreeBucket) extends Bu
         if stack.length == 0 then return
         var r = stack.last
         while r.isBranch do
-            var child:Int = 0  
+            var child:Long = 0  
             r.node match
                 case Some(node) => 
                     if node.elements.length == 0 then 
@@ -337,7 +337,7 @@ private[platdb] class btreeBucketIter(private var bucket:BTreeBucket) extends Bu
       * @param key
       * @param id
       */
-    private def seek(key:String,id:Int):Unit =
+    private def seek(key:String,id:Long):Unit =
         var r:Record = null
         bucket.nodeOrBlock(id) match
             case (None,None) => throw new Exception(s"not found node or block for id:$id")
