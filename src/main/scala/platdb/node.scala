@@ -37,6 +37,21 @@ private[platdb] class NodeElement(var flag:Byte,var child:Long,var key:String,va
     def keySize:Int = key.getBytes.length
     def valueSize:Int = value.getBytes.length
 
+// binary search
+extension (arr:ArrayBuffer[NodeElement])
+    def indexFunc(func:(NodeElement)=>Boolean):Int = 
+        var idx = -1
+        var low = 0
+        var high = arr.length
+        while low < high do
+            val mid = (low+high)/2
+            if func(arr(mid)) then
+                idx = mid
+                high = mid
+            else
+                low = mid+1
+        idx
+
 private[platdb] object Node:
     val indexSize = 17
     // parse node elements form block.
@@ -168,7 +183,7 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
         if elements.length == 0 then 
             elements+=elem 
         else 
-            val idx:Int = elements.indexWhere((e:NodeElement) => e.key>=oldKey)
+            val idx:Int = elements.indexFunc((e:NodeElement) => e.key>=oldKey)
             if idx >= 0 then
                 if elements(idx).key == oldKey then
                     elements(idx) = elem
@@ -184,7 +199,7 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
       */
     def del(key:String):Unit =
         if key.length<=0 then return None
-        val idx = elements.indexWhere((e:NodeElement) => e.key>=key)
+        val idx = elements.indexFunc((e:NodeElement) => e.key>=key)
         if idx>=0 && elements(idx).key == key then
             elements.remove(idx)
             unbalanced = true

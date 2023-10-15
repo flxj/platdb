@@ -123,6 +123,7 @@ def openBkAndTravel(db:DB,name:String):Unit =
         db.close() match
             case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
             case Success(value) => println("close success")
+
 object PlatDB:
     @main def main(args: String*) =
         /*
@@ -148,7 +149,33 @@ object PlatDB:
         //deleteBk(db,name)
         //openBk(db,name)
         //openBkAndWrite(db,name,50)
-        openBkAndTravel(db,name)
+        //openBkAndTravel(db,name)
+
+        var arr = new ArrayBuffer[NodeElement]()
+        arr+= new NodeElement(0,0,"abc","0")
+        arr+= new NodeElement(0,0,"bcd","1")
+        arr+= new NodeElement(0,0,"cde","2")
+        arr+= new NodeElement(0,0,"def","3")
+        arr+= new NodeElement(0,0,"efg","4")
+        arr+= new NodeElement(0,0,"fgh","5")
+        arr+= new NodeElement(0,0,"ghi","6")
+        arr+= new NodeElement(0,0,"hij","7")
+        arr+= new NodeElement(0,0,"ijk","8")
+        arr+= new NodeElement(0,0,"jkl","9")
+
+        val idx0 = arr.indexFunc((e:NodeElement)=>e.key >= "fgh")
+        val idx1 = arr.indexFunc((e:NodeElement)=>e.key >= "eff")
+        val idx2 = arr.indexFunc((e:NodeElement)=>e.key >= "klm")
+        val idx3 = arr.indexFunc((e:NodeElement)=>e.key >= "aaa")
+        val idx4 = arr.indexFunc((e:NodeElement)=>e.key >= "jkk")
+
+        println(s"idx0 = ${idx0} expect 5")
+        println(s"idx1 = ${idx1} expect 4")
+        println(s"idx2 = ${idx2} expect -1")
+        println(s"idx3 = ${idx3} expect 0")
+        println(s"idx4 = ${idx4} expect 9")
+
+        
 
         
         

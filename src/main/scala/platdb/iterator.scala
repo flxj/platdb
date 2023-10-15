@@ -35,7 +35,6 @@ private[platdb] class Record(var node:Option[Node],var block:Option[Block],var i
             case (None,None) => 0
             case (Some(n),_) => n.length
             case (_,Some(b)) => b.header.count
-
 /**
   * 
   *
@@ -362,7 +361,7 @@ private[platdb] class btreeBucketIter(private var bucket:BTreeBucket) extends Bu
         var r = stack.last
         r.node match 
             case Some(node) =>
-                val idx = node.elements.indexWhere((e:NodeElement) => e.key>=key) 
+                val idx = node.elements.indexFunc((e:NodeElement) => e.key>=key) 
                 if idx < 0 then
                     r.index = node.length-1
                 else
@@ -372,7 +371,7 @@ private[platdb] class btreeBucketIter(private var bucket:BTreeBucket) extends Bu
             case None =>
                 bucket.nodeElements(r.block) match
                     case Some(elems) => 
-                        val idx = elems.indexWhere((e:NodeElement) => e.key>=key)
+                        val idx = elems.indexFunc((e:NodeElement) => e.key>=key)
                         if idx < 0 then
                             r.index = elems.length-1
                         else
@@ -383,7 +382,7 @@ private[platdb] class btreeBucketIter(private var bucket:BTreeBucket) extends Bu
     
     // search in branch node.
     private def seekOnNode(key:String,node:Node):Unit =
-        var idx = node.elements.indexWhere((e:NodeElement)=> e.key>=key)
+        var idx = node.elements.indexFunc((e:NodeElement)=> e.key>=key)
         if idx < 0 then
             idx = node.elements.length - 1
         else
@@ -401,7 +400,7 @@ private[platdb] class btreeBucketIter(private var bucket:BTreeBucket) extends Bu
         bucket.nodeElements(block) match
             case None => None
             case Some(elems) =>
-                var idx:Int = elems.indexWhere((e:NodeElement) => e.key>=key)
+                var idx:Int = elems.indexFunc((e:NodeElement) => e.key>=key)
                 if idx < 0 then
                     idx = elems.length - 1
                 else
