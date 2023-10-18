@@ -90,6 +90,30 @@ def openBkAndWrite(db:DB,name:String,count:Int):Unit =
         db.close() match
             case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
             case Success(value) => println("close success")
+def openBkAndRead(db:DB,name:String,keys:Seq[String]):Unit =
+    try
+        db.open() match
+            case Failure(exception) => throw exception
+            case Success(value) => println("open success")
+
+        db.view(
+            (tx:Transaction) =>
+                tx.openBucket(name) match
+                    case Failure(e) => throw e
+                    case Success(bk) => 
+                        for k <- keys do
+                            bk.get(k) match
+                                case Failure(e) => throw e
+                                case Success(v) => println(s"GET key:$k value ${v}")
+        ) match
+            case Success(_) => println(s"READ bucket $name success")
+            case Failure(e) => throw e
+    catch
+        case e:Exception => throw e
+    finally
+        db.close() match
+            case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
+            case Success(value) => println("close success")
 
 def openBkAndTravel(db:DB,name:String):Unit =
     try
@@ -144,36 +168,13 @@ object PlatDB:
         val path:String =s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test"
         val name:String ="bk1"
         var db = new DB(path)
-        //createBk(db,name)
+        createBk(db,name)
         //openBk(db,name)
         //deleteBk(db,name)
         //openBk(db,name)
-        //openBkAndWrite(db,name,50)
-        //openBkAndTravel(db,name)
-
-        var arr = new ArrayBuffer[NodeElement]()
-        arr+= new NodeElement(0,0,"abc","0")
-        arr+= new NodeElement(0,0,"bcd","1")
-        arr+= new NodeElement(0,0,"cde","2")
-        arr+= new NodeElement(0,0,"def","3")
-        arr+= new NodeElement(0,0,"efg","4")
-        arr+= new NodeElement(0,0,"fgh","5")
-        arr+= new NodeElement(0,0,"ghi","6")
-        arr+= new NodeElement(0,0,"hij","7")
-        arr+= new NodeElement(0,0,"ijk","8")
-        arr+= new NodeElement(0,0,"jkl","9")
-
-        val idx0 = arr.indexFunc((e:NodeElement)=>e.key >= "fgh")
-        val idx1 = arr.indexFunc((e:NodeElement)=>e.key >= "eff")
-        val idx2 = arr.indexFunc((e:NodeElement)=>e.key >= "klm")
-        val idx3 = arr.indexFunc((e:NodeElement)=>e.key >= "aaa")
-        val idx4 = arr.indexFunc((e:NodeElement)=>e.key >= "jkk")
-
-        println(s"idx0 = ${idx0} expect 5")
-        println(s"idx1 = ${idx1} expect 4")
-        println(s"idx2 = ${idx2} expect -1")
-        println(s"idx3 = ${idx3} expect 0")
-        println(s"idx4 = ${idx4} expect 9")
+        openBkAndWrite(db,name,500)
+        openBkAndTravel(db,name)
+        //openBkAndRead(db,name,List[String]("key3"))
 
         
 

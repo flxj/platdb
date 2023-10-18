@@ -35,7 +35,8 @@ private[platdb] case class NodeIndex(offset:Int,keySize:Int,valSize:Long,flag:By
   */
 private[platdb] class NodeElement(var flag:Byte,var child:Long,var key:String,var value:String): // TODO: use Array[Byte] as key,value type
     def keySize:Int = key.getBytes.length
-    def valueSize:Int = value.getBytes.length
+    def valueSize:Int = if flag!=bucketType then value.getBytes.length else value.getBytes("ascii").length
+    def getValueBytes:Array[Byte] = if flag!=bucketType then value.getBytes() else value.getBytes("ascii")
 
 // binary search
 extension (arr:ArrayBuffer[NodeElement])
@@ -259,7 +260,7 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
 
             bk.write(idx,Node.marshalIndex(ni))
             bk.write(offset,e.key.getBytes)
-            bk.append(e.value.getBytes)
+            bk.append(e.getValueBytes)
            
             idx+=Node.indexSize
             offset = bk.size

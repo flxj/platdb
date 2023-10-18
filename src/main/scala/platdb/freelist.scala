@@ -35,7 +35,7 @@ private[platdb] object Meta:
                 meta.pageId = arr(0)
                 meta.freelistId = arr(1)
                 meta.txid = arr(2)
-                meta.root = new bucketValue(arr(3),arr(4),arr(5))
+                meta.root = new btreeBucketValue(arr(3),arr(4),arr(5))
                 meta.pageSize = sz
                 Some(meta)
 
@@ -46,7 +46,7 @@ private[platdb] class Meta(val id:Long) extends Persistence:
     var freelistId:Long = -1
     var pageId:Long = -1
     var txid:Long = -1
-    var root:bucketValue = null
+    var root:btreeBucketValue = null
 
     override def clone:Meta =
         var m = new Meta(id)
@@ -55,7 +55,7 @@ private[platdb] class Meta(val id:Long) extends Persistence:
         m.freelistId = freelistId
         m.pageId = pageId
         m.txid = txid
-        m.root = new bucketValue(root.root,root.count,root.sequence)
+        m.root = new btreeBucketValue(root.root,root.count,root.sequence)
         m
     def size():Int = Meta.size
     def writeTo(bk:Block):Int =

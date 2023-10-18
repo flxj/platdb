@@ -52,32 +52,13 @@ object Bucket:
             case Failure(e) => throw e
 
 // count is the number of keys in current bucket
-private[platdb] class bucketValue(var root:Long,var count:Long,var sequence:Long): // TODO Int-->Long
-    def getBytes:Array[Byte] = BTreeBucket.marshal(this)
-    override def toString(): String = new String(BTreeBucket.marshal(this))
-    override def clone:bucketValue = new bucketValue(root,count,sequence)
-
-//
-private[platdb] object BTreeBucket:
-    // bucket value size when convert byte array.
-    //val valueSize:Int = 16
-    val valueSize:Int = 24
-    //
-    def apply(data:Array[Byte]):Option[bucketValue] =
-        if data.length!=valueSize then
-            return None 
-        val arr = for i <- 0 to 2 yield
-            var n:Long = (data(8*i) & 0xff) << 56 | (data(8*i+1) & 0xff) << 48 | (data(8*i+2) & 0xff) << 40 | (data(8*i+3) & 0xff) << 32
-            n = n | (data(8*i+4) & 0xff) << 24 | (data(8*i+5) & 0xff) << 16 | (data(8*i+6) & 0xff) << 8 | (data(8*i+7) & 0xff)
-            n
-        Some(new bucketValue(arr(0),arr(1),arr(2)))
-        
+private[platdb] class btreeBucketValue(var root:Long,var count:Long,var sequence:Long):
     // convert bucket value to byte array.
-    def marshal(bkv:bucketValue):Array[Byte] = 
-        var r = bkv.root
-        var c = bkv.count
-        var s = bkv.sequence
-        var arr = new Array[Byte](valueSize)
+    def getBytes:Array[Byte] = 
+        var r = root
+        var c = count
+        var s = sequence
+        var arr = new Array[Byte](BTreeBucket.valueSize)
         for i <- 0 to 7 do
             arr(7-i) = (r & 0xff).toByte
             arr(15-i) = (c & 0xff).toByte
@@ -85,7 +66,22 @@ private[platdb] object BTreeBucket:
             r = r >> 8
             c = c >> 8
             s = s >> 8
-        arr 
+        arr
+    override def toString(): String = new String(getBytes,"ascii")
+    override def clone:btreeBucketValue = new btreeBucketValue(root,count,sequence)
+
+//
+private[platdb] object BTreeBucket:
+    // bucket value size when convert byte array.
+    val valueSize:Int = 24
+    def apply(data:Array[Byte]):Option[btreeBucketValue] =
+        if data.length!=valueSize then
+            return None 
+        val arr = for i <- 0 to 2 yield
+            var n:Long = (data(8*i) & 0xff) << 56 | (data(8*i+1) & 0xff) << 48 | (data(8*i+2) & 0xff) << 40 | (data(8*i+3) & 0xff) << 32
+            n = n | (data(8*i+4) & 0xff) << 24 | (data(8*i+5) & 0xff) << 16 | (data(8*i+6) & 0xff) << 8 | (data(8*i+7) & 0xff)
+            n
+        Some(new btreeBucketValue(arr(0),arr(1),arr(2)))
 
 /**
   * bucket trait implement by b+ tree.
@@ -94,7 +90,7 @@ private[platdb] object BTreeBucket:
   * @param tx
   */
 private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
-    var bkv:bucketValue = null
+    var bkv:btreeBucketValue = null
     var root:Option[Node] = None
     /** cache nodes about writeable tx. */
     var nodes:Map[Long,Node] = Map[Long,Node]() 
@@ -104,7 +100,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
     // keys number
     def name:String = bkname 
     def length:Long = bkv.count
-    def value:bucketValue = bkv 
+    def value:btreeBucketValue = bkv 
     def closed:Boolean = tx == null || tx.closed
     /**
       * return a bucket iterator.
@@ -286,9 +282,9 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                 v match 
                     case None => Failure(new Exception(s"query bucket $name value failed"))
                     case Some(data) =>
-                        val bytes = data.getBytes()
+                        val bytes = data.getBytes("ascii")
                         BTreeBucket(bytes) match
-                            case None => return Failure(new Exception(s"parse bucket $name value failed,expect data length is 16 but actual get ${bytes.length}")) 
+                            case None => return Failure(new Exception(s"parse bucket $name value failed,expect data length is ${BTreeBucket.valueSize} but actual get ${bytes.length}")) 
                             case Some(value) =>
                                 var bk = new BTreeBucket(name,tx)
                                 bk.bkv = value 
@@ -324,7 +320,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                     v match 
                         case None => None
                         case Some(data) =>
-                            BTreeBucket(data.getBytes()) match
+                            BTreeBucket(data.getBytes("ascii")) match
                                 case None => return Failure(new Exception(s"parse bucket $name value failed"))  
                                 case Some(value) =>
                                     var bk = new BTreeBucket(name,tx)
@@ -334,7 +330,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                     return Failure(new Exception(s"bucket create failed: bucket $name is already exists"))
         // create a new bucket
         var bk = new BTreeBucket(name,tx)
-        bk.bkv = new bucketValue(-1,0,0) // null bkv
+        bk.bkv = new btreeBucketValue(-1,0,0) // null bkv
         bk.root = Some(new Node(new BlockHeader(-1L,leafType,0,0,0))) // null root node
         buckets(name) = bk
         c.node() match 

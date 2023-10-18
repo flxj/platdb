@@ -229,7 +229,7 @@ private[platdb] class btreeBucketIter(private var bucket:BTreeBucket) extends Bu
       * @param key
       * @return
       */
-    private[platdb] def search(key:String):(Option[String],Option[String],Int) =
+    private[platdb] def search(key:String):(Option[String],Option[String],Byte) =
         if bucket.closed then return (None,None,0)
         stack = List[Record]()
         seek(key,bucket.bkv.root)
@@ -264,7 +264,7 @@ private[platdb] class btreeBucketIter(private var bucket:BTreeBucket) extends Bu
 
         // top-down: convert blocks on search path to nodes.
         breakable(
-            for r <- stack.tail do 
+            for r <- stack.init do 
                 bucket.getNodeChild(n,r.index) match
                     case Some(nd) => n = Some(nd) 
                     case None => break()
