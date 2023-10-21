@@ -425,8 +425,9 @@ class DB(val path:String)(using ops:Options):
             metaLock.lock()
             if closed then
                 throw DB.exceptionDBClosed
-            var tx = new Tx(false)
-            tx.init(this)
+            //var tx = new Tx(false)
+            //tx.init(this)
+            var tx = Tx(false,this)
             rwTx = Some(tx)
             free()
             Success(tx)
@@ -444,8 +445,9 @@ class DB(val path:String)(using ops:Options):
             metaLock.lock()
             if closed then
                 throw DB.exceptionDBClosed
-            var tx = new Tx(true)
-            tx.init(this)
+            //var tx = new Tx(true)
+            //tx.init(this)
+            var tx = Tx(true,this)
             rTx.addOne(tx)
             Success(tx)
         catch

@@ -148,6 +148,30 @@ def openBkAndTravel(db:DB,name:String):Unit =
             case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
             case Success(value) => println("close success")
 
+def openBkAndCheck(db:DB,name:String,keys:Seq[String]):Unit =
+    try
+        db.open() match
+            case Failure(exception) => throw exception
+            case Success(value) => println("open success")
+
+        db.view((tx:Transaction) => 
+            tx.openBucket(name) match
+                case Failure(e) => throw e
+                case Success(bk) => 
+                    for k <- keys do
+                        bk.contains(k) match
+                            case Success(_) => println(s"key:$k Exists")
+                            case Failure(exception) => println(s"key:$k,${exception.getMessage()}")
+        ) match
+            case Success(_) => println("check success")
+            case Failure(e) => throw e
+    catch
+        case e:Exception => throw e
+    finally
+        db.close() match
+            case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
+            case Success(value) => println("close success")
+
 object PlatDB:
     @main def main(args: String*) =
         /*
@@ -168,13 +192,14 @@ object PlatDB:
         val path:String =s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test"
         val name:String ="bk1"
         var db = new DB(path)
-        createBk(db,name)
+        //createBk(db,name)
         //openBk(db,name)
         //deleteBk(db,name)
         //openBk(db,name)
-        openBkAndWrite(db,name,500)
-        openBkAndTravel(db,name)
+        //openBkAndWrite(db,name,500)
+        //openBkAndTravel(db,name)
         //openBkAndRead(db,name,List[String]("key3"))
+        openBkAndCheck(db,name,List[String]("key0","key100","key123","key300","key500","key450","key600","key789"))
 
         
 

@@ -26,6 +26,18 @@ trait Transaction:
     // delete a bucket,if bucket not exists will throw an exception.
     def deleteBucket(name:String):Try[Boolean]
 
+    // ZSet methods
+    def openZSet(name:String):Try[ZSet]
+    def createZSet(name:String):Try[ZSet]
+    def createZSetIfNotExists(name:String):Try[ZSet]
+    def deleteZSet(name:String):Try[Unit]
+
+    // list methods.
+    def openList(name:String):Try[BList]
+    def createList(name:String):Try[BList]
+    def createListIfNotExists(name:String):Try[BList]
+    def deleteList(name:String):Try[Unit]
+
 /*
 A: 
     Reads and writes to transactions occur in memory, so if a transaction fails before committing, it does not affect the contents of the disk
@@ -53,21 +65,24 @@ D:
     Modifications to the DB by a successfully committed write transaction are persisted to the disk file,
     and an uncommitted transaction does not affect the contents of the DB
 */
+private[platdb] object Tx:
+    def apply(readonly:Boolean,db:DB):Tx =
+        var tx = new Tx(readonly)
+        tx.db = db
+        tx.meta = db.meta.clone
+        tx.root = new BTreeBucket("root",tx)
+        tx.root.bkv = tx.meta.root.clone
+        if !readonly then
+            tx.meta.txid+=1
+        tx
+
 private[platdb] class Tx(val readonly:Boolean) extends Transaction:
     var sysCommit:Boolean = false 
     var db:DB = null
     var meta:Meta = null
     var root:BTreeBucket = null
-    //var blocks:Map[Int,Block] = Map[Int,Block]() // cache dirty blocks,rebalance(merge/split) bucket maybe product them
+    // cache dirty blocks,rebalance(merge/split) bucket maybe product them.
     var blocks:Map[Long,Block] = Map[Long,Block]()
-    
-    def init(db:DB):Unit =
-        this.db = db
-        meta = db.meta.clone
-        root = new BTreeBucket("root",this)
-        root.bkv = meta.root.clone
-        if !readonly then
-            meta.txid+=1
 
     def id:Long = meta.txid
     def closed:Boolean = db == null
@@ -301,3 +316,15 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
         bk.setid(pgid)
         blocks(pgid) = bk
         bk 
+    
+    // ZSet methods
+    def openZSet(name:String):Try[ZSet] = ???
+    def createZSet(name:String):Try[ZSet] = ???
+    def createZSetIfNotExists(name:String):Try[ZSet] = ???
+    def deleteZSet(name:String):Try[Unit] = ???
+
+    // list methods.
+    def openList(name:String):Try[BList] = ???
+    def createList(name:String):Try[BList] = ???
+    def createListIfNotExists(name:String):Try[BList] = ???
+    def deleteList(name:String):Try[Unit] = ???

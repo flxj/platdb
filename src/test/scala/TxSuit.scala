@@ -1,6 +1,6 @@
 import platdb._
 import platdb.defaultOptions
-import platdb.Bucket._
+import platdb.Collection._
 
 import scala.util.Failure
 import scala.util.Success

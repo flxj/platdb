@@ -3,10 +3,15 @@ package platdb
 import scala.util.Try
 import scala.util.control.Breaks._
 
+trait Iterable:
+    def length:Long
+    def iterator:CollectionIterator
+
+
 /**
   * BucketIterator is used to traverse buckets.
   */
-trait BucketIterator extends Iterator[(Option[String],Option[String])]:
+trait CollectionIterator extends Iterator[(Option[String],Option[String])]:
     /**
       * Retrieves the specified element.
       *
@@ -72,7 +77,7 @@ private[platdb] class Record(var node:Option[Node],var block:Option[Block],var i
   *
   * @param bucket
   */
-private[platdb] class btreeBucketIter(private var bucket:BTreeBucket) extends BucketIterator:
+private[platdb] class BTreeBucketIter(private var bucket:BTreeBucket) extends CollectionIterator:
     // use a stack to record serach path.
     private var stack:List[Record] = List[Record]()
     /**

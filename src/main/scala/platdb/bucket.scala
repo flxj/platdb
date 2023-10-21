@@ -7,49 +7,6 @@ import scala.util.Try
 import scala.util.Success
 import scala.util.Failure
 
-/**
-  * 
-  */
-trait Bucket:
-    def name:String
-    def length:Long
-    def closed:Boolean
-    def iterator:BucketIterator
-    def contains(key:String):Try[Boolean]
-    def get(key:String):Try[String]
-    def put(key:String,value:String):Try[Boolean]
-    def delete(key:String):Try[Boolean]
-    def getBucket(name:String):Try[Bucket]
-    def createBucket(name:String):Try[Bucket]
-    def createBucketIfNotExists(name:String):Try[Bucket] 
-    def deleteBucket(name:String):Try[Boolean]
-
-    def apply(key:String):String
-    def +(key:String,value:String):Unit
-    def +(elems:Seq[(String,String)]):Unit
-    def -(key:String):Unit
-    def -(keys:Seq[String]):Unit
-
-/**
-  * some bucket methods with transaction parameter.
-  */
-object Bucket:
-    def openBucket(name:String)(using tx:Transaction):Bucket =
-        tx.openBucket(name) match
-            case Success(bk) => bk
-            case Failure(e) => throw e 
-    def createBucket(name:String)(using tx:Transaction):Bucket =
-        tx.createBucket(name) match
-            case Success(bk) => bk
-            case Failure(e) => throw e
-    def createBucketIfNotExists(name:String)(using tx:Transaction):Bucket =
-        tx.createBucketIfNotExists(name) match
-            case Success(bk) => bk
-            case Failure(e) => throw e
-    def deleteBucket(name:String)(using tx:Transaction):Boolean = 
-        tx.deleteBucket(name) match
-            case Success(_) => true
-            case Failure(e) => throw e
 
 // count is the number of keys in current bucket
 private[platdb] class btreeBucketValue(var root:Long,var count:Long,var sequence:Long):
@@ -107,7 +64,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       *
       * @return BucketIterator
       */
-    def iterator:BucketIterator = new btreeBucketIter(this)
+    def iterator:CollectionIterator = new BTreeBucketIter(this)
     /**
       * 
       *
@@ -194,6 +151,17 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                         case Some(s) => return Success(s) 
         Failure(DB.exceptionValueNotFound)
     /**
+      * 
+      *
+      * @param key
+      * @param defalutValue
+      * @return
+      */
+    def getOrElse(key:String,defalutValue:String):String =
+        get(key) match
+            case Failure(_) => defalutValue
+            case Success(v) => v 
+    /**
       * put method insert or update(overwritten) the value for a key in the bucket.
       * Put operation will failed if the key is null or too large, or the value is too large.
       * If the bucket was managed by a readonly transaction, not allow put operation on it.
@@ -213,7 +181,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         else if value.length>=DB.maxValueSize then
             return Failure(DB.exceptionValueTooLarge)
 
-        var c = new btreeBucketIter(this)
+        var c = new BTreeBucketIter(this)
         c.search(key) match 
             //case (None,_,_) => return Failure(DB.exceptionValueNotFound) // TODO use Try
             case (None,_,_) => None
@@ -242,7 +210,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         else if key.length <=0 then
             return Failure(DB.exceptionKeyIsNull) 
         
-        var c = new btreeBucketIter(this)
+        var c = new BTreeBucketIter(this)
         c.search(key) match 
             case (None,_,_) => return Failure(DB.exceptionValueNotFound)
             case (Some(k),_,f) =>
@@ -273,7 +241,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                 case Some(bk) => return Success(bk)
                 case None =>  return Failure(new Exception(s"buckets cache failed,not found $name"))
 
-        var c = new btreeBucketIter(this)
+        var c = new BTreeBucketIter(this)
         c.search(name) match
             case (None,_,_) => return Failure(new Exception(s"not found bucket $name"))
             case (Some(k),v,f) => 
@@ -309,7 +277,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         else if buckets.contains(name) then 
             return Failure(new Exception(s"bucket $name is already exists"))
         
-        var c = new btreeBucketIter(this)
+        var c = new BTreeBucketIter(this)
         c.search(name) match
             //case (None,_,_) => return Failure(new Exception("bucket create failed: not found create node"))
             case (None,_,_) => None
@@ -375,7 +343,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         else if name.length() >= DB.maxKeySize then
             return Failure(DB.exceptionKeyTooLarge)
         
-        var c = new btreeBucketIter(this)
+        var c = new BTreeBucketIter(this)
         c.search(name) match 
             case (None,_,_) => return Failure(new Exception(s"not found key $name")) 
             case (Some(k),_,f) => 
@@ -631,7 +599,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
             bucket.root match 
                 case None => None // Skip writing the bucket if there are no materialized nodes.
                 case Some(n) =>
-                    var c = new btreeBucketIter(this)
+                    var c = new BTreeBucketIter(this)
                     c.search(name) match 
                         case (None,_,_) => throw new Exception(s"misplaced bucket header:$name")
                         case (Some(k),_,flag) =>
