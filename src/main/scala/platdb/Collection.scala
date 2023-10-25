@@ -9,34 +9,82 @@ import scala.util.{Try,Success,Failure}
 object DataType extends Enumeration:
     type DataType = Value 
     val Bucket = Value(1,"Bucket")
-    val ZSet = Value(2,"ZSet")
+    val BSet = Value(2,"BSet")
     val BList = Value(3,"BList")
     val Unknown = Value(4,"Unknown")
 
     def parse(id:Int):DataType =
         id match
             case 1 => Bucket
-            case 2 => ZSet
+            case 2 => BSet
             case 3 => BList
             case _ => Unknown
 
 /**
+  * CollectionIterator is used to traverse platdb data structs.
+  */
+trait CollectionIterator extends Iterator[(Option[String],Option[String])]:
+    /**
+      * Retrieves the specified element.
+      *
+      * @param key
+      * @return
+      */
+    def find(key:String):(Option[String],Option[String])
+    /**
+      * moves the iterator to the first item in the bucket and returns its key and value.
+      *
+      * @return
+      */
+    def first():(Option[String],Option[String]) 
+    /**
+      * moves the iterator to the last item in the bucket and returns its key and value.
+      *
+      * @return
+      */
+    def last():(Option[String],Option[String]) 
+    /**
+      * Determine if there is the next element of the current iterator.
+      *
+      * @return
+      */
+    def hasNext():Boolean
+    /**
+      * moves the iterator to the next item in the bucket and returns its key and value.
+      *
+      * @return
+      */
+    def next():(Option[String],Option[String])
+    /**
+      * Determine whether the current iterator has the previous element.
+      *
+      * @return
+      */
+    def hasPrev():Boolean 
+    /**
+      * moves the iterator to the previous item in the bucket and returns its key and value.
+      *
+      * @return
+      */
+    def prev():(Option[String],Option[String]) 
+
+/**
   * 
   */
-trait ZSet extends Iterable:
-    def name:String
-    def contains(key:String):Try[Boolean]
-    def add(keys:String*):Try[Unit]
-    def remove(keys:String*):Try[Unit]
-    def +(key:String):Unit
-    def -(key:String):Unit
+trait Iterable:
+    /**
+      * 
+      *
+      * @return
+      */
+    def length:Long
+    /**
+      * 
+      *
+      * @return
+      */
+    def iterator:CollectionIterator
 
-    def intersect(set:ZSet):Try[ZSet]
-    def intersect(set:Set[String]):Try[ZSet]
-    def union(set:ZSet):Try[ZSet]
-    def union(set:Set[String]):Try[ZSet]
-    def difference(set:ZSet):Try[ZSet]
-    def difference(set:Set[String]):Try[ZSet]
 
 /**
   * 
@@ -51,7 +99,6 @@ trait Bucket extends Iterable:
     def createBucket(name:String):Try[Bucket]
     def createBucketIfNotExists(name:String):Try[Bucket] 
     def deleteBucket(name:String):Try[Boolean]
-
     def getOrElse(key:String,defalutValue:String):String
     def apply(key:String):String
     def +(key:String,value:String):Unit
@@ -59,35 +106,57 @@ trait Bucket extends Iterable:
     def -(key:String):Unit
     def -(keys:Seq[String]):Unit
 
+
+/**
+  * 
+  */
+trait BSet extends Iterable:
+    def name:String
+    def contains(key:String):Try[Boolean]
+    def add(keys:String*):Try[Unit]
+    def remove(keys:String*):Try[Unit]
+    def +(key:String):Unit
+    def -(key:String):Unit
+    def intersect(set:BSet):Try[BSet]
+    def intersect(set:Set[String]):Try[BSet]
+    def union(set:BSet):Try[BSet]
+    def union(set:Set[String]):Try[BSet]
+    def difference(set:BSet):Try[BSet]
+    def difference(set:Set[String]):Try[BSet]
+
+
 /**
   * 
   */
 trait BList extends Iterable:
     def name:String 
     def isEmpty: Boolean
-    def head:Try[(String,String)]
-    def last:Try[(String,String)]
-    def slice(from:Int,until:Int):BList
+    def get(idx:Int):Try[String]
+    def head:Try[String]
+    def last:Try[String]
+    def slice(from:Int,until:Int):Try[BList]
     def reverse:BList
     def init:BList
     def tail:BList
-    def filter(p:(String,String) => Boolean): BList
-    def take(n: Int): BList
-    def takeRight(n: Int): BList
+    def filter(p:(String) => Boolean): BList
+    def find(p:(String) => Boolean):Int
+    def take(n: Int): Try[BList]
+    def takeRight(n: Int): Try[BList]
     def drop(n: Int): Try[Unit]
     def dropRight(n: Int): Try[Unit]
-    def insert(index: Int, elem:(String,String)): Try[Unit]
-    def insert(index: Int, elems: Seq[(String,String)]): Try[Unit]
-    def prepend(elem: (String,String)):Try[Unit]
-    def append(elem: (String,String)):Try[Unit]
+    def insert(index: Int, elem:String): Try[Unit]
+    def insert(index: Int, elems:Seq[String]): Try[Unit]
+    def append(elem:String):Try[Unit]
+    def append(elems:Seq[String]):Try[Unit]
+    def prepend(elem: String):Try[Unit]
+    def prepend(elems: Seq[String]):Try[Unit]
     def remove(index: Int): Try[Unit]
     def remove(index: Int, count: Int):Try[Unit]
-    def update(index: Int, elem:(String,String)): Try[Unit]
-
-    def exists(p:(String,String) => Boolean): Boolean
+    def update(index: Int, elem:String): Try[Unit]
+    def exists(p:(String) => Boolean): Boolean
     def apply(n: Int):String
-    def :+(elem:(String,String)):Unit
-    def +:(elem:(String,String)):Unit
+    def :+(elem:String):Unit
+    def +:(elem:String):Unit
     
 
 /**
@@ -125,20 +194,20 @@ object Collection:
       * @param tx
       * @return
       */
-    def openZSet(name:String)(using tx:Transaction):ZSet =
-        tx.openZSet(name) match
+    def openBSet(name:String)(using tx:Transaction):BSet =
+        tx.openBSet(name) match
             case Success(set) => set
             case Failure(e) => throw e 
-    def createZSet(name:String)(using tx:Transaction):ZSet =
-        tx.createZSet(name) match
+    def createBSet(name:String)(using tx:Transaction):BSet =
+        tx.createBSet(name) match
             case Success(set) => set
             case Failure(e) => throw e
-    def createZSetIfNotExists(name:String)(using tx:Transaction):ZSet =
-        tx.createZSetIfNotExists(name) match
+    def createBSetIfNotExists(name:String)(using tx:Transaction):BSet =
+        tx.createBSetIfNotExists(name) match
             case Success(set) => set
             case Failure(e) => throw e
-    def deleteZSet(name:String)(using tx:Transaction):Boolean = 
-        tx.deleteZSet(name) match
+    def deleteBSet(name:String)(using tx:Transaction):Boolean = 
+        tx.deleteBSet(name) match
             case Success(_) => true
             case Failure(e) => throw e
     /**

@@ -48,6 +48,7 @@ object DB:
     val exceptionNotAllowCommitSysTx = new Exception("not allow to commit system transaction manually")
     val exceptionNotAllowRollbackSysTx = new Exception("not allow to rollback system transaction manually")
     val exceptionNotAllowCommitRTx = new Exception("cannot commit read-only tx")
+    val exceptionListIsEmpty = new Exception("the list is empty")
     
     def isNotExists(e:Exception):Boolean = false // TODO
     def isAlreadyExists(e:Exception):Boolean = false

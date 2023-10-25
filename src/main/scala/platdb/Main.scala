@@ -172,6 +172,62 @@ def openBkAndCheck(db:DB,name:String,keys:Seq[String]):Unit =
             case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
             case Success(value) => println("close success")
 
+def testIntersect(arr1:Array[Int],arr2:Array[Int]):ArrayBuffer[Int] =
+    var i = 0
+    var j = 0
+    var res = new ArrayBuffer[Int]()
+    while i<arr1.length && j<arr2.length do
+        while arr1(i) < arr2(j) do
+            i+=1
+        if i>=arr1.length then
+            return res
+        if arr1(i) == arr2(j) then
+            res+=arr1(i)
+            i+=1
+        j+=1
+    res
+
+def testUnion(arr1:Array[Int],arr2:Array[Int]):ArrayBuffer[Int] =
+    var i = 0
+    var j = 0
+    var res = new ArrayBuffer[Int]()
+    while i<arr1.length && j<arr2.length do
+        while arr1(i) < arr2(j) do
+            res+=arr1(i)
+            i+=1
+        if i<arr1.length then
+            if arr1(i) == arr2(j) then
+                res+=arr1(i)
+                i+=1
+            else 
+                res+=arr2(j)
+            j+=1
+    while i<arr1.length do
+        res+=arr1(i)
+        i+=1
+    while j<arr2.length do
+        res+=arr2(j)
+        j+=1
+    res
+
+def testDifference(arr1:Array[Int],arr2:Array[Int]):ArrayBuffer[Int] =
+    var i = 0
+    var j = 0
+    var res = new ArrayBuffer[Int]()
+    while i<arr1.length && j<arr2.length do
+        while arr1(i) < arr2(j) do
+            res+=arr1(i)
+            i+=1
+        if i<arr1.length then
+            if arr1(i) == arr2(j) then
+                i+=1
+            j+=1
+    while i<arr1.length do
+        res+=arr1(i)
+        i+=1
+    res
+        
+
 object PlatDB:
     @main def main(args: String*) =
         /*
@@ -199,7 +255,23 @@ object PlatDB:
         //openBkAndWrite(db,name,500)
         //openBkAndTravel(db,name)
         //openBkAndRead(db,name,List[String]("key3"))
-        openBkAndCheck(db,name,List[String]("key0","key100","key123","key300","key500","key450","key600","key789"))
+        //openBkAndCheck(db,name,List[String]("key0","key100","key123","key300","key500","key450","key600","key789"))
+
+        val arr1 = Array[Int](1,2,3,4,5,6,7,8,9,10,11,12,13)
+        val arr2 = Array[Int](-1,-5,5,7,9)
+
+        val intsect = testIntersect(arr1,arr2)
+        println(s"1 ${intsect}")
+
+        val union = testUnion(arr1,arr2)
+        println(s"2 ${union}")
+
+        val diff = testDifference(arr1,arr2)
+        println(s"3 ${diff}")
+
+
+
+
 
         
 

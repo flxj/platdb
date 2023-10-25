@@ -8,7 +8,7 @@ import scala.collection.mutable.TreeMap
   *
   * @param bk
   */
-private[platdb] class BTreeSet(var bk:BTreeBucket) extends ZSet:
+private[platdb] class BTreeSet(var bk:BTreeBucket) extends BSet:
     def name:String = bk.name
     def length:Long = bk.length
     def closed:Boolean = bk.closed
@@ -46,8 +46,9 @@ private[platdb] class BTreeSet(var bk:BTreeBucket) extends ZSet:
       * @param set
       * @return
       */
-    def intersect(set:ZSet):Try[ZSet] = 
-        var tempSet = new TempZSet("intersect")
+    def intersect(set:BSet):Try[BSet] = 
+        /*
+        var tempSet = new TempBSet("intersect")
         try
             for (k,_) <- set.iterator do
                 k match
@@ -60,8 +61,48 @@ private[platdb] class BTreeSet(var bk:BTreeBucket) extends ZSet:
             Success(tempSet)
         catch
             case e:Exception => Failure(e)
-    def intersect(set:Set[String]):Try[ZSet] = 
-        var tempSet = new TempZSet("intersect")
+        */
+        var tempSet = new TempBSet("intersect")
+        try
+            val it1 = iterator
+            val it2 = set.iterator
+            while it1.hasNext() && it2.hasNext() do
+                val (k1,_) = it1.next()
+                val (k2,_) = it2.next()
+                (k1,k2) match
+                    case (Some(key1),Some(key2)) =>
+                        if key1 < key2 then
+                            var continue = true
+                            while continue && it1.hasNext() do
+                                val (k,_) = it1.next()
+                                k match 
+                                    case Some(key) => 
+                                        if key == key2 then
+                                            tempSet+(key)
+                                        if key >= key2 then
+                                            continue = false
+                                    case None => None
+                        else if key1 == key2 then
+                            tempSet+(key1)
+                        else
+                            var continue = true
+                            while continue && it2.hasNext() do
+                                val (k,_) = it2.next()
+                                k match 
+                                    case Some(key) => 
+                                        if key == key1 then
+                                            tempSet+(key)
+                                        if key >= key1 then
+                                            continue = false
+                                    case None => None
+                    case _ => None
+            
+            Success(tempSet)
+        catch
+            case e:Exception => Failure(e)
+        
+    def intersect(set:Set[String]):Try[BSet] = 
+        var tempSet = new TempBSet("intersect")
         try
             for (k,_) <- iterator do
                 k match
@@ -76,8 +117,8 @@ private[platdb] class BTreeSet(var bk:BTreeBucket) extends ZSet:
       * @param set
       * @return
       */
-    def union(set:ZSet):Try[ZSet] = 
-        var tempSet = new TempZSet("union")
+    def union(set:BSet):Try[BSet] = 
+        var tempSet = new TempBSet("union")
         try
             for (k,_) <- iterator do
                 k match
@@ -90,8 +131,9 @@ private[platdb] class BTreeSet(var bk:BTreeBucket) extends ZSet:
             Success(tempSet)
         catch
             case e:Exception => Failure(e)
-    def union(set:Set[String]):Try[ZSet] = 
-        var tempSet = new TempZSet("union")
+        
+    def union(set:Set[String]):Try[BSet] = 
+        var tempSet = new TempBSet("union")
         try
             for (k,_) <- iterator do
                 k match
@@ -108,14 +150,14 @@ private[platdb] class BTreeSet(var bk:BTreeBucket) extends ZSet:
       * @param set
       * @return
       */
-    def difference(set:ZSet):Try[ZSet] = 
-        var tempSet = new TempZSet("difference")
+    def difference(set:BSet):Try[BSet] = 
+        var tempSet = new TempBSet("difference")
         try
-            for (k,_) <- set.iterator do
+            for (k,_) <- iterator do
                 k match
                     case None => None
                     case Some(key) =>
-                        contains(key) match
+                        set.contains(key) match
                             case Failure(e) => throw e
                             case Success(in) if !in => tempSet+(key)
                             case _ => None
@@ -123,13 +165,12 @@ private[platdb] class BTreeSet(var bk:BTreeBucket) extends ZSet:
         catch
             case e:Exception => Failure(e)
 
-    def difference(set:Set[String]):Try[ZSet] = 
-        var tempSet = new TempZSet("difference")
+    def difference(set:Set[String]):Try[BSet] = 
+        var tempSet = new TempBSet("difference")
         try
-            for k <- set.iterator do
-                contains(k) match
-                    case Failure(e) => throw e
-                    case Success(in) if !in => tempSet+(k)
+            for (k,_) <- iterator do
+                k match 
+                    case Some(key) if !set.contains(key) => tempSet+(key)
                     case _ => None
             Success(tempSet)
         catch
@@ -164,74 +205,71 @@ private[platdb] class BTreeSetIter(val iter:BTreeBucketIter) extends CollectionI
   *
   * @param name
   */
-private[platdb] class TempZSet(val name:String) extends ZSet:
-    var zset = new TreeMap[String,Boolean]()
-    def length:Long = zset.size
-    def contains(key:String):Try[Boolean] = Success(zset.contains(key))
-    def add(keys:String*):Try[Unit] = Success(zset.addAll(for k <- keys yield (k,true)))
-    def remove(keys:String*):Try[Unit] = Success(zset--=(keys))
-    def +(key:String):Unit = zset+=(key,true)
-    def -(key:String):Unit = zset-=key
-    def iterator: CollectionIterator = new TempZSetIter(this)
-    def intersect(set:ZSet):Try[ZSet] = 
-        var tempSet = new TempZSet("intersect") // TODO generate a random name
+private[platdb] class TempBSet(val name:String) extends BSet:
+    var BSet = new TreeMap[String,Boolean]()
+    def length:Long = BSet.size
+    def contains(key:String):Try[Boolean] = Success(BSet.contains(key))
+    def add(keys:String*):Try[Unit] = Success(BSet.addAll(for k <- keys yield (k,true)))
+    def remove(keys:String*):Try[Unit] = Success(BSet--=(keys))
+    def +(key:String):Unit = BSet+=(key,true)
+    def -(key:String):Unit = BSet-=key
+    def iterator: CollectionIterator = new TempBSetIter(this)
+    def intersect(set:BSet):Try[BSet] = 
+        var tempSet = new TempBSet("intersect") // TODO generate a random name
         try
             for (k,_) <- set.iterator do
                 k match
-                    case Some(key) if zset.contains(key) => tempSet+(key)
+                    case Some(key) if BSet.contains(key) => tempSet+(key)
                     case _ => None
             Success(tempSet)
         catch
             case e:Exception => Failure(e)
-    def intersect(set:Set[String]):Try[ZSet] = 
-        var tempSet = new TempZSet("intersect")
+    def intersect(set:Set[String]):Try[BSet] = 
+        var tempSet = new TempBSet("intersect")
         try
             for k <- set.iterator do
-                if zset.contains(k) then tempSet+(k)
+                if BSet.contains(k) then tempSet+(k)
             Success(tempSet)
         catch
             case e:Exception => Failure(e)
-    def union(set:ZSet):Try[ZSet] = 
-        var tempSet = new TempZSet("union")
+    def union(set:BSet):Try[BSet] = 
+        var tempSet = new TempBSet("union")
         try
             for (k,_) <- set.iterator do
                 k match
                     case Some(key) => tempSet+(key)
                     case None => None
-            for (k,_) <- zset.iterator do
+            for (k,_) <- BSet.iterator do
                 tempSet+(k)
             Success(tempSet)
         catch
             case e:Exception => Failure(e)
-    def union(set:Set[String]):Try[ZSet] = 
-        var tempSet = new TempZSet("union")
+    def union(set:Set[String]):Try[BSet] = 
+        var tempSet = new TempBSet("union")
         try
             for k <- set.iterator do
                 tempSet+(k)  
-            for (k,_) <- zset.iterator do
+            for (k,_) <- BSet.iterator do
                 tempSet+(k)
             Success(tempSet)
         catch
             case e:Exception => Failure(e)
-    def difference(set:ZSet):Try[ZSet] = 
-        var tempSet = new TempZSet("difference")
+    def difference(set:BSet):Try[BSet] = 
+        var tempSet = new TempBSet("difference")
         try
-            for (k,_) <- set.iterator do
-                k match
-                    case None => None
-                    case Some(key) =>
-                        contains(key) match
-                            case Failure(e) => throw e
-                            case Success(in) if !in => tempSet+(key)
-                            case _ => None
+            for (k,_) <- BSet.iterator do
+                set.contains(k) match
+                    case Failure(e) => throw e
+                    case Success(in) if !in => tempSet+(k)
+                    case _ => None       
             Success(tempSet)
         catch
             case e:Exception => Failure(e)
-    def difference(set:Set[String]):Try[ZSet] = 
-        var tempSet = new TempZSet("difference")
+    def difference(set:Set[String]):Try[BSet] = 
+        var tempSet = new TempBSet("difference")
         try
-            for k <- set.iterator do
-                if !zset.contains(k) then
+            for (k,_) <- BSet.iterator do
+                if !set.contains(k) then
                     tempSet+(k)
             Success(tempSet)
         catch
@@ -241,12 +279,12 @@ private[platdb] class TempZSet(val name:String) extends ZSet:
   *
   * @param tempSet
   */
-private[platdb] class TempZSetIter(val tempSet:TempZSet) extends CollectionIterator:
-    private var iter = tempSet.zset.keysIterator
+private[platdb] class TempBSetIter(val tempSet:TempBSet) extends CollectionIterator:
+    private var iter = tempSet.BSet.keysIterator
     def find(key:String):(Option[String],Option[String]) = 
-        if tempSet.zset.contains(key) then (Some(key),None) else (None,None)
-    def first():(Option[String],Option[String])  = (Some(tempSet.zset.firstKey),None)
-    def last():(Option[String],Option[String]) = (Some(tempSet.zset.lastKey),None)
+        if tempSet.BSet.contains(key) then (Some(key),None) else (None,None)
+    def first():(Option[String],Option[String])  = (Some(tempSet.BSet.firstKey),None)
+    def last():(Option[String],Option[String]) = (Some(tempSet.BSet.lastKey),None)
     def hasNext():Boolean= iter.hasNext
     def next():(Option[String],Option[String])= (Some(iter.next()),None)
     def hasPrev():Boolean = false

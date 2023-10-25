@@ -15,11 +15,11 @@ private[platdb] class MemTx(val id:Long) extends Transaction:
     def openBucket(name: String): Try[Bucket] = ???
     def rollback(): Try[Boolean] = ???
     def writable: Boolean = ???
-    // ZSet methods
-    def openZSet(name:String):Try[ZSet] = ???
-    def createZSet(name:String):Try[ZSet] = ???
-    def createZSetIfNotExists(name:String):Try[ZSet] = ???
-    def deleteZSet(name:String):Try[Unit] = ???
+    // BSet methods
+    def openBSet(name:String):Try[BSet] = ???
+    def createBSet(name:String):Try[BSet] = ???
+    def createBSetIfNotExists(name:String):Try[BSet] = ???
+    def deleteBSet(name:String):Try[Unit] = ???
 
     // list methods.
     def openList(name:String):Try[BList] = ???

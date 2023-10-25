@@ -3,58 +3,6 @@ package platdb
 import scala.util.Try
 import scala.util.control.Breaks._
 
-trait Iterable:
-    def length:Long
-    def iterator:CollectionIterator
-
-
-/**
-  * BucketIterator is used to traverse buckets.
-  */
-trait CollectionIterator extends Iterator[(Option[String],Option[String])]:
-    /**
-      * Retrieves the specified element.
-      *
-      * @param key
-      * @return
-      */
-    def find(key:String):(Option[String],Option[String])
-    /**
-      * moves the iterator to the first item in the bucket and returns its key and value.
-      *
-      * @return
-      */
-    def first():(Option[String],Option[String]) 
-    /**
-      * moves the iterator to the last item in the bucket and returns its key and value.
-      *
-      * @return
-      */
-    def last():(Option[String],Option[String]) 
-    /**
-      * Determine if there is the next element of the current iterator.
-      *
-      * @return
-      */
-    def hasNext():Boolean
-    /**
-      * moves the iterator to the next item in the bucket and returns its key and value.
-      *
-      * @return
-      */
-    def next():(Option[String],Option[String])
-    /**
-      * Determine whether the current iterator has the previous element.
-      *
-      * @return
-      */
-    def hasPrev():Boolean 
-    /**
-      * moves the iterator to the previous item in the bucket and returns its key and value.
-      *
-      * @return
-      */
-    def prev():(Option[String],Option[String]) 
 
 private[platdb] class Record(var node:Option[Node],var block:Option[Block],var index:Int):
     def isLeaf:Boolean =
