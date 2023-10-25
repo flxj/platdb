@@ -68,18 +68,16 @@ trait CollectionIterator extends Iterator[(Option[String],Option[String])]:
       */
     def prev():(Option[String],Option[String]) 
 
-/**
-  * 
-  */
+
 trait Iterable:
     /**
-      * 
+      * the elements number of current collection.
       *
       * @return
       */
     def length:Long
     /**
-      * 
+      * return a collection iterator object.
       *
       * @return
       */
@@ -87,23 +85,106 @@ trait Iterable:
 
 
 /**
-  * 
+  * Bucket represents an ordered (lexicographic) set of key-value pairs.
   */
 trait Bucket extends Iterable:
     def name:String
+    /**
+      * 
+      *
+      * @param key
+      * @return
+      */
     def contains(key:String):Try[Boolean]
+    /**
+      * 
+      *
+      * @param key
+      * @return
+      */
     def get(key:String):Try[String]
-    def put(key:String,value:String):Try[Boolean]
-    def delete(key:String):Try[Boolean]
-    def getBucket(name:String):Try[Bucket]
-    def createBucket(name:String):Try[Bucket]
-    def createBucketIfNotExists(name:String):Try[Bucket] 
-    def deleteBucket(name:String):Try[Boolean]
+    /**
+      * 
+      *
+      * @param key
+      * @param defalutValue
+      * @return
+      */
     def getOrElse(key:String,defalutValue:String):String
+    /**
+      * 
+      *
+      * @param key
+      * @param value
+      * @return
+      */
+    def put(key:String,value:String):Try[Unit]
+    /**
+      * 
+      *
+      * @param key
+      * @return
+      */
+    def delete(key:String):Try[Unit]
+    /**
+      * 
+      *
+      * @param name
+      * @return
+      */
+    def getBucket(name:String):Try[Bucket]
+    /**
+      * 
+      *
+      * @param name
+      * @return
+      */
+    def createBucket(name:String):Try[Bucket]
+    /**
+      * 
+      *
+      * @param name
+      * @return
+      */
+    def createBucketIfNotExists(name:String):Try[Bucket] 
+    /**
+      * 
+      *
+      * @param name
+      * @return
+      */
+    def deleteBucket(name:String):Try[Unit]
+    /**
+      * 
+      *
+      * @param key
+      * @return
+      */
     def apply(key:String):String
+    /**
+      * 
+      *
+      * @param key
+      * @param value
+      */
     def +(key:String,value:String):Unit
+    /**
+      * 
+      *
+      * @param elems
+      */
     def +(elems:Seq[(String,String)]):Unit
+    /**
+      * 
+      *
+      * @param key
+      */
     def -(key:String):Unit
+    /**
+      * 
+      *
+      * @param keys
+      */
     def -(keys:Seq[String]):Unit
 
 
@@ -182,9 +263,9 @@ object Collection:
         tx.createBucketIfNotExists(name) match
             case Success(bk) => bk
             case Failure(e) => throw e
-    def deleteBucket(name:String)(using tx:Transaction):Boolean = 
+    def deleteBucket(name:String)(using tx:Transaction):Unit = 
         tx.deleteBucket(name) match
-            case Success(_) => true
+            case Success(_) => None
             case Failure(e) => throw e
     
     /**
@@ -194,21 +275,21 @@ object Collection:
       * @param tx
       * @return
       */
-    def openBSet(name:String)(using tx:Transaction):BSet =
+    def openSet(name:String)(using tx:Transaction):BSet =
         tx.openBSet(name) match
             case Success(set) => set
             case Failure(e) => throw e 
-    def createBSet(name:String)(using tx:Transaction):BSet =
+    def createSet(name:String)(using tx:Transaction):BSet =
         tx.createBSet(name) match
             case Success(set) => set
             case Failure(e) => throw e
-    def createBSetIfNotExists(name:String)(using tx:Transaction):BSet =
+    def createSetIfNotExists(name:String)(using tx:Transaction):BSet =
         tx.createBSetIfNotExists(name) match
             case Success(set) => set
             case Failure(e) => throw e
-    def deleteBSet(name:String)(using tx:Transaction):Boolean = 
+    def deleteSet(name:String)(using tx:Transaction):Unit = 
         tx.deleteBSet(name) match
-            case Success(_) => true
+            case Success(_) => None
             case Failure(e) => throw e
     /**
       * 
@@ -229,7 +310,7 @@ object Collection:
         tx.createListIfNotExists(name) match
             case Success(bk) => bk
             case Failure(e) => throw e
-    def deleteList(name:String)(using tx:Transaction):Boolean = 
+    def deleteList(name:String)(using tx:Transaction):Unit = 
         tx.deleteList(name) match
-            case Success(_) => true
+            case Success(_) => None
             case Failure(e) => throw e

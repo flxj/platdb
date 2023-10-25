@@ -142,7 +142,7 @@ class DB(val path:String)(using ops:Options):
             m.txid = 0
             m.freelistId = 2
             m.pageId = 4
-            m.root = new btreeBucketValue(3,0,0)
+            m.root = new BucketValue(3,0,0)
 
             var bk = blockBuffer.get(DB.defaultPageSize)
             m.writeTo(bk)

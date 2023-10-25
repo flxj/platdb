@@ -9,7 +9,7 @@ import scala.util.Failure
 
 
 // count is the number of keys in current bucket
-private[platdb] class btreeBucketValue(var root:Long,var count:Long,var sequence:Long):
+private[platdb] class BucketValue(var root:Long,var count:Long,var sequence:Long):
     // convert bucket value to byte array.
     def getBytes:Array[Byte] = 
         var r = root
@@ -25,20 +25,20 @@ private[platdb] class btreeBucketValue(var root:Long,var count:Long,var sequence
             s = s >> 8
         arr
     override def toString(): String = new String(getBytes,"ascii")
-    override def clone:btreeBucketValue = new btreeBucketValue(root,count,sequence)
+    override def clone:BucketValue = new BucketValue(root,count,sequence)
 
 //
 private[platdb] object BTreeBucket:
     // bucket value size when convert byte array.
     val valueSize:Int = 24
-    def apply(data:Array[Byte]):Option[btreeBucketValue] =
+    def apply(data:Array[Byte]):Option[BucketValue] =
         if data.length!=valueSize then
             return None 
         val arr = for i <- 0 to 2 yield
             var n:Long = (data(8*i) & 0xff) << 56 | (data(8*i+1) & 0xff) << 48 | (data(8*i+2) & 0xff) << 40 | (data(8*i+3) & 0xff) << 32
             n = n | (data(8*i+4) & 0xff) << 24 | (data(8*i+5) & 0xff) << 16 | (data(8*i+6) & 0xff) << 8 | (data(8*i+7) & 0xff)
             n
-        Some(new btreeBucketValue(arr(0),arr(1),arr(2)))
+        Some(new BucketValue(arr(0),arr(1),arr(2)))
 
 /**
   * bucket trait implement by b+ tree.
@@ -47,7 +47,7 @@ private[platdb] object BTreeBucket:
   * @param tx
   */
 private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
-    var bkv:btreeBucketValue = null
+    var bkv:BucketValue = null
     var root:Option[Node] = None
     /** cache nodes about writeable tx. */
     var nodes:Map[Long,Node] = Map[Long,Node]() 
@@ -57,7 +57,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
     // keys number
     def name:String = bkname 
     def length:Long = bkv.count
-    def value:btreeBucketValue = bkv 
+    def value:BucketValue = bkv 
     def closed:Boolean = tx == null || tx.closed
     /**
       * return a bucket iterator.
@@ -169,7 +169,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       * @param value
       * @return success flag
       */
-    def put(key:String,value:String):Try[Boolean] =
+    def put(key:String,value:String):Try[Unit] =
         if tx.closed then
             return Failure(DB.exceptionTxClosed) 
         else if !tx.writable then 
@@ -193,7 +193,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
             case Some(node) =>
                 node.put(key,key,value,leafType,0)
                 bkv.count+=1
-                Success(true)
+                Success(None)
          
     /**
       * try to remove a key from the bucket.
@@ -202,7 +202,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       * @param key
       * @return success flag
       */
-    def delete(key:String):Try[Boolean] = 
+    def delete(key:String):Try[Unit] = 
         if tx.closed then
             return Failure(DB.exceptionTxClosed) 
         else if !tx.writable then 
@@ -222,7 +222,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                 node.del(key) 
                 bkv.count-=1
                 buckets.remove(key)
-                Success(true)
+                Success(None)
     
     /**
       * getBucket method retrieve a sub bucket in current bucket.
@@ -298,7 +298,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                     return Failure(new Exception(s"bucket create failed: bucket $name is already exists"))
         // create a new bucket
         var bk = new BTreeBucket(name,tx)
-        bk.bkv = new btreeBucketValue(-1,0,0) // null bkv
+        bk.bkv = new BucketValue(-1,0,0) // null bkv
         bk.root = Some(new Node(new BlockHeader(-1L,leafType,0,0,0))) // null root node
         buckets(name) = bk
         c.node() match 
@@ -333,7 +333,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       * @param name: subbucket name
       * @return success flag
       */
-    def deleteBucket(name:String):Try[Boolean] =
+    def deleteBucket(name:String):Try[Unit] =
         if tx.closed then
             return Failure(DB.exceptionTxClosed)  
         else if !tx.writable then 
@@ -380,7 +380,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                             case Some(node) => 
                                 node.del(name) // delete bucket record from the node.
                                 bkv.count-=1
-                Success(true)
+                Success(None)
     /** 
      * try to get node or block by block id.
      * 

@@ -24,18 +24,22 @@ trait Transaction:
     // create a bucket,if exists then return the bucket.
     def createBucketIfNotExists(name:String):Try[Bucket]
     // delete a bucket,if bucket not exists will throw an exception.
-    def deleteBucket(name:String):Try[Boolean]
-
-    // BSet methods
+    def deleteBucket(name:String):Try[Unit]
+    // 
     def openBSet(name:String):Try[BSet]
+    //
     def createBSet(name:String):Try[BSet]
+    //
     def createBSetIfNotExists(name:String):Try[BSet]
+    //
     def deleteBSet(name:String):Try[Unit]
-
-    // list methods.
+    //
     def openList(name:String):Try[BList]
+    //
     def createList(name:String):Try[BList]
+    //
     def createListIfNotExists(name:String):Try[BList]
+    //
     def deleteList(name:String):Try[Unit]
 
 /*
@@ -97,7 +101,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
     // 
     def createBucketIfNotExists(name:String):Try[Bucket] = root.createBucketIfNotExists(name)
     // delete bucket
-    def deleteBucket(name:String):Try[Boolean] = root.deleteBucket(name)
+    def deleteBucket(name:String):Try[Unit] = root.deleteBucket(name)
     // commit current transaction
     def commit():Try[Boolean] = 
         if closed then

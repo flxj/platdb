@@ -11,7 +11,7 @@ private[platdb] class MemTx(val id:Long) extends Transaction:
     def commit(): Try[Boolean] = ???
     def createBucket(name: String): Try[Bucket] = ???
     def createBucketIfNotExists(name: String): Try[Bucket] = ???
-    def deleteBucket(name: String): Try[Boolean] = ???
+    def deleteBucket(name: String): Try[Unit] = ???
     def openBucket(name: String): Try[Bucket] = ???
     def rollback(): Try[Boolean] = ???
     def writable: Boolean = ???
@@ -42,12 +42,12 @@ private[platdb] class MemBucket(val path:String) extends Bucket:
     def apply(key: String): String = ???
     def closed: Boolean = ???
     def get(key: String): Try[String] = ???
-    def put(key: String, value: String): Try[Boolean] = ???
+    def put(key: String, value: String): Try[Unit] = ???
     def contains(key: String): Try[Boolean] = ???
     def createBucket(name: String): Try[Bucket] = ???
     def createBucketIfNotExists(name: String): Try[Bucket] = ???
-    def delete(key: String): Try[Boolean] = ???
-    def deleteBucket(name: String): Try[Boolean] = ???
+    def delete(key: String): Try[Unit] = ???
+    def deleteBucket(name: String): Try[Unit] = ???
     def getBucket(name: String): Try[Bucket] = ???
     def iterator: CollectionIterator = ???
     def length: Long = ???
