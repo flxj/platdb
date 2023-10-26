@@ -7,13 +7,14 @@ class MemDB(val name:String,val path:String):
     var store:DB = null
 
 private[platdb] class MemTx(val id:Long) extends Transaction:
+    def size:Long = ???
     def closed: Boolean = ???
-    def commit(): Try[Boolean] = ???
+    def commit(): Try[Unit] = ???
     def createBucket(name: String): Try[Bucket] = ???
     def createBucketIfNotExists(name: String): Try[Bucket] = ???
     def deleteBucket(name: String): Try[Unit] = ???
     def openBucket(name: String): Try[Bucket] = ???
-    def rollback(): Try[Boolean] = ???
+    def rollback(): Try[Unit] = ???
     def writable: Boolean = ???
     // BSet methods
     def openBSet(name:String):Try[BSet] = ???

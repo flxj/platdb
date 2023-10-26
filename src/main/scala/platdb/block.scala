@@ -15,6 +15,8 @@ import scala.util.control.Breaks._
 import scala.collection.mutable.Map
 import scala.collection.mutable.ArrayDeque
 import java.nio.channels.OverlappingFileLockException
+import java.io.FileInputStream
+import java.io.FileOutputStream
 
 private[platdb] trait Persistence:
     /** return object bytes size. */
@@ -491,3 +493,32 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
         w.seek(bk.id*DB.pageSize)
         w.write(bk.all)
         true
+    
+    /**
+      * 
+      *
+      * @param dst
+      * @param srcOffset
+      * @param sz
+      * @param dstOffset
+      * @return
+      */
+    def copyToFile(dst:File,srcOffset:Long,sz:Long,dstOffset:Long):Try[Long] = 
+        var src:FileChannel = null
+        var dest:FileChannel = null
+        try
+            src = new FileInputStream(file).getChannel()
+            dest = new FileOutputStream(dst).getChannel()
+            src.position(srcOffset)
+            dest.position(dstOffset)
+            val n = dest.transferFrom(src,0L,sz)
+            if n!=sz then
+                throw new Exception(s"copy data length unexpected: expect $sz actual $n")
+            Success(n)
+        catch
+            case e:Exception => Failure(e)
+        finally
+            if src != null then
+                src.close()
+            if dest != null then
+                dest.close()

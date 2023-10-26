@@ -5,6 +5,8 @@ import scala.util.Failure
 import scala.util.Success
 import scala.util.Try
 import scala.util.control.Breaks._
+import java.io.RandomAccessFile
+import java.io.File
 
 trait Transaction:
     // return current transactions identity.
@@ -13,10 +15,12 @@ trait Transaction:
     def writable:Boolean
     // if the transaction is closed.
     def closed:Boolean
+    // return db bytes size in current transaction view.
+    def size:Long
     // commit transaction,if its already closed then throw an exception.
-    def commit():Try[Boolean]
+    def commit():Try[Unit]
     // rollback transaction,if its already closed then throw an exception.
-    def rollback():Try[Boolean]
+    def rollback():Try[Unit]
     // open a bucket,if not exists will throw an exception.
     def openBucket(name:String):Try[Bucket]
     // create a bucket,if already exists will throw an exception.
@@ -93,6 +97,9 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
     def writable:Boolean = !readonly
     // return the max pageid
     def maxPageId:Long = meta.pageId
+    //
+    def size:Long =  meta.pageId * DB.pageSize
+    //
     def rootBucket():Option[Bucket] = Some(root)
     // open and return a bucket
     def openBucket(name:String):Try[Bucket] = root.getBucket(name)
@@ -103,7 +110,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
     // delete bucket
     def deleteBucket(name:String):Try[Unit] = root.deleteBucket(name)
     // commit current transaction
-    def commit():Try[Boolean] = 
+    def commit():Try[Unit] = 
         if closed then
             return Failure(DB.exceptionTxClosed)
         else if db.closed then
@@ -140,7 +147,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
                     case _ => None
                 return Failure(e)
         close()
-        Success(true)
+        Success(None)
     
     /**
       * rollback current tx during commit process.
@@ -166,7 +173,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
       *
       * @return
       */
-    def rollback():Try[Boolean] =
+    def rollback():Try[Unit] =
         if closed then
             return Failure(DB.exceptionTxClosed)
         else if db.closed then
@@ -176,7 +183,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
         if writable then
             db.freelist.rollback(id)
         close()
-        Success(true)
+        Success(None)
 
     /**
       * close current tx: release all object references about the tx 
@@ -266,7 +273,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
       * @param pgid
       * @return
       */
-    private[platdb] def block(pgid:Long):Try[Block] =
+    def block(pgid:Long):Try[Block] =
         if blocks.contains(pgid) then 
             blocks.get(pgid) match
                 case Some(bk) =>  return Success(bk)
@@ -282,7 +289,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
       *
       * @param pgid
       */
-    private[platdb] def free(pgid:Long):Unit =
+    def free(pgid:Long):Unit =
         block(pgid) match
             case Failure(e) => None 
             case Success(bk) => 
@@ -296,7 +303,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
       * @param size
       * @return
       */
-    private[platdb] def allocate(size:Int):Long =
+    def allocate(size:Int):Long =
         var n = size/DB.pageSize
         if size%DB.pageSize!=0 then n+=1
         // try to allocate space from frreelist
@@ -314,12 +321,59 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
       * @param size
       * @return
       */
-    private[platdb] def makeBlock(pgid:Long,size:Int):Block = 
+    def makeBlock(pgid:Long,size:Int):Block = 
         var bk = db.blockBuffer.get(size)
         bk.reset()
         bk.setid(pgid)
         blocks(pgid) = bk
         bk 
+    
+    /**
+      * 
+      *
+      * @param path
+      * @return
+      */
+    def copyToFile(path:String):Try[Long] = 
+        if closed then 
+            return Failure(DB.exceptionTxClosed)
+        else if db.closed then
+            return Failure(DB.exceptionDBClosed)
+        var writer:RandomAccessFile = null
+        try
+            var f = new File(path)
+            if !f.exists() then
+                f.createNewFile()
+            f.setWritable(true)
+            // 1. copy meta page
+            writer = new RandomAccessFile(f,"rw")
+            var bk = db.blockBuffer.get(meta.size())
+            var buf = new Array[Byte](DB.pageSize)
+            // meta0
+            bk.setid(0L)
+            meta.writeTo(bk)
+            bk.all.copyToArray(buf,0)
+            writer.seek(bk.id*DB.pageSize)
+            writer.write(buf)
+            // meta1
+            bk.reset()
+            bk.setid(1L)
+            val meta1 = meta.clone
+            meta1.txid = meta.txid-1
+            meta1.writeTo(bk)
+            bk.all.copyToArray(buf,0)
+            writer.seek(bk.id*DB.pageSize)
+            writer.write(buf)
+            // 2. copy data page
+            val off = 2*DB.pageSize
+            db.fileManager.copyToFile(f,off,size-off,off) match
+                case Failure(e) => Failure(e)
+                case Success(n) => Success(n+off)
+        catch
+            case e:Exception => Failure(e)
+        finally
+            if writer != null then 
+                writer.close()
     
     // BSet methods
     def openBSet(name:String):Try[BSet] = ???

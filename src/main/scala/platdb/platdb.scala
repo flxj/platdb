@@ -313,7 +313,7 @@ class DB(val path:String)(using ops:Options):
       * @param value
       * @return
       */
-    def put(bucket:String,key:String,value:String):Try[Boolean] = 
+    def put(bucket:String,key:String,value:String):Try[Unit] = 
         beginRWTx() match
             case Failure(e) => Failure(e)
             case Success(tx) =>
@@ -339,7 +339,7 @@ class DB(val path:String)(using ops:Options):
       * @param elems
       * @return
       */
-    def put(bucket:String,elems:Seq[(String,String)]):Try[Boolean] = 
+    def put(bucket:String,elems:Seq[(String,String)]):Try[Unit] = 
         beginRWTx() match
             case Failure(e) => Failure(e)
             case Success(tx) =>
@@ -364,7 +364,7 @@ class DB(val path:String)(using ops:Options):
       * @param op
       * @return
       */
-    def update(op:(Transaction)=>Unit):Try[Boolean] =
+    def update(op:(Transaction)=>Unit):Try[Unit] =
         beginRWTx() match
             case Failure(e) => Failure(e)
             case Success(tx) =>
@@ -389,7 +389,7 @@ class DB(val path:String)(using ops:Options):
       * @param op
       * @return
       */
-    def view(op:(Transaction)=>Unit):Try[Boolean] =
+    def view(op:(Transaction)=>Unit):Try[Unit] =
         beginRTx() match
             case Failure(exception) => Failure(exception)
             case Success(tx) =>
@@ -411,7 +411,26 @@ class DB(val path:String)(using ops:Options):
       * @param path
       * @return
       */
-    def backup(path:String):Try[Int] = Failure(new Exception("not implement backup now"))
+    def backup(path:String):Try[Long] = 
+        beginRTx() match
+            case Failure(e) => Failure(e)
+            case Success(tx) =>
+                try
+                    var n:Long = 0
+                    tx.sysCommit = true
+                    tx.copyToFile(path) match
+                        case Failure(e) => throw e
+                        case Success(m) => n = m 
+                    tx.sysCommit = false
+                    tx.rollback()
+                    Success(n)
+                catch
+                    case e:Exception =>
+                        tx.rollback() match
+                            case _ => None
+                        Failure(e)
+                finally
+                    tx.rollbackTx()
 
     /**
       * open a read-write transaction.

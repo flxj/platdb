@@ -59,7 +59,7 @@ private[platdb] class Meta(val id:Long) extends Persistence:
         m
     def size():Int = Meta.size
     def writeTo(bk:Block):Int =
-        bk.header.pgid = id 
+        //bk.header.pgid = id 
         bk.header.flag = flag
         bk.header.overflow = 0
         bk.header.count = 1
