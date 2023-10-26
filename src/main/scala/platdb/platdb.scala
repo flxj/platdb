@@ -37,6 +37,7 @@ object DB:
     private[platdb] val meta0Page = 0
     private[platdb] val meta1Page = 1
 
+
     val exceptionTxClosed = new Exception("transaction is closed")
     val exceptionNotAllowOp = new Exception("readonly transaction not allow current operation")
     val exceptionKeyIsNull = new Exception("param key is null")
@@ -142,7 +143,7 @@ class DB(val path:String)(using ops:Options):
             m.txid = 0
             m.freelistId = 2
             m.pageId = 4
-            m.root = new BucketValue(3,0,0)
+            m.root = new BucketValue(3L,0L,0L,bucketDataType)
 
             var bk = blockBuffer.get(DB.defaultPageSize)
             m.writeTo(bk)

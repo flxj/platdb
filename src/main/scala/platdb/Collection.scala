@@ -3,22 +3,19 @@ package platdb
 import scala.collection.immutable.{Set}
 import scala.util.{Try,Success,Failure}
 
-/**
-  * 
-  */
-object DataType extends Enumeration:
-    type DataType = Value 
-    val Bucket = Value(1,"Bucket")
-    val BSet = Value(2,"BSet")
-    val BList = Value(3,"BList")
-    val Unknown = Value(4,"Unknown")
 
-    def parse(id:Int):DataType =
-        id match
-            case 1 => Bucket
-            case 2 => BSet
-            case 3 => BList
-            case _ => Unknown
+// collection data type.
+private[platdb] val bucketDataType:Byte = 1
+private[platdb] val bsetDataType:Byte = 2
+private[platdb] val blistDataType:Byte = 3
+
+private[platdb] def dataTypeName(t:Byte):String = 
+    t match
+        case 0 => "Bucket"
+        case 1 => "BSet"
+        case 2 => "BList"
+        case _ => "Unknown"
+
 
 /**
   * CollectionIterator is used to traverse platdb data structs.
