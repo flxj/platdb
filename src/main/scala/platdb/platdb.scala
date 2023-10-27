@@ -51,8 +51,31 @@ object DB:
     val exceptionNotAllowCommitRTx = new Exception("cannot commit read-only tx")
     val exceptionListIsEmpty = new Exception("the list is empty")
     
-    def isNotExists(e:Exception):Boolean = false // TODO
-    def isAlreadyExists(e:Exception):Boolean = false
+    def isNotExists(e:Throwable):Boolean = 
+        if e != null then
+            e match
+                case ex:Exception =>
+                    val msg = ex.getMessage()
+                    msg.startsWith("not found") || msg.startsWith("not exists")
+                case er:Error => 
+                    val msg = er.getMessage()
+                    msg.startsWith("not found") || msg.startsWith("not exists")
+                case _ => false
+        else
+            false
+
+    def isAlreadyExists(e:Throwable):Boolean = 
+        if e!=null then
+            e match
+                case ex:Exception =>
+                  val msg = e.getMessage()
+                  msg.startsWith("already exists")
+                case er:Error =>
+                    val msg = e.getMessage()
+                    msg.startsWith("already exists")
+                case _ => false
+        else 
+            false
 
 /**
   * Default DB configuration.

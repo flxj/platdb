@@ -45,34 +45,10 @@ trait Transaction:
     def createListIfNotExists(name:String):Try[BList]
     //
     def deleteList(name:String):Try[Unit]
+    //
+    def allCollection():Try[Seq[(String,String)]]
 
-/*
-A: 
-    Reads and writes to transactions occur in memory, so if a transaction fails before committing, it does not affect the contents of the disk
-    All additions, deletions, and changes to the DB by read-write transactions will be recorded on the dirty pages, 
-    and the freelist is written to the file first when the transaction is committed, then the dirty page, and finally the meta information is committed
-    The meta information contains the current DB version and root node information, 
-    and only the successful writing of meta indicates that the transaction is committed successfully, 
-    so if the transaction fails before writing meta, only writing dirty pages or freelist will not affect the consistency of db content
-    So how to guarantee atomicity if writing meta error?
-C:
-    Write transactions are performed serially, 
-    so each open read or write transaction is operating on a DB object that is an updated version of the previous write transaction.
-    Due to the atomicity/durability guarantee, as long as each write transaction itself is logically consistent, 
-    it drives the db view to move from one consistent state to the next
-I:
-    Multiple read-only transactions and at most one read-write transaction are allowed to operate the database at the same time,
-    and MVCC is used to ensure the isolation of concurrent transactions
-    When a transaction is opened, it will copy the latest meta information, that is, it holds the latest version of the DB, 
-    so the later opened transaction will not read the content of the old version
-    The read-only transaction does not change the DB version, and the write transaction will update the version information of the DB after the commit is successful,
-    because the changes of the write transaction to the DB are written to the dirty page, 
-    so other parallel read-only transactions during the execution of the read and write transaction will not read the modification of the write transaction
-    (Pages freed by write transactions can only be used for allocation as dirty pages if no other read-only transactions are held.)
-D:
-    Modifications to the DB by a successfully committed write transaction are persisted to the disk file,
-    and an uncommitted transaction does not affect the contents of the DB
-*/
+
 private[platdb] object Tx:
     def apply(readonly:Boolean,db:DB):Tx =
         var tx = new Tx(readonly)
@@ -84,6 +60,31 @@ private[platdb] object Tx:
             tx.meta.txid+=1
         tx
 
+/*
+    Reads and writes to transactions occur in memory, so if a transaction fails before committing, it does not affect the contents of the disk
+    All additions, deletions, and changes to the DB by read-write transactions will be recorded on the dirty pages, 
+    and the freelist is written to the file first when the transaction is committed, then the dirty page, and finally the meta information is committed
+    The meta information contains the current DB version and root node information, 
+    and only the successful writing of meta indicates that the transaction is committed successfully, 
+    so if the transaction fails before writing meta, only writing dirty pages or freelist will not affect the consistency of db content.
+
+    Write transactions are performed serially, 
+    so each open read or write transaction is operating on a DB object that is an updated version of the previous write transaction.
+    Due to the atomicity/durability guarantee, as long as each write transaction itself is logically consistent, 
+    it drives the db view to move from one consistent state to the next.
+
+    Multiple read-only transactions and at most one read-write transaction are allowed to operate the database at the same time,
+    and MVCC is used to ensure the isolation of concurrent transactions
+    When a transaction is opened, it will copy the latest meta information, that is, it holds the latest version of the DB, 
+    so the later opened transaction will not read the content of the old version
+    The read-only transaction does not change the DB version, and the write transaction will update the version information of the DB after the commit is successful,
+    because the changes of the write transaction to the DB are written to the dirty page, 
+    so other parallel read-only transactions during the execution of the read and write transaction will not read the modification of the write transaction
+    (Pages freed by write transactions can only be used for allocation as dirty pages if no other read-only transactions are held.)
+
+    Modifications to the DB by a successfully committed write transaction are persisted to the disk file,
+    and an uncommitted transaction does not affect the contents of the DB.
+*/
 private[platdb] class Tx(val readonly:Boolean) extends Transaction:
     var sysCommit:Boolean = false 
     var db:DB = null
@@ -376,13 +377,14 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
                 writer.close()
     
     // BSet methods
-    def openBSet(name:String):Try[BSet] = ???
-    def createBSet(name:String):Try[BSet] = ???
-    def createBSetIfNotExists(name:String):Try[BSet] = ???
-    def deleteBSet(name:String):Try[Unit] = ???
+    def openBSet(name:String):Try[BSet] = root.getBSet(name)
+    def createBSet(name:String):Try[BSet] = root.createBSet(name)
+    def createBSetIfNotExists(name:String):Try[BSet] = root.createBSetIfNotExists(name)
+    def deleteBSet(name:String):Try[Unit] = root.deleteBSet(name)
 
-    // list methods.
-    def openList(name:String):Try[BList] = ???
-    def createList(name:String):Try[BList] = ???
-    def createListIfNotExists(name:String):Try[BList] = ???
-    def deleteList(name:String):Try[Unit] = ???
+    // BList methods.
+    def openList(name:String):Try[BList] = root.getList(name,!writable)
+    def createList(name:String):Try[BList] = root.createList(name)
+    def createListIfNotExists(name:String):Try[BList] = root.createListIfNotExists(name)
+    def deleteList(name:String):Try[Unit] = root.deleteList(name)
+    def allCollection(): Try[Seq[(String, String)]] = root.allCollection()

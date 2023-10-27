@@ -10,16 +10,22 @@ private[platdb] object KList:
     val indexHeaderSize = 4
     val indexElementSize = 12
     val indexKey = "index"
-    def apply(bk:Bucket,readonly:Boolean):Option[KList] =
+    def apply(bk:Bucket,readonly:Boolean):Try[KList] =
         bk.get(indexKey) match
-            case Failure(e) => None
+            case Failure(e) => 
+                if DB.isNotExists(e) then
+                    var list = new KList(bk,readonly)
+                    list.index = ArrayBuffer[(Long,Long,Int)]()
+                    Success(list)
+                else 
+                    Failure(e)
             case Success(value) =>
                 indexElements(value.getBytes("ascii")) match
-                    case None => None
+                    case None => Failure(new Exception("parse list index failed"))
                     case Some(idx) =>
                         var list = new KList(bk,readonly)
                         list.index = idx
-                        Some(list)
+                        Success(list)
     //
     def indexElements(data:Array[Byte]):Option[ArrayBuffer[(Long,Long,Int)]] = 
         if data.length < indexHeaderSize then

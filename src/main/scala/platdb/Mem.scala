@@ -27,6 +27,7 @@ private[platdb] class MemTx(val id:Long) extends Transaction:
     def createList(name:String):Try[BList] = ???
     def createListIfNotExists(name:String):Try[BList] = ???
     def deleteList(name:String):Try[Unit] = ???
+    def allCollection():Try[Seq[(String,String)]] = ???
 
 /**
   * 
