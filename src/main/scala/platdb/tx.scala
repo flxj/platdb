@@ -23,29 +23,29 @@ trait Transaction:
     def rollback():Try[Unit]
     // open a bucket,if not exists will throw an exception.
     def openBucket(name:String):Try[Bucket]
-    // create a bucket,if already exists will throw an exception.
+    // create a new bucket,if already exists will throw an exception.
     def createBucket(name:String):Try[Bucket]
     // create a bucket,if exists then return the bucket.
     def createBucketIfNotExists(name:String):Try[Bucket]
     // delete a bucket,if bucket not exists will throw an exception.
     def deleteBucket(name:String):Try[Unit]
-    // 
+    // open a set,if not exists will throw an exception.
     def openBSet(name:String):Try[BSet]
-    //
+    // create a new set,if already exists will throw an exception.
     def createBSet(name:String):Try[BSet]
-    //
+    // create a set,if exists then return the set.
     def createBSetIfNotExists(name:String):Try[BSet]
-    //
+    // delete a bucket,if bucket not exists will throw an exception.
     def deleteBSet(name:String):Try[Unit]
-    //
+    //  open a set,if not exists will throw an exception.
     def openList(name:String):Try[BList]
-    //
+    // create a new list,if already exists will throw an exception.
     def createList(name:String):Try[BList]
-    //
+    // create a list,if exists then return the set.
     def createListIfNotExists(name:String):Try[BList]
-    //
+    // delete a list,if bucket not exists will throw an exception.
     def deleteList(name:String):Try[Unit]
-    //
+    // return all collection objects in current db,format is (name,dataType).
     def allCollection():Try[Seq[(String,String)]]
 
 

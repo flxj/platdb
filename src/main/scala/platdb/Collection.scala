@@ -16,7 +16,6 @@ private[platdb] def dataTypeName(t:Byte):String =
         case 2 => "BList"
         case _ => "Unknown"
 
-
 /**
   * CollectionIterator is used to traverse platdb data structs.
   */
@@ -64,7 +63,6 @@ trait CollectionIterator extends Iterator[(Option[String],Option[String])]:
       * @return
       */
     def prev():(Option[String],Option[String]) 
-
 
 trait Iterable:
     /**
@@ -242,7 +240,8 @@ trait BList extends Iterable:
   */
 object Collection:
     /**
-      * 
+      * This method has the same meaning as the openBucket method of the Transaction trait, 
+      * but it may throw an exception
       *
       * @param name
       * @param tx
@@ -252,21 +251,44 @@ object Collection:
         tx.openBucket(name) match
             case Success(bk) => bk
             case Failure(e) => throw e 
+    /**
+      * This method has the same meaning as the createBucket method of the Transaction trait, 
+      * but it may throw an exception
+      *
+      * @param name
+      * @param tx
+      * @return
+      */
     def createBucket(name:String)(using tx:Transaction):Bucket =
         tx.createBucket(name) match
             case Success(bk) => bk
             case Failure(e) => throw e
+    /**
+      * This method has the same meaning as the createBucketIfNotExists method of the Transaction trait, 
+      * but it may throw an exception
+      *
+      * @param name
+      * @param tx
+      * @return
+      */
     def createBucketIfNotExists(name:String)(using tx:Transaction):Bucket =
         tx.createBucketIfNotExists(name) match
             case Success(bk) => bk
             case Failure(e) => throw e
+    /**
+      * This method has the same meaning as the deleteBucket method of the Transaction trait, 
+      * but it may throw an exception
+      *
+      * @param name
+      * @param tx
+      */
     def deleteBucket(name:String)(using tx:Transaction):Unit = 
         tx.deleteBucket(name) match
             case Success(_) => None
             case Failure(e) => throw e
-    
     /**
-      * 
+      * This method has the same meaning as the openSet method of the Transaction trait,
+      *  but it may throw an exception
       *
       * @param name
       * @param tx
@@ -276,20 +298,44 @@ object Collection:
         tx.openBSet(name) match
             case Success(set) => set
             case Failure(e) => throw e 
+    /**
+      * This method has the same meaning as the createSet method of the Transaction trait, 
+      * but it may throw an exception
+      *
+      * @param name
+      * @param tx
+      * @return
+      */
     def createSet(name:String)(using tx:Transaction):BSet =
         tx.createBSet(name) match
             case Success(set) => set
             case Failure(e) => throw e
+    /**
+      * This method has the same meaning as the createSetIfNotExists method of the Transaction trait, 
+      * but it may throw an exception
+      *
+      * @param name
+      * @param tx
+      * @return
+      */
     def createSetIfNotExists(name:String)(using tx:Transaction):BSet =
         tx.createBSetIfNotExists(name) match
             case Success(set) => set
             case Failure(e) => throw e
+    /**
+      * This method has the same meaning as the deleteSet method of the Transaction trait, 
+      * but it may throw an exception
+      *
+      * @param name
+      * @param tx
+      */
     def deleteSet(name:String)(using tx:Transaction):Unit = 
         tx.deleteBSet(name) match
             case Success(_) => None
             case Failure(e) => throw e
     /**
-      * 
+      * This method has the same meaning as the openList method of the Transaction trait, 
+      * but it may throw an exception.
       *
       * @param name
       * @param tx
@@ -299,14 +345,37 @@ object Collection:
         tx.openList(name) match
             case Success(bk) => bk
             case Failure(e) => throw e 
+    /**
+      * This method has the same meaning as the createList method of the Transaction trait, 
+      * but it may throw an exception.
+      *
+      * @param name
+      * @param tx
+      * @return
+      */
     def createList(name:String)(using tx:Transaction):BList =
         tx.createList(name) match
             case Success(bk) => bk
             case Failure(e) => throw e
+    /**
+      * This method has the same meaning as the createListIfNotExists method of the Transaction trait, 
+      * but it may throw an exception.
+      *
+      * @param name
+      * @param tx
+      * @return
+      */
     def createListIfNotExists(name:String)(using tx:Transaction):BList =
         tx.createListIfNotExists(name) match
             case Success(bk) => bk
             case Failure(e) => throw e
+    /**
+      * This method has the same meaning as the deleteList method of the Transaction trait, 
+      * but it may throw an exception.
+      *
+      * @param name
+      * @param tx
+      */
     def deleteList(name:String)(using tx:Transaction):Unit = 
         tx.deleteList(name) match
             case Success(_) => None

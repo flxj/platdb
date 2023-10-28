@@ -25,6 +25,10 @@ private[platdb] object KList:
                     case Some(idx) =>
                         var list = new KList(bk,readonly)
                         list.index = idx
+                        var n = 0L
+                        for (_,_,m) <- idx do
+                            n+=m 
+                        list.len = n
                         Success(list)
     //
     def indexElements(data:Array[Byte]):Option[ArrayBuffer[(Long,Long,Int)]] = 
@@ -65,20 +69,15 @@ private[platdb] case class IndexSlice(idx:Int,start:Long,end:Long)
   * @param bk
   */
 private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
-    //private var lock:ReentrantReadWriteLock = new ReentrantReadWriteLock()
+    var len:Long = 0L
     var index:ArrayBuffer[(Long,Long,Int)] = null
     private def copyIndex():ArrayBuffer[(Long,Long,Int)] = index.clone()
     
     def name: String = bk.name
-    def length: Long =
-        var n = 0
-        for (_,_,m) <- index do
-            n+=m 
-        n.toLong
+    def length: Long = len
+    def isEmpty: Boolean = len == 0L
     
-    def isEmpty: Boolean = index.length == 0
-    
-    def iterator: CollectionIterator = new KListIter(this)
+    def iterator: CollectionIterator = new BListIter(this)
     
     /**
       * 
@@ -125,7 +124,8 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             var idx = index.init
             if n!=1 then
                 idx+=((i,j-1,n-1))
-            list.index = idx  
+            list.index = idx 
+            list.len = len-1
         else 
             list.index = new ArrayBuffer[(Long,Long,Int)]()
         list
@@ -140,7 +140,8 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             var idx = index.tail
             if n!=1 then
                 idx.prepend(((i+1,j,n-1)))
-            list.index = idx  
+            list.index = idx 
+            list.len = len-1
         else 
             list.index = new ArrayBuffer[(Long,Long,Int)]()
         list
@@ -164,6 +165,10 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             for s <- is do
                 idx+=((s.start,s.end,(s.end-s.start+1).toInt))
             list.index = idx 
+            var n = 0L
+            for (_,_,m) <- idx do
+                n+=m 
+            list.len = n
             Success(list)
         catch
             case e:Exception => Failure(e)
@@ -188,6 +193,10 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
                     i+=1
         var list = new KList(bk,true)
         list.index = idx
+        var n = 0L
+        for (_,_,m) <- idx do
+            n+=m 
+        list.len = n
         list
     
     /**
@@ -206,6 +215,7 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             for s <- is do
                 idx+=((s.start,s.end,(s.end-s.start+1).toInt))
             list.index = idx 
+            list.len = n.toLong
             Success(list)
         catch
             case e:Exception => Failure(e)
@@ -226,6 +236,7 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             for s <- is do
                 idx+=((s.start,s.end,(s.end-s.start+1).toInt))
             list.index = idx 
+            list.len = n.toLong
             Success(list)
         catch
             case e:Exception => Failure(e)
@@ -251,6 +262,7 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             removeIndexSlice(cp,is)
             bk+(KList.indexKey,KList.indexValue(cp))
             index = cp
+            len-=n
             Success(None)
         catch
             case e:Exception => Failure(e)
@@ -275,6 +287,7 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             removeIndexSlice(cp,is)
             bk+(KList.indexKey,KList.indexValue(cp))
             index = cp
+            len-=n
             Success(None)
         catch
             case e:Exception => Failure(e)
@@ -359,6 +372,7 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             mergeIndexSlice(cp,is)
             bk+(KList.indexKey,KList.indexValue(cp))
             index = cp
+            len+=elems.length
             Success(None)
         catch
             case e:Exception => Failure(e)
@@ -384,6 +398,7 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
                 cp = ArrayBuffer[(Long,Long,Int)]((0L,0L,1))
             bk+(KList.indexKey,KList.indexValue(cp))
             index = cp
+            len+=1
             Success(None)
         catch
             case e:Exception => Failure(e)
@@ -409,6 +424,7 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
                 cp = ArrayBuffer[(Long,Long,Int)]((0L,0L,1))
             bk+(KList.indexKey,KList.indexValue(cp))
             index = cp
+            len+=1
             Success(None)
         catch
             case e:Exception => Failure(e)
@@ -435,6 +451,7 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
                 cp = ArrayBuffer[(Long,Long,Int)]((0L,i-1,elems.length))
             bk+(KList.indexKey,KList.indexValue(cp))
             index = cp
+            len+=elems.length
             Success(None)
         catch
             case e:Exception => Failure(e) 
@@ -461,6 +478,7 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
                 cp = ArrayBuffer[(Long,Long,Int)]((0L,i-1,elems.length))
             bk+(KList.indexKey,KList.indexValue(cp))
             index = cp
+            len+=elems.length
             Success(None)
         catch
             case e:Exception => Failure(e)
@@ -481,6 +499,7 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             removeIndexSlice(cp,is)
             bk+(KList.indexKey,KList.indexValue(cp))
             index = cp
+            len-=count
             Success(None)
         catch
             case e:Exception => return Failure(e)
@@ -522,6 +541,7 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             cp = ArrayBuffer[(Long,Long,Int)]((0L,0L,1))
         bk+(KList.indexKey,KList.indexValue(cp))
         index = cp 
+        len+=1
     
     def +:(elem:String):Unit = 
         if readonly then
@@ -537,7 +557,14 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             cp = ArrayBuffer[(Long,Long,Int)]((0L,0L,1))
         bk+(KList.indexKey,KList.indexValue(cp))
         index = cp
+        len+=1
     
+    /**
+      * 
+      *
+      * @param n
+      * @return
+      */
     private def formatKey(n:Long):String = n.toBinaryString
     /**
       * convert list index value to element key in bucket.
