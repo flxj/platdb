@@ -6,7 +6,6 @@ import scala.util.control.Breaks._
 import scala.util.Try
 import scala.util.Success
 import scala.util.Failure
-import platdb.BTreeBucket.valueSize
 
 
 // count is the number of keys in current bucket
@@ -24,7 +23,7 @@ private[platdb] class BucketValue(var root:Long,var count:Long,var sequence:Long
             r = r >> 8
             c = c >> 8
             s = s >> 8
-        arr(valueSize-1) = dataType
+        arr(BTreeBucket.valueSize-1) = dataType
         arr
     override def toString(): String = new String(getBytes,"ascii")
     override def clone:BucketValue = new BucketValue(root,count,sequence,dataType)

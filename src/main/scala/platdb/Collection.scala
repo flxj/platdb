@@ -87,14 +87,14 @@ trait Iterable:
 trait Bucket extends Iterable:
     def name:String
     /**
-      * 
+      * name
       *
       * @param key
       * @return
       */
     def contains(key:String):Try[Boolean]
     /**
-      * 
+      * Retrieve the element
       *
       * @param key
       * @return
@@ -109,7 +109,7 @@ trait Bucket extends Iterable:
       */
     def getOrElse(key:String,defalutValue:String):String
     /**
-      * 
+      * Add or update element.
       *
       * @param key
       * @param value
@@ -117,74 +117,74 @@ trait Bucket extends Iterable:
       */
     def put(key:String,value:String):Try[Unit]
     /**
-      * 
+      * delete element.
       *
       * @param key
       * @return
       */
     def delete(key:String):Try[Unit]
     /**
-      * 
+      * Open nested subbuckets.
       *
       * @param name
       * @return
       */
     def getBucket(name:String):Try[Bucket]
     /**
-      * 
+      * Create a subbucket.
       *
       * @param name
       * @return
       */
     def createBucket(name:String):Try[Bucket]
     /**
-      * 
+      * Create a subbucket.
       *
       * @param name
       * @return
       */
     def createBucketIfNotExists(name:String):Try[Bucket] 
     /**
-      * 
+      * Delete subbucekt
       *
       * @param name
       * @return
       */
     def deleteBucket(name:String):Try[Unit]
     /**
-      * 
+      * A convenient way to retrieve element.
       *
       * @param key
       * @return
       */
     def apply(key:String):String
     /**
-      * 
+      * A convenient way to add or update element.
       *
       * @param key
       * @param value
       */
     def +=(key:String,value:String):Unit
     /**
-      * 
+      * A convenient way to add or update elements
       *
       * @param elems
       */
     def +=(elems:Seq[(String,String)]):Unit
     /**
-      * 
+      * A convenient way to delete an element.
       *
       * @param key
       */
     def -=(key:String):Unit
     /**
-      * 
+      * A convenient way to delete elements.
       *
       * @param keys
       */
     def -=(keys:Seq[String]):Unit
     /**
-      * 
+      * A convenient way to add or update element.
       *
       * @param key
       * @param value
@@ -193,102 +193,364 @@ trait Bucket extends Iterable:
 
 
 /**
-  * 
+  * An ordered collection of strings.
   */
 trait BSet extends Iterable:
+    /**
+      * name
+      *
+      * @return
+      */
     def name:String
+    /**
+      * 是否包含某个元素
+      *
+      * @param key
+      * @return
+      */
     def contains(key:String):Try[Boolean]
+    /**
+      * 添加元素
+      *
+      * @param keys
+      * @return
+      */
     def add(keys:String*):Try[Unit]
+    /**
+      * 删除元素
+      *
+      * @param keys
+      * @return
+      */
     def remove(keys:String*):Try[Unit]
+    /**
+      * 计算交集
+      *
+      * @param set
+      * @return
+      */
     def and(set:BSet):Try[BSet]
+    /**
+      * 计算交集
+      *
+      * @param set
+      * @return
+      */
     def and(set:Set[String]):Try[BSet]
+    /**
+      * 计算并集
+      *
+      * @param set
+      * @return
+      */
     def union(set:BSet):Try[BSet]
+    /**
+      * 计算并集
+      *
+      * @param set
+      * @return
+      */
     def union(set:Set[String]):Try[BSet]
+    /**
+      * 计算差集
+      *
+      * @param set
+      * @return
+      */
     def diff(set:BSet):Try[BSet]
+    /**
+      * 计算差集
+      *
+      * @param set
+      * @return
+      */
     def diff(set:Set[String]):Try[BSet]
-    
-    // TODO implement these methods in trait
-    /*
-    def +=(key:String):Unit
-    def -=(key:String):Unit
-    def &(set:BSet):BSet
-    def &(set:Set[String]):BSet
-    def |(set:BSet):BSet
-    def |(set:Set[String]):BSet
-    def -(set:BSet):BSet
-    def -(set:Set[String]):BSet
-    */
+    /**
+      * 便捷方法，等同于add
+      *
+      * @param set
+      * @return
+      */
     def &(set:BSet):BSet =
         and(set) match
             case Failure(exception) => throw exception
             case Success(bset) => bset
-    
+    /**
+      * 
+      *
+      * @param set
+      * @return
+      */
     def &(set:Set[String]):BSet =
         and(set) match
             case Failure(exception) => throw exception
             case Success(bset) => bset
-
+    /**
+      * 便捷方法，等同于union
+      *
+      * @param set
+      * @return
+      */
     def |(set:BSet):BSet =
         union(set) match
             case Failure(exception) => throw exception
             case Success(bset) => bset
-
+    /**
+      * 
+      *
+      * @param set
+      * @return
+      */
     def |(set:Set[String]):BSet =
         union(set) match
             case Failure(exception) => throw exception
             case Success(bset) => bset
-    
+    /**
+      * 便捷方法，等同于diff
+      *
+      * @param set
+      * @return
+      */
     def -(set:BSet):BSet =
         diff(set) match
             case Failure(exception) => throw exception
             case Success(bset) => bset
-    
+    /**
+      * 
+      *
+      * @param set
+      * @return
+      */
     def -(set:Set[String]):BSet =
         diff(set) match
             case Failure(exception) => throw exception
             case Success(bset) => bset
 
-
 /**
-  * 
+  * A list of strings
   */
 trait BList extends Iterable:
+    /**
+      * name
+      *
+      * @return
+      */
     def name:String 
+    /**
+      * 列表是否为空
+      *
+      * @return
+      */
     def isEmpty: Boolean
+    /**
+      * 根据下标检索元素
+      *
+      * @param idx
+      * @return
+      */
     def get(idx:Int):Try[String]
+    /**
+      * 列表头部元素
+      *
+      * @return
+      */
     def head:Try[String]
+    /**
+      * 列表尾部元素
+      *
+      * @return
+      */
     def last:Try[String]
+    /**
+      * 列表切片操作，获得的子列表为只读模式
+      *
+      * @param from
+      * @param until
+      * @return
+      */
     def slice(from:Int,until:Int):Try[BList]
+    /**
+      * 列表逆置，获得的逆列表为只读模式
+      *
+      * @return
+      */
     def reverse:BList
+    /**
+      * 去除末尾元素后的列表，获得的子列表为只读模式
+      *
+      * @return
+      */
     def init:BList
+    /**
+      * 去除头部元素后的列表，获得的子列表为只读模式
+      *
+      * @return
+      */
     def tail:BList
+    /**
+      * 过滤元素，获得的子列表为只读模式
+      *
+      * @param p
+      * @return
+      */
     def filter(p:(String) => Boolean): BList
+    /**
+      * 查找第一个满足条件的元素下标，如果不存在则返回-1
+      *
+      * @param p
+      * @return
+      */
     def find(p:(String) => Boolean):Int
+    /**
+      * 获取前n个元素，获得的子列表是只读的
+      *
+      * @param n
+      * @return
+      */
     def take(n: Int): Try[BList]
+    /**
+      * 获取后n个元素，获得的子列表是只读的
+      *
+      * @param n
+      * @return
+      */
     def takeRight(n: Int): Try[BList]
+    /**
+      * 删除前n个元素
+      *
+      * @param n
+      * @return
+      */
     def drop(n: Int): Try[Unit]
+    /**
+      * 删除后n个元素
+      *
+      * @param n
+      * @return
+      */
     def dropRight(n: Int): Try[Unit]
+    /**
+      * 在index位置插入一个元素
+      *
+      * @param index
+      * @param elem
+      * @return
+      */
     def insert(index: Int, elem:String): Try[Unit]
+    /**
+      * 在index位置插入多个元素
+      *
+      * @param index
+      * @param elems
+      * @return
+      */
     def insert(index: Int, elems:Seq[String]): Try[Unit]
+    /**
+      * 尾部追加一个元素
+      *
+      * @param elem
+      * @return
+      */
     def append(elem:String):Try[Unit]
+    /**
+      * 尾部追加若干元素
+      *
+      * @param elems
+      * @return
+      */
     def append(elems:Seq[String]):Try[Unit]
+    /**
+      * 头部插入一个元素
+      *
+      * @param elem
+      * @return
+      */
     def prepend(elem: String):Try[Unit]
+    /**
+      * 头部插入多个元素
+      *
+      * @param elems
+      * @return
+      */
     def prepend(elems: Seq[String]):Try[Unit]
+    /**
+      * 删除一个元素
+      *
+      * @param index
+      * @return
+      */
     def remove(index: Int): Try[Unit]
+    /**
+      * 删除多个元素
+      *
+      * @param index
+      * @param count
+      * @return
+      */
     def remove(index: Int, count: Int):Try[Unit]
+    /**
+      * 更新元素
+      *
+      * @param index
+      * @param elem
+      * @return
+      */
     def set(index: Int, elem:String): Try[Unit]
+    /**
+      * 满足条件的元素是否存在
+      *
+      * @param p
+      * @return
+      */
     def exists(p:(String) => Boolean): Boolean
+    /**
+      * 检索元素的便捷方法
+      *
+      * @param n
+      * @return
+      */
     def apply(n: Int):String
+    /**
+      * 便捷方法，等同于append
+      *
+      * @param elem
+      */
     def :+(elem:String):Unit
+    /**
+      * 便捷方法，等同于prepend
+      *
+      * @param elem
+      */
     def +:(elem:String):Unit
+    /**
+      * 更新元素的便捷方法，等同于set
+      *
+      * @param index
+      * @param elem
+      */
     def update(index:Int,elem:String):Unit
     
 /**
-  * 
+  * 空间索引
   */
 trait Region:
+    /**
+      * name
+      *
+      * @return
+      */
     def name:String
+    /**
+      * 对象个数
+      *
+      * @return
+      */
     def length:Long
+    /**
+      * 维度
+      *
+      * @return
+      */
     def dimension:Int
     // 迭代所有对象
     def iterator:Iterator[SpatialObject]
@@ -316,8 +578,24 @@ trait Region:
     def nearby(key:String,k:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]]
     // 查询与obj对象的距离小于等于d的范围内的所有其它对象
     def nearby(obj:SpatialObject,d:Double,limit:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]]
+    /**
+      * 便捷方法，等同于put
+      *
+      * @param obj
+      */
     def +=(obj:SpatialObject):Unit
+    /**
+      * 便捷方法，等同于delete
+      *
+      * @param key
+      */
     def -=(key:String):Unit
+    /**
+      * 更新对象的便捷方法
+      *
+      * @param key
+      * @param obj
+      */
     def update(key:String,obj:SpatialObject):Unit
 
 /**
@@ -508,4 +786,3 @@ object Collection:
         tx.deleteRegion(name) match
             case Success(_) => None
             case Failure(e) => throw e
-    

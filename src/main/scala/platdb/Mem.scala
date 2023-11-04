@@ -1,7 +1,6 @@
 package platdb
 
 import scala.util.{Try,Success}
-import scala.annotation.targetName
 
 class MemDB(val name:String,val path:String):
     var store:DB = null
@@ -58,9 +57,8 @@ private[platdb] class MemBucket(val path:String) extends Bucket:
     def update(key: String, value: String): Unit = ???
 
 
-    // 定义一个新trait
-    def writeTo(path:String):Unit = None // 将该内存map持久化到某个文件中 --> 新建一个磁盘DB对象，然后向其写入当前桶的所有内容 （注意版本）
-    def appendTo(path:String):Unit = None // 追加到某个文件
+    def writeTo(path:String):Unit = None 
+    def appendTo(path:String):Unit = None 
 
 class MemSet[K]:
     var bk:MemBucket = null 

@@ -372,7 +372,7 @@ platdb使用SpatialObject表示一个空间对象，coord字段表示其边界�
 更多其它Region方法的介绍，参考文档 [xxxxxxx]
 
 
-[其它操作]
+### 备份
 
 platdb的备份很简单，只需要对一个已经打开状态的DB实例，调用backup方法即可. 该方法会开启一个只读事务，复制一个一致的db视图到目标文件中，备份过程不会阻塞其它读/写事务。
 
@@ -389,5 +389,9 @@ db.backup(path) match
 
 ```
 
+### TODO
 
-[server模式](TODO)
+1.补充一些测试用例
+2.实现Server模式，使得可以通过http接口访问platdb DB实例
+3.实现一些内存数据结构
+4.实现分布式版本
