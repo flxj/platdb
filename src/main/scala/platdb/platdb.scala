@@ -32,6 +32,8 @@ object DB:
     val defaultFillPercent = 0.5
     val minFillPercent = 0.1
     val maxFillPercent = 1.0
+    val maxEntries = 64
+    val minEntries = 32
     private[platdb] var pageSize = defaultPageSize
     private[platdb] var fillPercent = defaultFillPercent
     private[platdb] val meta0Page = 0
@@ -120,10 +122,10 @@ class DB(val path:String)(using ops:Options):
       *
       * @return
       */
-    def open():Try[Boolean] =
+    def open():Try[Unit] =
         try
             if openFlag then
-                return Success(true)
+                return Success(None)
             // try to open db file, if get lock timeout,then return an exception.
             fileManager = new FileManager(path,ops.readonly)
             fileManager.open(ops.timeout)
@@ -150,7 +152,7 @@ class DB(val path:String)(using ops:Options):
                 DB.fillPercent = ops.fillPercent
                 
             openFlag = true
-            Success(openFlag)
+            Success(None)
         catch
             case ex:Exception => Failure(ex)
             case er:Error => Failure(er)
@@ -227,23 +229,24 @@ class DB(val path:String)(using ops:Options):
       *
       * @return
       */
-    def close(): Try[Boolean] =
+    def close(): Try[Unit] =
         try 
             rwLock.writeLock().lock()
             metaLock.lock()
             if !closed then
                 openFlag = false
+                blockBuffer.close()
                 fileManager.close()
                 fileManager = null
                 freelist = null
-            Success(true)
+            Success(None)
         catch
             case e:Exception => Failure(e)
         finally
             metaLock.unlock()
             rwLock.writeLock().unlock()
 
-    def sync():Try[Boolean] = Failure(new Exception("not implement now"))
+    def sync():Try[Unit] = Failure(new Exception("not implement now"))
 
     /**
       * Opens and returns a transactional object, or exception information if the opening fails.
@@ -345,7 +348,7 @@ class DB(val path:String)(using ops:Options):
                     tx.sysCommit = true
                     tx.openBucket(bucket) match
                         case Failure(e) => throw e
-                        case Success(bk) => bk+(key,value)
+                        case Success(bk) => bk+=(key,value)
                     tx.sysCommit = false
                     tx.commit()
                 catch
@@ -371,7 +374,7 @@ class DB(val path:String)(using ops:Options):
                     tx.sysCommit = true
                     tx.openBucket(bucket) match
                         case Failure(e) => throw e
-                        case Success(bk) => bk+(elems)
+                        case Success(bk) => bk+=(elems)
                     tx.sysCommit = false
                     tx.commit()
                 catch

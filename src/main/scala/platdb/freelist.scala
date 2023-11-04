@@ -28,14 +28,15 @@ private[platdb] object Meta:
                 if data.length != elementSize then
                     return None 
                 val arr = for i <- 0 to 5 yield
-                    var n:Long = (data(8*i) & 0xff) << 56 | (data(8*i+1) & 0xff) << 48 | (data(8*i+2) & 0xff) << 40 | (data(8*i+3) & 0xff) << 32
-                    n = n | (data(8*i+4) & 0xff) << 24 | (data(8*i+5) & 0xff) << 16 | (data(8*i+6) & 0xff) << 8 | (data(8*i+7) & 0xff)
+                    val n:Long = (data(8*i) & 0xff) << 56 | (data(8*i+1) & 0xff) << 48 
+                    | (data(8*i+2) & 0xff) << 40 | (data(8*i+3) & 0xff) << 32 | (data(8*i+4) & 0xff) << 24 
+                    | (data(8*i+5) & 0xff) << 16 | (data(8*i+6) & 0xff) << 8 | (data(8*i+7) & 0xff)
                     n
                 val sz =  (data(48) & 0xff) << 24 | (data(49) & 0xff) << 16 | (data(50) & 0xff) << 8 | (data(51) & 0xff)
                 meta.pageId = arr(0)
                 meta.freelistId = arr(1)
                 meta.txid = arr(2)
-                meta.root = new BucketValue(arr(3),arr(4),arr(5))
+                meta.root = new BucketValue(arr(3),arr(4),arr(5),bucketDataType )
                 meta.pageSize = sz
                 Some(meta)
 
@@ -55,7 +56,7 @@ private[platdb] class Meta(val id:Long) extends Persistence:
         m.freelistId = freelistId
         m.pageId = pageId
         m.txid = txid
-        m.root = new BucketValue(root.root,root.count,root.sequence)
+        m.root = new BucketValue(root.root,root.count,root.sequence,bucketDataType)
         m
     def size():Int = Meta.size
     def writeTo(bk:Block):Int =

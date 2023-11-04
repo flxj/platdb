@@ -6,7 +6,7 @@ import scala.annotation.targetName
 class MemDB(val name:String,val path:String):
     var store:DB = null
 
-private[platdb] class MemTx(val id:Long) extends Transaction:
+private[platdb] class MemTx(val id:Long):
     def size:Long = ???
     def closed: Boolean = ???
     def commit(): Try[Unit] = ???
@@ -37,10 +37,10 @@ private[platdb] class MemTx(val id:Long) extends Transaction:
 private[platdb] class MemBucket(val path:String) extends Bucket:
     var db:MemDB = null
     var tx:MemTx = null
-    def +(key: String, value: String): Unit = ???
-    def +(elems: Seq[(String, String)]): Unit = ???
-    def -(key: String): Unit = ???
-    def -(keys: Seq[String]): Unit = ???
+    def +=(key: String, value: String): Unit = ???
+    def +=(elems: Seq[(String, String)]): Unit = ???
+    def -=(key: String): Unit = ???
+    def -=(keys: Seq[String]): Unit = ???
     def apply(key: String): String = ???
     def closed: Boolean = ???
     def get(key: String): Try[String] = ???
@@ -55,6 +55,7 @@ private[platdb] class MemBucket(val path:String) extends Bucket:
     def length: Long = ???
     def name: String = ???
     def getOrElse(key:String,defalutValue:String):String = ???
+    def update(key: String, value: String): Unit = ???
 
 
     // 定义一个新trait

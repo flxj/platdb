@@ -9,44 +9,164 @@ import java.io.RandomAccessFile
 import java.io.File
 
 trait Transaction:
-    // return current transactions identity.
+    /**
+      * return current transactions identity.
+      *
+      * @return
+      */
     def id:Long
-    // readonly or read-write transaction.
+    /**
+      * readonly or read-write transaction.
+      *
+      * @return
+      */
     def writable:Boolean
-    // if the transaction is closed.
+    /**
+      * if the transaction is closed.
+      *
+      * @return
+      */
     def closed:Boolean
-    // return db bytes size in current transaction view.
+    /**
+      * return db bytes size in current transaction view.
+      *
+      * @return
+      */
     def size:Long
-    // commit transaction,if its already closed then throw an exception.
+    /**
+      * commit transaction,if its already closed then throw an exception.
+      *
+      * @return
+      */
     def commit():Try[Unit]
-    // rollback transaction,if its already closed then throw an exception.
+    /**
+      * rollback transaction,if its already closed then throw an exception.
+      *
+      * @return
+      */
     def rollback():Try[Unit]
-    // open a bucket,if not exists will throw an exception.
-    def openBucket(name:String):Try[Bucket]
-    // create a new bucket,if already exists will throw an exception.
-    def createBucket(name:String):Try[Bucket]
-    // create a bucket,if exists then return the bucket.
-    def createBucketIfNotExists(name:String):Try[Bucket]
-    // delete a bucket,if bucket not exists will throw an exception.
-    def deleteBucket(name:String):Try[Unit]
-    // open a set,if not exists will throw an exception.
-    def openBSet(name:String):Try[BSet]
-    // create a new set,if already exists will throw an exception.
-    def createBSet(name:String):Try[BSet]
-    // create a set,if exists then return the set.
-    def createBSetIfNotExists(name:String):Try[BSet]
-    // delete a bucket,if bucket not exists will throw an exception.
-    def deleteBSet(name:String):Try[Unit]
-    //  open a set,if not exists will throw an exception.
-    def openList(name:String):Try[BList]
-    // create a new list,if already exists will throw an exception.
-    def createList(name:String):Try[BList]
-    // create a list,if exists then return the set.
-    def createListIfNotExists(name:String):Try[BList]
-    // delete a list,if bucket not exists will throw an exception.
-    def deleteList(name:String):Try[Unit]
-    // return all collection objects in current db,format is (name,dataType).
+    /**
+      * return all collection objects in current db,format is (name,dataType).
+      *
+      * @return
+      */
     def allCollection():Try[Seq[(String,String)]]
+    /**
+      * open a bucket,if not exists will throw an exception.
+      *
+      * @param name
+      * @return
+      */
+    def openBucket(name:String):Try[Bucket]
+    /**
+      * create a new bucket,if already exists will throw an exception.
+      *
+      * @param name
+      * @return
+      */
+    def createBucket(name:String):Try[Bucket]
+    /**
+      * create a bucket,if exists then return the bucket.
+      *
+      * @param name
+      * @return
+      */
+    def createBucketIfNotExists(name:String):Try[Bucket]
+    /**
+      * delete a bucket,if bucket not exists will throw an exception.
+      *
+      * @param name
+      * @return
+      */
+    def deleteBucket(name:String):Try[Unit]
+    /**
+      * open a set,if not exists will throw an exception.
+      *
+      * @param name
+      * @return
+      */
+    def openBSet(name:String):Try[BSet]
+    /**
+      * create a new set,if already exists will throw an exception.
+      *
+      * @param name
+      * @return
+      */
+    def createBSet(name:String):Try[BSet]
+    /**
+      * create a set,if exists then return the set.
+      *
+      * @param name
+      * @return
+      */
+    def createBSetIfNotExists(name:String):Try[BSet]
+    /**
+      * delete a bucket,if bucket not exists will throw an exception.
+      *
+      * @param name
+      * @return
+      */
+    def deleteBSet(name:String):Try[Unit]
+    /**
+      * open a list,if not exists will throw an exception.
+      *
+      * @param name
+      * @return
+      */
+    def openList(name:String):Try[BList]
+    /**
+      * create a new list,if already exists will throw an exception.
+      *
+      * @param name
+      * @return
+      */
+    def createList(name:String):Try[BList]
+    // create a list,if exists then return the list.
+    /**
+      * 
+      *
+      * @param name
+      * @return
+      */
+    def createListIfNotExists(name:String):Try[BList]
+    /**
+      * delete a list,if bucket not exists will throw an exception.
+      *
+      * @param name
+      * @return
+      */
+    def deleteList(name:String):Try[Unit]
+    /**
+      * open a region,if not exists will throw an exception.
+      *
+      * @param name
+      * @return
+      */
+    def openRegion(name:String):Try[Region]
+    // create a new list,if already exists will throw an exception.
+    /**
+      * 
+      *
+      * @param name
+      * @param dimension
+      * @return
+      */
+    def createRegion(name:String,dimension:Int):Try[Region]
+    /**
+      * create a region,if exists then return the region.
+      *
+      * @param name
+      * @param dimension
+      * @return
+      */
+    def createRegionIfNotExists(name:String,dimension:Int):Try[Region]
+    /**
+      * delete a regison,if not exists will throw an exception.
+      *
+      * @param name
+      * @return
+      */
+    def deleteRegion(name:String):Try[Unit]
 
 
 private[platdb] object Tx:
@@ -165,7 +285,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
             db.freelist.rollback(id)
             // TODO:
             // Read free page list from freelist page.
-			// tx.db.freelist.reload(tx.db.page(tx.db.meta().freelist))
+			// freelist.reload(db.meta.freelist))
         close()
         Success(true)
     
@@ -375,7 +495,8 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
         finally
             if writer != null then 
                 writer.close()
-    
+    //
+    def allCollection(): Try[Seq[(String, String)]] = root.allCollection()
     // BSet methods
     def openBSet(name:String):Try[BSet] = root.getBSet(name)
     def createBSet(name:String):Try[BSet] = root.createBSet(name)
@@ -387,4 +508,12 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
     def createList(name:String):Try[BList] = root.createList(name)
     def createListIfNotExists(name:String):Try[BList] = root.createListIfNotExists(name)
     def deleteList(name:String):Try[Unit] = root.deleteList(name)
-    def allCollection(): Try[Seq[(String, String)]] = root.allCollection()
+    
+    // Region
+    def openRegion(name:String):Try[Region] = root.getRegion(name)
+    //
+    def createRegion(name:String,dimension:Int):Try[Region] = ???
+    //
+    def createRegionIfNotExists(name:String,dimension:Int):Try[Region] = ???
+    //
+    def deleteRegion(name:String):Try[Unit] = ???

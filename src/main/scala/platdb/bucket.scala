@@ -38,8 +38,9 @@ private[platdb] object BTreeBucket:
         if data.length!=valueSize then
             return None 
         val arr = for i <- 0 to 2 yield
-            var n:Long = (data(8*i) & 0xff) << 56 | (data(8*i+1) & 0xff) << 48 | (data(8*i+2) & 0xff) << 40 | (data(8*i+3) & 0xff) << 32
-            n = n | (data(8*i+4) & 0xff) << 24 | (data(8*i+5) & 0xff) << 16 | (data(8*i+6) & 0xff) << 8 | (data(8*i+7) & 0xff)
+            val n:Long = (data(8*i) & 0xff) << 56 
+            | (data(8*i+1) & 0xff) << 48 | (data(8*i+2) & 0xff) << 40 | (data(8*i+3) & 0xff) << 32 
+            | (data(8*i+4) & 0xff) << 24 | (data(8*i+5) & 0xff) << 16 | (data(8*i+6) & 0xff) << 8 | (data(8*i+7) & 0xff)
             n
         Some(new BucketValue(arr(0),arr(1),arr(2),data(valueSize-1)))
 
@@ -74,7 +75,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       * @param key
       * @param value
       */
-    def +(key:String,value:String):Unit = 
+    def +=(key:String,value:String):Unit = 
         put(key,value) match
             case Success(_) => None
             case Failure(e) => throw e
@@ -83,7 +84,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       *
       * @param elems
       */ 
-    def +(elems:Seq[(String,String)]):Unit =
+    def +=(elems:Seq[(String,String)]):Unit =
         for (k,v) <- elems do
             put(k,v) match
                 case Success(_) => None
@@ -93,15 +94,27 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       *
       * @param key
       */
-    def -(key:String):Unit = 
+    def -=(key:String):Unit = 
         delete(key) match
             case Success(_) => None
             case Failure(e) => throw e
-    def -(keys:Seq[String]):Unit =
+    /**
+      * 
+      *
+      * @param keys
+      */
+    def -=(keys:Seq[String]):Unit =
         for k <- keys do
             delete(k) match
                 case Success(_) => None
                 case Failure(e) => throw e
+    /**
+      * 
+      *
+      * @param key
+      * @param value
+      */
+    def update(key:String,value:String):Unit = this.+=(key,value)
     /**
       * 
       *
@@ -542,8 +555,10 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
     def merge():Unit = 
         for (_,node) <- nodes do 
             mergeOnNode(node)
-        for (_,bucket) <- buckets do 
-            bucket.merge() 
+        for (_,rbk) <- regions do
+            rbk.merge()
+        for (_,bk) <- buckets do 
+            bk.merge()
     /**
       * try to merge the node.
       *
@@ -625,6 +640,8 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       * rebalance bucket,split too large nodes.
       */
     def split():Unit =
+        for (name,region) <- regions do
+            region.split()
         // split all cache subbuckets.
         for (name,bucket) <- buckets do 
             bucket.split()
@@ -665,7 +682,6 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       */
     private def splitOnNode(node:Node):Unit =
         if node.spilled then return None
-         // TODO: sort.Sort(n.children)
         // Recursively slice the children of the current node. 
         // Note that child node splitting may add more elements to the current node's children array, 
         // and these new elements do not need to be repartitioned, so subscripts are recycled here.
@@ -1080,3 +1096,88 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
             Success(arr.toList)
         catch
             case e:Exception => Failure(e)
+    //
+    private var regions = Map[String,RTreeBucket]()
+    /**
+      * 
+      *
+      * @param name
+      * @param readonly
+      * @return
+      */
+    def getRegion(name:String):Try[Region] = 
+        regions.get(name) match
+            case None => None
+            case Some(reg) => return Success(reg)
+        getBucket(name,regionDataType) match
+            case Failure(e) => Failure(e)
+            case Success(bk) =>
+                RTreeBucket(bk,tx) match
+                    case Failure(e) => Failure(new Exception(s"get Region $name failed:${e.getMessage()}"))
+                    case Success(reg) => 
+                        regions(name) = reg
+                        Success(reg)   
+    /**
+      * 
+      *
+      * @param name
+      * @return
+      */
+    def createRegion(name:String,dimension:Int):Try[Region] = 
+        createBucket(name,regionDataType) match
+            case Failure(e) => Failure(e)
+            case Success(bk) =>
+                RTreeBucket(bk,dimension,tx) match
+                    case Failure(e) => Failure(new Exception(s"create Region $name failed:${e.getMessage()}"))
+                    case Success(reg) => 
+                        regions(name) = reg
+                        Success(reg)
+    /**
+      * 
+      *
+      * @param name
+      * @return
+      */
+    def createRegionIfNotExists(name:String,dimension:Int):Try[Region] = 
+        createBucketIfNotExists(name,regionDataType) match
+            case Failure(e) => Failure(e)
+            case Success(bk) =>
+                RTreeBucket(bk,dimension,tx) match
+                    case Failure(e) => Failure(new Exception(s"create Region $name failed:${e.getMessage()}"))
+                    case Success(reg) => 
+                        regions(name) = reg
+                        Success(reg)
+            
+    /**
+      * 
+      *
+      * @param name
+      * @return
+      */
+    def deleteRegion(name:String):Try[Unit] =
+        regions.get(name) match
+            case None => None
+            case Some(rbk) => 
+                rbk.clear() match
+                    case Failure(e) => return Failure(e)
+                    case Success(_) => None
+                deleteBucket(name,regionDataType) match
+                    case Failure(e) => return Failure(e)
+                    case Success(_) => None
+                regions.remove(name)
+                return Success(None)
+        getBucket(name,regionDataType) match
+            case Failure(e) => Failure(e)
+            case Success(bk) =>
+                RTreeBucket(bk,tx) match
+                    case Failure(e) => Failure(new Exception(s"get Region $name failed:${e.getMessage()}"))
+                    case Success(rbk) => 
+                        rbk.clear() match
+                            case Failure(e) => return Failure(e)
+                            case Success(_) => None
+                        deleteBucket(name,regionDataType) match
+                            case Failure(e) => return Failure(e)
+                            case Success(_) => None
+                        regions.remove(name)
+                        Success(None) 
+        

@@ -29,6 +29,7 @@ private[platdb] trait Persistence:
       */
     def writeTo(block:Block):Int
 
+// block flag.
 private[platdb] val metaType:Byte = 1 
 private[platdb] val branchType:Byte = 2
 private[platdb] val leafType:Byte = 3
@@ -36,6 +37,7 @@ private[platdb] val freelistType:Byte = 4
 
 // node element type
 private[platdb] val bucketType:Byte = 5
+private[platdb] val regionType:Byte = 6
 
 /**
   * 
@@ -298,6 +300,11 @@ private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
         
     // TODO: sync将所有脏block写入文件？
     def sync():Unit = None
+    def close():Unit = 
+        link.clear()
+        pinned.clear()
+        blocks.clear()
+        idle.clear()
 
 // 
 private[platdb] class FileManager(val path:String,val readonly:Boolean):
