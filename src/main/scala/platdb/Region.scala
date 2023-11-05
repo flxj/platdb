@@ -13,8 +13,153 @@ import scala.util.{Try,Failure,Success}
 import scala.util.control.Breaks._
 
 
+    
 /**
-  * 
+  * spatial index
+  */
+trait Region:
+    /**
+      * name
+      *
+      * @return
+      */
+    def name:String
+    /**
+      * number of objects.
+      *
+      * @return
+      */
+    def length:Long
+    /**
+      * the dimension of current region.
+      *
+      * @return
+      */
+    def dimension:Int
+    /**
+      * Iterate all objects in ascending order according to the key value dictionary.
+      *
+      * @return
+      */
+    def iterator:Iterator[SpatialObject]
+    /**
+      * Insert a spatial point object into the current region
+      *
+      * @param coordinate
+      * @param key
+      * @param Value
+      * @return
+      */
+    def mark(coordinate:Array[Double],key:String,Value:String):Try[Unit]
+    /**
+      * Insert a spatial object into the current region
+      *
+      * @param obj
+      * @return
+      */
+    def put(obj:SpatialObject):Try[Unit]
+    /**
+      * Query spatial object information
+      *
+      * @param key
+      * @return
+      */
+    def get(key:String):Try[SpatialObject]
+    /**
+      * Query and filter all objects that intersect with the given query window
+      *
+      * @param range
+      * @param filter
+      * @return
+      */
+    def search(range:Rectangle,filter:(SpatialObject)=>Boolean):Try[Seq[SpatialObject]]
+    /**
+      * Filter all objects in the entire area
+      *
+      * @param filter
+      * @return
+      */
+    def scan(filter:(SpatialObject)=>Boolean):Try[Seq[SpatialObject]]
+    /**
+      * Delete a spatial object
+      *
+      * @param key
+      * @return
+      */
+    def delete(key:String):Try[Unit]
+    /**
+      * Filter and delete objects within the specified range (intersecting with the query window)
+      *
+      * @param range
+      * @param filter
+      * @return
+      */
+    def delete(range:Rectangle,filter:(SpatialObject)=>Boolean):Try[Unit]
+    /**
+      * Delete all objects containing range (completely covering the query window)
+      *
+      * @param range
+      * @return
+      */
+    def delete(range:Rectangle):Try[Unit] 
+    /**
+      * Returns the range of the entire region
+      *
+      * @return
+      */
+    def boundary():Try[Rectangle]
+    /**
+      * Query k objects closest to obj objects
+      *
+      * @param obj
+      * @param k
+      * @param distFunc
+      * @return
+      */
+    def nearby(obj:SpatialObject,k:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]]
+    /**
+      * Query the k objects closest to the key object
+      *
+      * @param key
+      * @param k
+      * @param distFunc
+      * @return
+      */
+    def nearby(key:String,k:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]]
+    /**
+      * Query all other objects with a distance less than or equal to d from the obj object
+      *
+      * @param obj
+      * @param d
+      * @param limit
+      * @param distFunc
+      * @return
+      */
+    def nearby(obj:SpatialObject,d:Double,limit:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]]
+    /**
+      * A convenient method for adding spatial objects, equivalent to putting
+      *
+      * @param obj
+      * @throws
+      */
+    def +=(obj:SpatialObject):Unit
+    /**
+      * A convenient method for deleting spatial objects, equivalent to delete
+      *
+      * @param key
+      */
+    def -=(key:String):Unit
+    /**
+      * Convenient methods for updating objects
+      *
+      * @param key
+      * @param obj
+      * @throws
+      */
+    def update(key:String,obj:SpatialObject):Unit
+
+/**
+  * A spatial rectangle used to describe the boundary range of a spatial object.
   *
   * @param min
   * @param max
@@ -62,12 +207,12 @@ case class Rectangle(min:Array[Double],max:Array[Double]):
 case class SpatialObject(coord:Rectangle,key:String,data:String,isPoint:Boolean):
     def dimension:Int = coord.dimension
 
-// region的元信息
+// meta info of region.
 private[platdb] class RegionValue(var root:Long,val dimension:Int,val maxEntries:Int,val minEntries:Int):
     def getBytes:Array[Byte] = ???
     override def toString():String = ???
 
-// rtree 节点元素，叶节点child为-1，value为数据对象对应的key，分支节点的value字段为null
+// for leaf node child is -1, for branch node key is null
 private[platdb] class Entry(var mbr:Rectangle,var child:Long,var key:String):
     def keySize:Int = ???
     def getKeyBytes:Array[Byte] = ???

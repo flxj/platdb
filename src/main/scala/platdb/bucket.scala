@@ -15,6 +15,122 @@ import scala.util.Try
 import scala.util.Success
 import scala.util.Failure
 
+/**
+  * Bucket represents an ordered (lexicographic) set of key-value pairs.
+  */
+trait Bucket extends Iterable:
+    def name:String
+    /**
+      * name
+      *
+      * @param key
+      * @return
+      */
+    def contains(key:String):Try[Boolean]
+    /**
+      * Retrieve the element
+      *
+      * @param key
+      * @return
+      */
+    def get(key:String):Try[String]
+    /**
+      * 
+      *
+      * @param key
+      * @param defalutValue
+      * @return
+      */
+    def getOrElse(key:String,defalutValue:String):String
+    /**
+      * Add or update element.
+      *
+      * @param key
+      * @param value
+      * @return
+      */
+    def put(key:String,value:String):Try[Unit]
+    /**
+      * delete element.
+      *
+      * @param key
+      * @return
+      */
+    def delete(key:String):Try[Unit]
+    /**
+      * Open nested subbuckets.
+      *
+      * @param name
+      * @return
+      */
+    def getBucket(name:String):Try[Bucket]
+    /**
+      * Create a subbucket.
+      *
+      * @param name
+      * @return
+      */
+    def createBucket(name:String):Try[Bucket]
+    /**
+      * Create a subbucket.
+      *
+      * @param name
+      * @return
+      */
+    def createBucketIfNotExists(name:String):Try[Bucket] 
+    /**
+      * Delete subbucekt
+      *
+      * @param name
+      * @return
+      */
+    def deleteBucket(name:String):Try[Unit]
+    /**
+      * A convenient way to retrieve element.
+      *
+      * @param key
+      * @return
+      * @throws
+      */
+    def apply(key:String):String
+    /**
+      * A convenient way to add or update element.
+      *
+      * @param key
+      * @param value
+      * @throws
+      */
+    def +=(key:String,value:String):Unit
+    /**
+      * A convenient way to add or update elements
+      *
+      * @param elems
+      * @throws
+      */
+    def +=(elems:Seq[(String,String)]):Unit
+    /**
+      * A convenient way to delete an element.
+      *
+      * @param key
+      * @throws
+      */
+    def -=(key:String):Unit
+    /**
+      * A convenient way to delete elements.
+      *
+      * @param keys
+      * @throws
+      */
+    def -=(keys:Seq[String]):Unit
+    /**
+      * A convenient way to add or update element.
+      *
+      * @param key
+      * @param value
+      * @throws
+      */
+    def update(key:String,value:String):Unit 
+
 
 // count is the number of keys in current bucket
 private[platdb] class BucketValue(var root:Long,var count:Long,var sequence:Long,val dataType:Byte):

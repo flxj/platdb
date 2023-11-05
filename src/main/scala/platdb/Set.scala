@@ -12,7 +12,146 @@ import scala.util.{Success,Failure,Try}
 import scala.collection.mutable.TreeMap
 
 /**
-  * 
+  * BSet represents a set of string elements on disk, where the elements are unique and can be traversed in dictionary order.
+  */
+trait BSet extends Iterable:
+    /**
+      * name
+      *
+      * @return
+      */
+    def name:String
+    /**
+      * Check if the current collection contains an element.
+      *
+      * @param key
+      * @return
+      */
+    def contains(key:String):Try[Boolean]
+    /**
+      * Add one or more elements to the current collection.
+      *
+      * @param keys
+      * @return
+      */
+    def add(keys:String*):Try[Unit]
+    /**
+      * Remove one or more elements from the current collection.
+      *
+      * @param keys
+      * @return
+      */
+    def remove(keys:String*):Try[Unit]
+    /**
+      * Calculate the intersection of the current set and the target set, and the result is still a BSet (the object is stored in memory).
+      *
+      * @param set
+      * @return
+      */
+    def and(set:BSet):Try[BSet]
+    /**
+      * Calculate the intersection of the current set and the target set，and the result is still a BSet (the object is stored in memory).
+      *
+      * @param set
+      * @return
+      */
+    def and(set:Set[String]):Try[BSet]
+    /**
+      * Calculate the union of the current set and the target set，and the result is still a BSet (the object is stored in memory).
+      *
+      * @param set
+      * @return
+      */
+    def union(set:BSet):Try[BSet]
+    /**
+      * Calculate the union of the current set and the target set，and the result is still a BSet (the object is stored in memory).
+      *
+      * @param set
+      * @return
+      */
+    def union(set:Set[String]):Try[BSet]
+    /**
+      * Calculate the difference between the current set and the target set，and the result is still a BSet (the object is stored in memory).
+      *
+      * @param set
+      * @return
+      */
+    def diff(set:BSet):Try[BSet]
+    /**
+      * Calculate the difference between the current set and the target set，and the result is still a BSet (the object is stored in memory).
+      *
+      * @param set
+      * @return
+      */
+    def diff(set:Set[String]):Try[BSet]
+    /**
+      * A convenient method for calculating intersections, equivalent to the add method.
+      *
+      * @param set
+      * @return
+      */
+    def &(set:BSet):BSet =
+        and(set) match
+            case Failure(exception) => throw exception
+            case Success(bset) => bset
+    /**
+      * A convenient method for calculating intersections, equivalent to the add method.
+      *
+      * @param set
+      * @return
+      * @throws
+      */
+    def &(set:Set[String]):BSet =
+        and(set) match
+            case Failure(exception) => throw exception
+            case Success(bset) => bset
+    /**
+      * A convenient method for calculating unions, equivalent to the union method.
+      *
+      * @param set
+      * @return
+      * @throws
+      */
+    def |(set:BSet):BSet =
+        union(set) match
+            case Failure(exception) => throw exception
+            case Success(bset) => bset
+    /**
+      * A convenient method for calculating unions, equivalent to the union method.
+      *
+      * @param set
+      * @return
+      * @throws
+      */
+    def |(set:Set[String]):BSet =
+        union(set) match
+            case Failure(exception) => throw exception
+            case Success(bset) => bset
+    /**
+      * A convenient method for calculating difference sets, equivalent to the diff method.
+      *
+      * @param set
+      * @return
+      * @throws
+      */
+    def -(set:BSet):BSet =
+        diff(set) match
+            case Failure(exception) => throw exception
+            case Success(bset) => bset
+    /**
+      * A convenient method for calculating difference sets, equivalent to the diff method.
+      *
+      * @param set
+      * @return
+      * @throws
+      */
+    def -(set:Set[String]):BSet =
+        diff(set) match
+            case Failure(exception) => throw exception
+            case Success(bset) => bset
+
+/**
+  * BSet implementation based on B+tree.
   *
   * @param bk
   */

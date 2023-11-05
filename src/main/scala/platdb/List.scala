@@ -14,6 +14,211 @@ import scala.util.{Try,Success,Failure}
 import scala.util.control.Breaks._
 import java.nio.ByteBuffer
 
+
+/**
+  * A list of strings
+  */
+trait BList extends Iterable:
+    /**
+      * name
+      *
+      * @return
+      */
+    def name:String 
+    /**
+      * Is the current list empty
+      *
+      * @return
+      */
+    def isEmpty: Boolean
+    /**
+      * Retrieve elements based on subscripts
+      *
+      * @param idx
+      * @return
+      */
+    def get(idx:Int):Try[String]
+    /**
+      * Return list header element
+      *
+      * @return
+      */
+    def head:Try[String]
+    /**
+      * Return the element at the end of the list
+      *
+      * @return
+      */
+    def last:Try[String]
+    /**
+      * List slicing operation, obtaining a sub list in read-only mode
+      *
+      * @param from
+      * @param until
+      * @return
+      */
+    def slice(from:Int,until:Int):Try[BList]
+    /**
+      * Invert the list, and the obtained inverse list is in read-only mode
+      *
+      * @return
+      */
+    def reverse:BList
+    /**
+      * The list obtained after removing the end element is in read-only mode
+      *
+      * @return
+      */
+    def init:BList
+    /**
+      * The list obtained after removing the header element is in read-only mode
+      *
+      * @return
+      */
+    def tail:BList
+    /**
+      * Filter elements to obtain a read-only sublist
+      *
+      * @param p
+      * @return
+      */
+    def filter(p:(String) => Boolean): BList
+    /**
+      * Find the index of the first element that meets the condition, and return -1 if it does not exist
+      *
+      * @param p
+      * @return
+      */
+    def find(p:(String) => Boolean):Int
+    /**
+      * Get the first n elements, and the obtained sublist is read-only
+      *
+      * @param n
+      * @return
+      */
+    def take(n: Int): Try[BList]
+    /**
+      * Obtain the last n elements, and the obtained sublist is read-only
+      *
+      * @param n
+      * @return
+      */
+    def takeRight(n: Int): Try[BList]
+    /**
+      * Delete the first n elements
+      *
+      * @param n
+      * @return
+      */
+    def drop(n: Int): Try[Unit]
+    /**
+      * Delete n elements at the end of the list
+      *
+      * @param n
+      * @return
+      */
+    def dropRight(n: Int): Try[Unit]
+    /**
+      * Insert an element at the index position
+      *
+      * @param index
+      * @param elem
+      * @return
+      */
+    def insert(index: Int, elem:String): Try[Unit]
+    /**
+      * Insert multiple elements at index position
+      *
+      * @param index
+      * @param elems
+      * @return
+      */
+    def insert(index: Int, elems:Seq[String]): Try[Unit]
+    /**
+      * Add an element to the tail
+      *
+      * @param elem
+      * @return
+      */
+    def append(elem:String):Try[Unit]
+    /**
+      * Add several elements to the tail
+      *
+      * @param elems
+      * @return
+      */
+    def append(elems:Seq[String]):Try[Unit]
+    /**
+      * Insert an element into the head
+      *
+      * @param elem
+      * @return
+      */
+    def prepend(elem: String):Try[Unit]
+    /**
+      * Insert multiple elements into the head
+      *
+      * @param elems
+      * @return
+      */
+    def prepend(elems: Seq[String]):Try[Unit]
+    /**
+      * Delete an element
+      *
+      * @param index
+      * @return
+      */
+    def remove(index: Int): Try[Unit]
+    /**
+      * Delete multiple elements
+      *
+      * @param index
+      * @param count
+      * @return
+      */
+    def remove(index: Int, count: Int):Try[Unit]
+    /**
+      * Update element
+      *
+      * @param index
+      * @param elem
+      * @return
+      */
+    def set(index: Int, elem:String): Try[Unit]
+    /**
+      * Does the element that meets the condition exist
+      *
+      * @param p
+      * @return
+      */
+    def exists(p:(String) => Boolean): Boolean
+    /**
+      * Convenient methods for retrieving elements
+      *
+      * @param n
+      * @return
+      */
+    def apply(n: Int):String
+    /**
+      * Convenient method, equivalent to append
+      *
+      * @param elem
+      */
+    def :+(elem:String):Unit
+    /**
+      * Convenient method, equivalent to prepend
+      *
+      * @param elem
+      */
+    def +:(elem:String):Unit
+    /**
+      * A convenient method for updating elements, equivalent to set
+      *
+      * @param index
+      * @param elem
+      */
+    def update(index:Int,elem:String):Unit
+
 private[platdb] object KList:
     val indexHeaderSize = 4
     val indexElementSize = 12

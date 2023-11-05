@@ -1,58 +1,68 @@
-## platdb
+## PlatDB
 
-[logo]
+PlatDB is an embedded key value engine for disk storage, with the goal of providing a simple and lightweight data persistence solution. Has the following characteristics
+
+1) Organize data using a single file for easy migration
+
+2) Support for ACID transactions
+
+3) Supports concurrent execution of read and write transactions (mvcc)
+
+3) Supports multiple commonly used data structures (Map/Set/List/RTree)
+
+4) Support HTTP interface to access data in server mode (TODO)
+
+### Usage
 
 
-paltdb是一个嵌面向磁盘存储的嵌入式key-value引擎,目标是提供一种使用简单，轻量级的数据持久化方案。具有如下特点 
-1)使用单一文件组织数据，便于迁移 
-2)支持ACID事务
-3)支持读写事务并发执行(mvcc,一写多读)
-3)支持多种常用数据结构(Map/Set/List/RTree) 
-4)server模式下支持http接口访问数据 （TODO）
+Import platdb into your project first
 
-platdb实现参考了boltdb等项目，本人开发platdb的主要目的之一是学习数据库相关知识
 
-### 使用
+Sbt
+```scala
 
-在你的项目中导入platdb
+```
 
-marven
 
-sbt
+Using platdb is very simple. You only need to provide a data file path, create a DB instance, and open it
 
-使用platdb非常简单，你只需要提供一个数据文件路径，创建一个DB实例并打开它即可
 
-如下示例将打开一个数据库
+The following example will open a database
 ```scala
 import platdb._
-import platdb.defaultOptions // 默认的db配置
+import platdb.defaultOptions // Default db configuration
 
-val path = "/tmp/my.db" // 如果文件不存在则platdb会尝试创建并初始化它
+val path = "/tmp/my.db" // If the file does not exist, platdb will attempt to create and initialize it
 var db = new DB(path)
 db.open() match
-    case Failure(e) => println(e.getMessage())
+    case Failure(e) => println(e.getMessage()) 
     case Success(_) => None
 
-// 对该DB实例做一些读写操作...
+// Perform some read and write operations on this DB instance...
 
 db.close() match
     case Failure(e) => println(e.getMessage())
     case Success(_) => None
 ```
-platdb允许同一时刻只有一个进程能够打开数据文件，因此其它尝试打开的进程或线程将一直阻塞或超时退出(超时时间可在Options中设置)。
 
-多个线程操作同一个DB实例是安全的。
+Platdb allows only one process to open a data file at the same time, so other processes or threads attempting to open will continue to block or timeout (the timeout can be set in Options). 
+
+It is safe for multiple threads to operate on the same DB instance.
+
+### Transaction
 
 
-### 事务
+All operations on platdb data objects should be encapsulated in the transaction context to ensure consistency of db data content.
 
-所有针对platdb数据对象的操作都应该封装到事务上下文中进行，以确保db数据内容的一致性.
-当前platdb支持在DB实例上创建读或写事务，其中可读写事务允许更新数据对象状态，只读事务中只允许读取数据对象信息。
-platdb支持一个DB实例上同时打开多个只读事务和至多一个读写事务(读写事务串行执行)，并使用mvcc机制控制事务并发.
+Currently, Platdb supports creating read-only or read-write transactions on DB instances, where read-write transactions allow updating of data object status, while read-only transactions only allow reading of data object information.
 
-platdb的数据对象都是线程不安全的，因此不要在一个事务中并发的操作同一个数据对象，如果有该需求则应该每个线程各自打开一个事务
+Platdb supports the simultaneous opening of multiple read-only transactions and at most one read-write transaction (read-write transaction serial execution) on a single DB instance, and uses the mvcc mechanism to control transaction concurrency.
 
-platdb的Transaction支持对内置数据结构对象的管理方法
+
+Platdb's data objects are thread unsafe, so do not operate on the same data object concurrently in a transaction. If there is a requirement, each thread should open a transaction separately.
+
+
+Platdb's Transaction supports management methods for built-in data structure objects. for example
 ```shell
 createBucket:
 createBucketIfNotExists:
@@ -64,17 +74,16 @@ createListIfNotExists:
 openList:
 deleteList:
 ```
-
-如下示例执行一个只读事务,view是DB实例提供的执行只读事务的便捷方法
+The following example executes a read-only transaction, where `view` is a convenient method provided by the DB instance to execute read-only transactions
 ```scala
 import platdb._
 import platdb.defaultOptions
 
-// 打开一个DB实例
+// Open a DB instance
 
 db.view(
     (tx:Transaction) =>
-        // 做一些读取操作，比如此处代码打开并读取了bucket中的一些内容
+        // Perform some reading operations, such as opening and reading some content from the bucket
         tx.openBucket("bucketName") match
             case Failure(e) => throw e
             case Success(bk) =>
@@ -83,14 +92,16 @@ db.view(
                     case Success(value) => println(value)
 ) match
     case Failure(e) => println(e.getMessage())
-    case Success(_) => None    
+    case Success(_) => None 
 
-// 关闭该DB实例
+// Close this DB instance
 ```
-如果你不喜欢写太多match语句来处理每一步操作可能抛出的异常，上述示例也可以写成如下形式
+
+
+If you don't like to write too many match statements to handle the possible exceptions thrown by each step of the operation, the above example can also be written in the following form
 ```scala
 import platdb._
-import platdb.Collection._ // 导入collection对象中的便捷方法
+import platdb.Collection._ // Convenient methods for importing collection objects
 
 db.view(
     (tx:Transaction) =>
@@ -103,17 +114,16 @@ db.view(
     case Failure(e) => println(e.getMessage())
     case Success(_) => None    
 ```
-
-如下示例显执行了一个读写事务，update是DB实例提供的执行读写事务的便捷方法
+The following example shows the execution of a read/write transaction, and `update` is a convenient method provided by the DB instance to execute read/write transactions
 ```scala
 import platdb._
 import platdb.defaultOptions
 
-// 打开一个DB实例
+// Open a DB instance
 
 db.update(
     (tx:Transaction) =>
-        // 做一些读写操作，比如此处代码打开并修改了list中的一些内容
+        // Perform some read and write operations, such as opening and modifying some content in the list at this point
         tx.openList("listName") match
             case Failure(e) => throw e
             case Success(list) =>
@@ -130,12 +140,13 @@ db.update(
     case Failure(e) => println(e.getMessage())
     case Success(_) => None    
 
-// 关闭该DB实例
+// Close this DB instance
 ```
-同样地，上述示例也可写为
+
+Similarly, the above example can also be written as
 ```scala
 import platdb._
-import platdb.Collection._ // 导入collection对象中的便捷方法
+import platdb.Collection._ 
 
 db.update(
     (tx:Transaction) =>
@@ -149,9 +160,10 @@ db.update(
     case Failure(e) => println(e.getMessage())
     case Success(_) => None    
 ```
-推荐用户的事务操作都通过view/update等便捷方法进行，因为这些方法会自动回滚/提交事务，并把异常信息返回
+The recommended transaction operations for users are carried out through convenient methods such as view/update, as these methods automatically rollback/commit transactions and return exception information.
 
-当然用户也可以手动管理事务，DB实例的begin方法用于打开一个事务对象
+
+Of course, users can also manually manage transactions, and the start method of a DB instance is used to open a transaction object.
 ```scala
 import platdb._
 
@@ -173,25 +185,30 @@ catch
         // process the error if need
    
 ```
-手动管理事务时务必记住手动关闭该事务(显式的调用回滚/提交方法)。更多关于事务方法的文档，参考 [xxxxxx]
-
-另外需要注意的是在事务中查询数据对象的结果仅在当前事务生命周期中有效，当事务关闭后会被垃圾回收。因此如果想要在事务之外使用读取到的内容，需要在事务中将其拷贝出来。
+When manually managing a transaction, it is important to remember to manually close the transaction (explicitly calling the rollback/commit method). For more documentation on transaction methods, refer to [xxxxxx]
 
 
-### 数据结构
+Additionally, it should be noted that the results of querying data objects in a transaction are only valid during the current transaction lifecycle, and will be garbage collected when the transaction is closed. Therefore, if you want to use the read content outside of a transaction, you need to copy it out in the transaction.
 
-platdb支持一些常见的数据结构:
-
-`Bucket`:有序的key-value集合（可类比scala/java的TreeMap）其中key,value均为string类型数据(使用平台默认编码)，Bucket也支持嵌套。
-
-`BSet`：有序的字符串集合(可类比scala/java的TreeSet)。
-
-`KList`: 字符串列表，可使用下标检索元素，类比scala的ArrayBuffer和List。
-
-`Region`：基于RTree的空间索引，每个Region对象可用来表示一个n维空间区域，提供对空间对象的增删改查操作能力。
+### data structure
 
 
-Bucket常见操作如下
+Platdb supports some common data structures:
+
+
+`Bucket`: An ordered set of key-values (similar to TreeMap in scala/Java), where both key and value are string type data (using platform default encoding), and buckets also support nesting.
+
+
+`BSet`: An ordered set of strings (similar to TreeSet in scala/Java).
+
+
+`KList`: A string list that can be used to retrieve elements using subscripts, similar to Scala's ArrayBuffer and List.
+
+
+`Region`: A spatial index based on RTree, where each Region object can be used to represent an n-dimensional spatial region, providing the ability to add, delete, modify, and query spatial objects.
+
+
+The common operations for buckets are as follows
 ```scala
 import platdb._
 import platdb.Collection._
@@ -200,34 +217,34 @@ db.update(
     (tx:Transaction) =>
         given tx = tx
         
-        // 创建bucket
+        // create bucket
         val bk = createBucketIfNotExists("bucketName") 
 
-        // 打开一个已经存在的bucket
+        // Open an existing bucket
         val bk2 = openBucket("bucketName2")
 
-        // 添加或更新bucket元素(如果key已经存在，则会覆盖其旧值)
+        // Add or update bucket elements (if the key already exists, its old value will be overwritten)
         bk+=("key1","value1")
         bk("key2") = "value2"
-
-        // 批量添加或修改bucket元素
+        
+        // Batch adding or modifying bucket elements
         val elems = List[(String,String)](("key2","value2"),("key3","value3"),("key4","value4"))
         bk+=(elems)
         
-        // 读取
+        // read
         val v = bk("key4")
 
-        // 删除bucket元素
+        // Delete bucket element
         bk-=("key1")
 
-        // 遍历bucket(按照key的字典升序)
+        // Traverse buckets (in ascending dictionary order of keys)
         for e <- bk.iterator do
             e match 
                 case (None,None) => None
                 case (Some(k),None) => 
                 case (Some(k),Some(v)) =>
 
-        // 打开一个嵌套子bucket
+        // Open a nested sub bucket
         bk.openBucket("subBucketName") match
             case Failure(e) => throw e
             case Success(sbk) => None
@@ -235,10 +252,9 @@ db.update(
     case Failure(e) => println(e.getMessage())
     case Success(_) => None  
 ```
-更多关于bucket的方法介绍，参考[xxxxxxxxxx]
+For more introduction to bucket methods, please refer to [xxxxxxxxxxx]
 
-
-BSet常见操作如下所示
+The common operations of BSet are as follows
 ```scala
 import platdb._
 import platdb.Collection._
@@ -247,49 +263,48 @@ db.update(
     (tx:Transaction) =>
         given tx = tx
         
-        // 创建集合
+        // create set
         val set = createBSetIfNotExists("setName") 
 
-        // 添加元素
+        // Adding Elements
         set+=("elem1")
 
-        // 批量添加元素
+        // Batch Add Elements
         val elems = List[String]("elem1","elem2","elem3")
         set+=(elems)
         
-        // 判断元素是否存在
+        // Determine whether an element exists
         set.contains("elem4") match
             case Failure(e) => throw e
             case Success(flag) => println(flag)
 
-        // 删除元素
+        // Delete Element
         set-=("elem1")
 
-        // 遍历(按照元素的字典升序)
+        // Traverse (in ascending dictionary order of elements)
         for e <- set.iterator do
             e match 
                 case (None,_) => None
                 case (Some(k),_) =>
         
-        // 打开一个已经存在的集合
+        // Open an existing set
         val set2 = openSet("setName2")
 
-        // 集合交集
-        val set3 = set and set2
+        // set intersection
+        val set3 = set & set2
 
-        // 集合并集
-        val set4 = set union set2
+        // Set union
+        val set4 = set | set2
 
-        // 集合差
+        // Set difference
         val set5 = set - set2
 ) match
     case Failure(e) => println(e.getMessage())
     case Success(_) => None  
 ```
-更多关于set的方法介绍，参考[xxxxxxxxxx]
+For more introduction to the method of set, please refer to [xxxxxxxxxxx]
 
-
-KList常见操作如下所示
+The common operations for KList are as follows
 ```scala
 import platdb._
 import platdb.Collection._
@@ -298,35 +313,35 @@ db.update(
     (tx:Transaction) =>
         given tx = tx
         
-        // 创建列表
+        // create list
         val list = createListIfNotExists("listName") 
 
-        // 打开一个已经存在的列表
+        // Open an existing list
         val list1 = openList("listName") 
 
-        // 在尾部添加元素
+        // Add elements at the tail
         list:+=("elem1")
 
-        // 在头部添加元素
+        // Add elements to the header
         list+:=("elem2")
 
-        // 使用下标检索元素
+        // Retrieve elements using subscripts
         val e = list(1)
 
-        // 更新元素
+        // Update Element
         list(1) = "newElem"
 
-        // 删除一个元素
+        // Delete an element
         list.remove(100) match
             case Failure(e) => throw e
             case Success(_) => None 
 
-        // 插入元素
+        // Insert Element
         list.insert(100, "value") match
             case Failure(e) => throw e
             case Success(_) => None 
 
-        // 切片操作
+        // Slice operation
         list.slice(400,500) match
             case Failure(e) => throw e
             case Success(sublist) => 
@@ -334,10 +349,10 @@ db.update(
     case Failure(e) => println(e.getMessage())
     case Success(_) => None 
 ```
-KList还支持其它诸如drop/dropRight,take/taskRight,find/flter等方法，关于这些方法的介绍，参考文档[xxxxxxxxxx]
+KList also supports other methods such as drop/dropRight, take/taskRight, find/filter, etc. For an introduction to these methods, please refer to the document [xxxxxxxxxxx]
 
 
-Region常用方法如下
+The commonly used methods for Region are as follows
 ```scala
 import platdb._
 import platdb.Collection._
@@ -363,19 +378,15 @@ db.update(
     case Failure(e) => println(e.getMessage())
     case Success(_) => None 
 ```
+Platdb uses Rectangle to describe the boundary of an object, with the min field being a vector that sequentially represents the smallest coordinate value of each dimension, and the max field being used to represent the maximum value of each dimension
 
-platdb使用Rectangle描述一个对象的边界，min字段为一个向量，依次表示各个维度最小的坐标值，max字段用来表示各个维度的最大值
+Platdb uses SpatialObject to represent a spatial object, the coord field to represent its boundaries, the key field to be a globally unique name, and the data field to be the data associated with the object (can be empty)
 
-platdb使用SpatialObject表示一个空间对象，coord字段表示其边界，key字段为全局唯一的名称，data字段为该对象关联的数据(可为空)
+For more introductions to other region methods, refer to the document [xxxxxxx]
 
+### Backup
 
-更多其它Region方法的介绍，参考文档 [xxxxxxx]
-
-
-### 备份
-
-platdb的备份很简单，只需要对一个已经打开状态的DB实例，调用backup方法即可. 该方法会开启一个只读事务，复制一个一致的db视图到目标文件中，备份过程不会阻塞其它读/写事务。
-
+The backup of platdb is very simple, just call the backup method on a DB instance that is already open This method will initiate a read-only transaction, copy a consistent db view to the target file, and the backup process will not block other read/write transactions.
 ```scala
 import platdb._
 import platdb.defaultOptions
@@ -391,7 +402,10 @@ db.backup(path) match
 
 ### TODO
 
-1.补充一些测试用例
-2.实现Server模式，使得可以通过http接口访问platdb DB实例
-3.实现一些内存数据结构
-4.实现分布式版本
+1. Supplement some test cases
+
+2. Implement the Server mode, allowing access to platdb DB instances through the HTTP interface
+
+3. Implement some memory data structures
+
+4. Implement a distributed version of platdb cluster

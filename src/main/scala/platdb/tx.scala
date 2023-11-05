@@ -16,6 +16,9 @@ import scala.util.control.Breaks._
 import java.io.RandomAccessFile
 import java.io.File
 
+/**
+  * platdb transaction.
+  */
 trait Transaction:
     /**
       * return current transactions identity.
@@ -42,13 +45,13 @@ trait Transaction:
       */
     def size:Long
     /**
-      * commit transaction,if its already closed then throw an exception.
+      * commit transaction,if its already closed then return an exception message.
       *
       * @return
       */
     def commit():Try[Unit]
     /**
-      * rollback transaction,if its already closed then throw an exception.
+      * rollback transaction,if its already closed then return an exception message.
       *
       * @return
       */
@@ -60,14 +63,14 @@ trait Transaction:
       */
     def allCollection():Try[Seq[(String,String)]]
     /**
-      * open a bucket,if not exists will throw an exception.
+      * open a bucket,if not exists will return an exception message.
       *
       * @param name
       * @return
       */
     def openBucket(name:String):Try[Bucket]
     /**
-      * create a new bucket,if already exists will throw an exception.
+      * create a new bucket,if already exists will return an exception message.
       *
       * @param name
       * @return
@@ -81,21 +84,21 @@ trait Transaction:
       */
     def createBucketIfNotExists(name:String):Try[Bucket]
     /**
-      * delete a bucket,if bucket not exists will throw an exception.
+      * delete a bucket,if bucket not exists will return an exception message.
       *
       * @param name
       * @return
       */
     def deleteBucket(name:String):Try[Unit]
     /**
-      * open a set,if not exists will throw an exception.
+      * open a set,if not exists will return an exception message.
       *
       * @param name
       * @return
       */
     def openBSet(name:String):Try[BSet]
     /**
-      * create a new set,if already exists will throw an exception.
+      * create a new set,if already exists will return an exception message.
       *
       * @param name
       * @return
@@ -109,51 +112,49 @@ trait Transaction:
       */
     def createBSetIfNotExists(name:String):Try[BSet]
     /**
-      * delete a bucket,if bucket not exists will throw an exception.
+      * delete a bucket,if bucket not exists will return an exception message.
       *
       * @param name
       * @return
       */
     def deleteBSet(name:String):Try[Unit]
     /**
-      * open a list,if not exists will throw an exception.
+      * open a list,if not exists will return an exception message.
       *
       * @param name
       * @return
       */
     def openList(name:String):Try[BList]
     /**
-      * create a new list,if already exists will throw an exception.
+      * create a new list,if already exists will return an exception message.
       *
       * @param name
       * @return
       */
     def createList(name:String):Try[BList]
-    // create a list,if exists then return the list.
     /**
-      * 
+      * create a list,if exists then return the list.
       *
       * @param name
       * @return
       */
     def createListIfNotExists(name:String):Try[BList]
     /**
-      * delete a list,if bucket not exists will throw an exception.
+      * delete a list,if bucket not exists will return an exception message.
       *
       * @param name
       * @return
       */
     def deleteList(name:String):Try[Unit]
     /**
-      * open a region,if not exists will throw an exception.
+      * open a region,if not exists will return an exception message.
       *
       * @param name
       * @return
       */
     def openRegion(name:String):Try[Region]
-    // create a new list,if already exists will throw an exception.
     /**
-      * 
+      * create a region with a specified dimension, and return an exception message if the object already exists.
       *
       * @param name
       * @param dimension
@@ -169,7 +170,7 @@ trait Transaction:
       */
     def createRegionIfNotExists(name:String,dimension:Int):Try[Region]
     /**
-      * delete a regison,if not exists will throw an exception.
+      * delete a regison,if not exists will return an exception message.
       *
       * @param name
       * @return
