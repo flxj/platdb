@@ -4,7 +4,7 @@ lazy val root = project
   .in(file("."))
   .settings(
     name := "platdb",
-    version := "0.9.0-alpha",
+    version := "0.10.0",
 
     scalaVersion := scala3Version,
 
@@ -13,6 +13,8 @@ lazy val root = project
 
 scalacOptions ++= Seq("-encoding", "utf8")
 javacOptions ++= Seq("-encoding", "utf8")
+Compile / doc / scalacOptions ++= Seq("-siteroot", "docs")
+Compile / doc / scalacOptions ++= Seq("-project", "platdb")
 
 resolvers += "Akka library repository".at("https://repo.akka.io/maven")
 

@@ -521,8 +521,8 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
     // Region
     def openRegion(name:String):Try[Region] = root.getRegion(name)
     //
-    def createRegion(name:String,dimension:Int):Try[Region] = ???
+    def createRegion(name:String,dimension:Int):Try[Region] = root.createRegion(name,dimension)
     //
-    def createRegionIfNotExists(name:String,dimension:Int):Try[Region] = ???
+    def createRegionIfNotExists(name:String,dimension:Int):Try[Region] = root.createRegionIfNotExists(name,dimension)
     //
-    def deleteRegion(name:String):Try[Unit] = ???
+    def deleteRegion(name:String):Try[Unit] = root.deleteRegion(name)

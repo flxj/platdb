@@ -24,9 +24,9 @@ class TxSuit1 extends munit.FunSuite {
                     given t:Transaction = tx
                     var bk = createBucket(bk1)
                     println(s"create bucket $bk1 success")
-                    bk+("k1","value1")
-                    bk+("k2","value2")
-                    bk+("k3","value3")
+                    bk+=("k1","value1")
+                    bk+=("k2","value2")
+                    bk+=("k3","value3")
             ) match
                 case Success(_) => println("op success")
                 case Failure(e) => throw e

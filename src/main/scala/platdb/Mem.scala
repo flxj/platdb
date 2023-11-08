@@ -10,7 +10,7 @@ package platdb
 
 import scala.util.{Try,Success}
 
-class MemDB(val name:String,val path:String):
+private[platdb] class MemDB(val name:String,val path:String):
     var store:DB = null
 
 private[platdb] class MemTx(val id:Long):
@@ -68,11 +68,11 @@ private[platdb] class MemBucket(val path:String) extends Bucket:
     def writeTo(path:String):Unit = None 
     def appendTo(path:String):Unit = None 
 
-class MemSet[K]:
+private[platdb] class MemSet[K]:
     var bk:MemBucket = null 
 
-class PriorityQueue[K,O]:
+private[platdb] class PriorityQueue[K,O]:
     var tx:MemTx = null 
 
-class FIFO[K,O]:
+private[platdb] class FIFO[K,O]:
     var pq:PriorityQueue[K,O] = null

@@ -11,7 +11,7 @@ package platdb
 import scala.collection.mutable.{ArrayBuffer,Map}
 import scala.util.{Try,Failure,Success}
 import scala.util.control.Breaks._
-
+import java.nio.ByteBuffer
 
     
 /**
@@ -166,8 +166,17 @@ trait Region:
   */
 case class Rectangle(min:Array[Double],max:Array[Double]):
     private[platdb] def size:Int = 16*dimension
+    /**
+      * 
+      *
+      * @return
+      */
     def dimension:Int = if min.length <= max.length then min.length else max.length
-    // whether current rectangle is a point.
+    /**
+      * whether current rectangle is a point.
+      *
+      * @return
+      */
     def isPoint:Boolean = 
         var flag = true
         breakable(
@@ -177,24 +186,153 @@ case class Rectangle(min:Array[Double],max:Array[Double]):
                     break()
         )
         flag
-    // 计算当前矩形和r重叠部分的面积
-    def intersect(r:Rectangle):Boolean = ???
-    // whether current rectangle can corver r.
-    def cover(r:Rectangle):Boolean = ???
-    // whether current rectangle be corverd by r.
-    def beCoverd(r:Rectangle):Boolean = ???
-    // calculate the reatangle area.
-    def area:Double = ???
-    // 计算当前举行最小需要增加多少面积才能完全覆盖r
-    def areaEnlargementForCover(r:Rectangle):Double = ???
-    // 扩张当前矩形以便覆盖r
-    def enlarge(r:Rectangle):Rectangle = ??? 
-    // 计算面积差
-    def areaDifference(r:Rectangle):Double = ???
-    // 计算面积差
-    def -(r:Rectangle):Double = ???
-    // 面积比较
-    def >=(r:Rectangle):Boolean = ??? 
+    /**
+      * 
+      *
+      * @return
+      */
+    def area:Double =
+        if isPoint then return 0.0
+        var a = 0.0
+        for i <- 0 until dimension do
+            a*= (max(i)-min(i)) 
+        a
+    /**
+      * 
+      *
+      * @param r
+      * @return
+      */
+    def intersect(r:Rectangle):Boolean = 
+        if dimension!=r.dimension then
+            return false
+        dimension match
+            case 0 => true
+            case 1 => !(min(0) > r.max(0) || max(0) < r.min(0))
+            case 2 => Min(min(0),r.min(0)) <= Min(max(0),r.max(0)) && Max(min(1),r.min(1)) <= Min(max(1),r.max(1))
+            case n =>
+                var flag = true
+                breakable(
+                    for i <- 1 to n do
+                        if !this.projectFollow(i).intersect(r.projectFollow(i)) then
+                            flag = false
+                            break()
+                )
+                flag 
+    /**
+      * Project along the axis, projecting the current rectangle onto a plane other than that axis.
+      * for example,(x,y,z) -> (y,z), axis=1
+      * 
+      * @param axis
+      * @return
+      */
+    private def projectFollow(axis:Int):Rectangle = 
+        if axis <= 0 || axis>dimension then
+            throw new Exception(s"project axis($axis) out of bound [1,${dimension}]")
+        dimension match
+            case 0 => this
+            case 1 => Rectangle(Array[Double](0),Array[Double](0))
+            case n =>  
+                val a = (for i <- 0 until dimension if i!=n-1 yield min(i)).toArray
+                val b = (for i <- 0 until dimension if i!=n-1 yield max(i)).toArray
+                Rectangle(a,b)
+    /**
+      * whether current rectangle can corver r.
+      *
+      * @param r
+      * @return
+      */
+    def cover(r:Rectangle):Boolean =
+        if dimension != r.dimension then
+            return false
+        var cov = true
+        breakable(
+            for i <- 0 until dimension do
+                if min(i)>=r.min(i) || max(i)<=r.max(i) then
+                    cov = false
+                    break()
+        )
+        cov
+    /**
+      * whether current rectangle be corverd by r.
+      *
+      * @param r
+      * @return
+      */
+    def beCoverd(r:Rectangle):Boolean = r.cover(this)
+    /**
+      * 要覆盖r所需要的最小面积扩张
+      *
+      * @param r
+      * @return
+      */
+    def enlargeAreaToCover(r:Rectangle):(Double,Rectangle) = 
+        val x = Array[Double](dimension)
+        val y = Array[Double](dimension)
+        var cover = true
+        for i <- 0 until dimension do
+            if min(i) <= r.min(i) then
+                x(i) = min(i)
+            else 
+                x(i) = r.min(i)
+                cover = false
+            if max(i) >= r.max(i) then
+                y(i) = max(i)
+            else 
+                y(i) = r.max(i)
+                cover = false
+        if cover then
+            (0.0,this)
+        else 
+            val cov = Rectangle(x,y)
+            (cov.area - area,cov)
+    /**
+      * 
+      *
+      * @param r
+      * @return
+      */
+    def areaDifference(r:Rectangle):Double = area - r.area
+    /**
+      * 
+      *
+      * @param r
+      * @return
+      */
+    def -(r:Rectangle):Double = area - r.area
+    /**
+      * 
+      *
+      * @param r
+      * @return
+      */
+    def >=(r:Rectangle):Boolean = area >= r.area
+    /**
+      * 
+      *
+      * @param p
+      * @return
+      */
+    private[platdb] def centreDistToPoint(p:Array[Double]):Double = 
+        var d:Double = 0.0
+        for i <- 0 until dimension do
+            val n = (max(i)+min(i))/2 -p(i)
+            d+=n*n
+        d
+    /**
+      * 
+      *
+      * @param b
+      * @return
+      */
+    private[platdb] def centreDistTo(b:Rectangle):Double = 
+        var d:Double = 0.0
+        for i <- 0 until dimension do
+            val n = (max(i)+min(i)-b.max(i)-b.min(i))/2 
+            d+=n*n
+        d
+    private def Max(a:Double,b:Double):Double = if a>b then a else b
+    private def Min(a:Double,b:Double):Double = if a<b then a else b
 
 /**
   * 
@@ -209,25 +347,129 @@ case class SpatialObject(coord:Rectangle,key:String,data:String,isPoint:Boolean)
 
 // meta info of region.
 private[platdb] class RegionValue(var root:Long,val dimension:Int,val maxEntries:Int,val minEntries:Int):
-    def getBytes:Array[Byte] = ???
-    override def toString():String = ???
+    def getBytes:Array[Byte] = 
+        var a = (root >> 32).toInt
+        var b = (root & 0x00000000ffffffffL).toInt
+        var c = dimension
+        var d = maxEntries
+        var e = minEntries
+        var arr = new Array[Byte](RTreeBucket.metaSize)
+        for i <- 0 to 3 do
+            arr(3-i) = ( a & 0xff).toByte
+            arr(7-i) = ( b & 0xff).toByte
+            arr(11-i) = ( c & 0xff).toByte
+            arr(15-i)= ( d & 0xff).toByte
+            arr(19-i)= ( e & 0xff).toByte
+            a = a >> 8
+            b = b >> 8
+            c = c >> 8
+            d = d >> 8
+            e = e >> 8
+        arr
+    override def toString():String = new String(getBytes,"ascii")
 
-// for leaf node child is -1, for branch node key is null
+// for leaf node child is -1, for branch node key is null.
 private[platdb] class Entry(var mbr:Rectangle,var child:Long,var key:String):
-    def keySize:Int = ???
-    def getKeyBytes:Array[Byte] = ???
+    def size:Int = mbr.size + key.getBytes.length + 8
+    def keySize:Int = key.getBytes.length
+    def getKeyBytes:Array[Byte] = key.getBytes
 
-// for branch node--> offset<<32 | keySize == child
+
+extension (arr:ArrayBuffer[Entry])
+    def mbr:Rectangle = 
+        if arr.length == 0 then
+            Rectangle(Array[Double](0),Array[Double](0))
+        else
+            val d = arr(0).mbr.dimension
+            var x = Array[Double](d)
+            var y = Array[Double](d)
+            for i <- 0 until d do
+                var m = Double.MaxValue
+                var n = Double.MinValue
+                for e <- arr do
+                    if e.mbr.min(i) < m then
+                        m = e.mbr.min(i)
+                    if e.mbr.max(i) > n then
+                        n = e.mbr.max(i)
+                x(i) = m
+                y(i) = n
+            Rectangle(x,y)
+    def size:Int = 
+        var sz = BlockHeader.size
+        if arr.length > 0 then
+            val d = arr(0).mbr.dimension
+            sz+= RNode.entryIndexSize(d)*arr.length
+            for e <- arr do
+                sz += e.keySize
+        sz
+
+// for branch node--> offset<<32 | keySize == child.
 private[platdb] case class EntryIndex(mbr:Rectangle,offset:Int,keySize:Int)
 
 private[platdb] object RNode:
     def entryIndexSize(dimension:Int):Int = 16*dimension+8
+    //
+    def entries(blk:Block,dimension:Int):Try[ArrayBuffer[Entry]] = 
+        blk.getBytes() match
+            case None => Failure(new Exception(s"null blcok ${blk.id},cannot get entries from it"))
+            case Some(data) =>
+                val idxSize = entryIndexSize(dimension)
+                if data.length < blk.header.count*idxSize then
+                    return Failure(new Exception(s"block ${blk.id} data format wrong"))
+                var entries = new ArrayBuffer[Entry]()
+                var err:Boolean = false 
+                breakable( 
+                    for i <- 0 until blk.header.count do
+                        val idx = data.slice(idxSize*i,(i+1)*idxSize) 
+                        unmashalIndex(idx,dimension) match
+                            case None => 
+                                err = true
+                                break() 
+                            case Some(ei) =>
+                                var child = -1L
+                                var key:String = ""
+                                if blk.header.flag == leafType then
+                                    val off = ei.offset - BlockHeader.size
+                                    key = new String(data.slice(off,off+ei.keySize))
+                                else 
+                                    child = (ei.offset & 0x00000000ffffffffL) << 32 | (ei.keySize & 0x00000000ffffffffL)
+                                entries+=new Entry(ei.mbr,child,key)
+                )
+                if !err then Success(entries) else Failure(new Exception("parse block data failed"))
+    //
+    def apply(blk:Block,dimension:Int):Try[RNode] = 
+        var node:Option[RNode] = None
+        entries(blk,dimension) match
+            case Failure(e) => Failure(e)
+            case Success(es) =>
+                var n = new RNode(blk.header)
+                n.entries = es 
+                Success(n)
+    //
+    def marshalIndex(idx:EntryIndex):Array[Byte] = 
+        var buf:ByteBuffer = ByteBuffer.allocate(entryIndexSize(idx.mbr.dimension))
+        for n <- idx.mbr.min do  
+            buf.putDouble(n)
+        for n <- idx.mbr.max do 
+            buf.putDouble(n)
+        buf.putInt(idx.offset)
+        buf.putInt(idx.keySize)
+        buf.array()
+    //
+    def unmashalIndex(d:Array[Byte],dimension:Int):Option[EntryIndex] = 
+        val off = 16*dimension
+        if d.length != off+8 then
+            return None
+        val a = for i <- Range(0,off/2,8) yield ByteBuffer.wrap(d.slice(8*i,8*i+8).toArray).getDouble()
+        val offset =  (d(off) &0xff) << 24 | (d(off+1) & 0xff) << 16 | (d(off+2) & 0xff) << 8 | (d(off+3) & 0xff)
+        val keySize = (d(off+4) &0xff) << 24 | (d(off+5) & 0xff) << 16 | (d(off+6) & 0xff) << 8 | (d(off+7) & 0xff)
+        Some(EntryIndex(Rectangle(a.slice(0,dimension).toArray,a.takeRight(dimension+1).toArray),offset,keySize))
 
-    def entries(blk:Block):Option[ArrayBuffer[Entry]] = ???
-    def apply(blk:Block):Option[RNode] = ???
-    def marshalIndex(idx:EntryIndex):Array[Byte] = ???  
-    def unmashalIndex(d:Array[Byte]):Option[EntryIndex] = ???
-
+/**
+  * 
+  *
+  * @param header
+  */
 private[platdb] class RNode(var header:BlockHeader) extends Persistence:
     var unbalanced:Boolean = false
     var spilled:Boolean = false
@@ -246,7 +488,7 @@ private[platdb] class RNode(var header:BlockHeader) extends Persistence:
             case Some(node) => node.root
             case None => this
         }
-    def mbr:Rectangle = ???
+    def mbr:Rectangle = entries.mbr
     //
     def put(obj:SpatialObject):Unit = 
         if !isLeaf then return None
@@ -308,28 +550,141 @@ private[platdb] class RNode(var header:BlockHeader) extends Persistence:
         breakable(
             for i <- 0 until entries.length do
                 if entries(i).child == child.id then
-                    entries(i).mbr = entries(i).mbr.enlarge(child.mbr)
+                    val (_,r) = entries(i).mbr.enlargeAreaToCover(child.mbr)
+                    entries(i).mbr = r
                     break()
         )
-    def linearSplit(threshold:Int,minEntry:Int):(ArrayBuffer[Entry],ArrayBuffer[Entry]) = ???
-    def size():Int = 
-        var sz:Int = BlockHeader.size
+    //
+    def size():Int = entries.size
+    //
+    def writeTo(blk: Block): Int = 
+        if isLeaf then
+            blk.header.flag = leafType
+        else 
+            blk.header.flag = branchType
+        blk.header.count = entries.length
+        blk.header.size = size()
+        blk.header.overflow = (size()+DB.pageSize)/DB.pageSize - 1
+        // update data.
+        blk.append(blk.header.getBytes())
         if entries.length > 0 then
-            val d = entries(0).mbr.dimension
-            sz+= RNode.entryIndexSize(d)*entries.length
+            val indexSize = RNode.entryIndexSize(entries(0).mbr.dimension)
+            var idx = blk.size
+            var offset = BlockHeader.size+(entries.length*indexSize)
+            for e <- entries do 
+                val ei = isLeaf match
+                    case true => EntryIndex(e.mbr,offset,e.keySize)
+                    case false => EntryIndex(e.mbr,(e.child >> 32).toInt,e.child.toInt)
+                blk.write(idx,RNode.marshalIndex(ei))
+                blk.write(offset,e.getKeyBytes)
+                idx+=indexSize
+                offset = blk.size
+        blk.size
+    //
+    def linearSplit(sz:Int,minEntries:Int):(ArrayBuffer[Entry],ArrayBuffer[Entry]) =
+        var dimension = 0
+        if entries.length > 0 then
+            dimension = entries(0).mbr.dimension
+        // select two points
+        val p1 = new Array[Double](dimension)
+        val p2 = new Array[Double](dimension)
+        for i <- 0 until dimension do
+            var mi = Double.MaxValue
+            var ma = Double.MinValue
             for e <- entries do
-                sz += e.keySize
-        sz
-    def writeTo(block: Block): Int = ???
+                if e.mbr.min(i) < mi then
+                    mi = e.mbr.min(i)
+                if e.mbr.max(i) > ma then
+                    ma = e.mbr.max(i)
+            p1(i) = mi 
+            p2(i) = ma
+        // split entries according the distance to p1 and p2.
+        var a = new ArrayBuffer[Entry]()
+        var b = new ArrayBuffer[Entry]()
+        for e <- entries do
+            if a.size >=sz && a.length >= minEntries then
+                b+=e
+            else
+                val d1 = e.mbr.centreDistToPoint(p1)
+                val d2 = e.mbr.centreDistToPoint(p2)
+                if d1 < d2 then
+                    a+=e
+                else if d1 > d2 then
+                    b+=e
+                else
+                    // compare area
+                    val ar1 = a.mbr.area
+                    val ar2 = b.mbr.area
+                    if ar1 < ar2 then
+                        a+=e
+                    else if ar1 > ar2 then
+                        b+=e
+                    else 
+                        // compare count
+                        if a.length <= b.length then
+                            a+=e
+                        else 
+                            b+=e
+        (a,b)
 
+/**
+  * 
+  */
 private[platdb] object RTreeBucket:
-    val metaKey = "region-meta-value-2333hh"
+    val metaKey = "region-meta-value-o8h6d4sva3e9"
     val metaSize = 20
-    def unmashalValue(d:Array[Byte]):Option[RegionValue] = ???
-    def getCoordinate(data:String):Try[Rectangle] = ???
-    def getData(data:String):Try[String] = ???
-    def unwarpData(v:String):Try[(Rectangle,String)] = ???
-    def wrapData(obj:SpatialObject):String = ???
+    def unmashalValue(d:Array[Byte]):Option[RegionValue] = 
+        if d.length!=metaSize then
+            return None
+        val arr = for i <- 0 to 4 yield
+            (d(4*i) & 0xff) << 24 | (d(4*i+1) & 0xff) << 16 | (d(4*i+2) & 0xff) << 8 | (d(4*i+3) & 0xff)
+        val root = (arr(0) & 0x00000000ffffffffL) << 32 | (arr(1) & 0x00000000ffffffffL)
+        Some(RegionValue(root,arr(2),arr(3),arr(4)))
+    //
+    def getCoordinate(data:String,dimension:Int):Try[Rectangle] = 
+        val i = data.indexOf("|")
+        if i < 0 then
+            Failure(new Exception(s"not found coordinate info from data"))
+        else 
+            val bs = data.slice(0,i).getBytes("ascii")
+            if bs.length != 16*dimension then
+                Failure(new Exception(s"not found coordinate info from data"))
+            else 
+                val a = for j <- Range(0,bs.length/8,8) yield ByteBuffer.wrap(bs.slice(8*j,8*j+8)).getDouble()
+                Success(Rectangle(a.slice(0,dimension).toArray,a.takeRight(dimension+1).toArray))
+    //
+    def getData(data:String):Try[String] = 
+        val i = data.indexOf("|")
+        if i < 0 then
+            Failure(new Exception(s"not found data info"))
+        else 
+            Success(data.takeRight(i+1))
+    //
+    def unwarpData(data:String,dimension:Int):Try[(Rectangle,String)] = 
+        val i = data.indexOf("|")
+        if i < 0 then
+            Failure(new Exception(s"not found coordinate info from data"))
+        else 
+            val (c,d) = data.splitAt(i)
+            val bs = c.getBytes("ascii")
+            if bs.length != 16*dimension then
+                Failure(new Exception(s"not found coordinate info from data"))
+            else 
+                val a = for j <- Range(0,bs.length/8,8) yield ByteBuffer.wrap(bs.slice(8*j,8*j+8)).getDouble()
+                Success((Rectangle(a.slice(0,dimension).toArray,a.takeRight(dimension+1).toArray),d))
+    //
+    def wrapData(obj:SpatialObject):String = 
+        val s = "|".getBytes()
+        val d = obj.data.getBytes()
+        var buf:ByteBuffer = ByteBuffer.allocate(obj.coord.size+s.length+d.length)
+        for i <- 0 until obj.dimension do
+            buf.putDouble(obj.coord.min(i))
+        for i <- 0 until obj.dimension do
+            buf.putDouble(obj.coord.max(i))
+        buf.put(s)
+        buf.put(d)
+        buf.toString()
+    //
     def apply(bk:Bucket,tx:Tx):Try[RTreeBucket] = 
         bk.get(metaKey) match
             case Failure(e) => Failure(e)
@@ -340,6 +695,7 @@ private[platdb] object RTreeBucket:
                         var rbk = new RTreeBucket(bk,tx)
                         rbk.value = value
                         Success(rbk)
+    //
     def apply(bk:Bucket,dimension:Int,tx:Tx):Try[RTreeBucket] = 
         if dimension<=0 then
             return Failure(new Exception(s"dimension should larger than 0"))
@@ -348,7 +704,12 @@ private[platdb] object RTreeBucket:
         rbk.value = new RegionValue(-1L,dimension,DB.minEntries,DB.maxEntries)
         Success(rbk)
 
-// bk用来存储对象信息，以及Rtree的元信息
+/**
+  * 
+  *
+  * @param bk
+  * @param tx
+  */
 private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
     var value:RegionValue = null
     var root:Option[RNode] = None
@@ -415,14 +776,16 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                             for r <- itr.stack.reverse.tail do
                                 (r.node,r.block,r.index) match
                                     case (Some(n),_,idx) => 
-                                        n.entries(idx).mbr = n.entries(idx).mbr.enlarge(rect)
-                                        rect = n.entries(idx).mbr
+                                        val (_,rec) = n.entries(idx).mbr.enlargeAreaToCover(rect)
+                                        n.entries(idx).mbr = rec
+                                        rect = rec
                                     case (None,Some(b),idx) => 
                                         getNodeByBlock(b) match
                                             case Failure(e) => throw e
                                             case Success(n) =>
-                                                n.entries(idx).mbr = n.entries(idx).mbr.enlarge(rect)
-                                                rect = n.entries(idx).mbr
+                                                val (_,rec) = n.entries(idx).mbr.enlargeAreaToCover(rect)
+                                                n.entries(idx).mbr = rec
+                                                rect = rec
                                     case (None,None,_) => throw new Exception("search path element is null")
                             Success(None)
                         catch
@@ -432,7 +795,7 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
         bk.get(key) match
             case Failure(e) => Failure(e)
             case Success(v) =>
-                RTreeBucket.unwarpData(v) match
+                RTreeBucket.unwarpData(v,dimension) match
                     case Failure(e) => Failure(e)
                     case Success(d) =>
                         val (r,data) = d
@@ -450,7 +813,7 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                     for n <- ns do
                         for e <- n.entries do
                             val v = bk(e.key)
-                            RTreeBucket.unwarpData(v) match
+                            RTreeBucket.unwarpData(v,dimension) match
                                 case Failure(exception) => throw exception
                                 case Success((_,data)) =>
                                     val so = SpatialObject(e.mbr,e.key,data,e.mbr.isPoint)
@@ -470,7 +833,7 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
         bk.get(key) match
             case Failure(e) => Failure(e)
             case Success(v) =>
-                RTreeBucket.unwarpData(v) match
+                RTreeBucket.unwarpData(v,dimension) match
                     case Failure(exception) => throw exception
                     case Success((r,_)) => delete(r,(s:SpatialObject) => s.key == key)
     //
@@ -484,7 +847,7 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                         var keys = List[String]()
                         for e <- n.entries do
                             val v = bk(e.key) // TODO ignore not exists err
-                            RTreeBucket.unwarpData(v) match
+                            RTreeBucket.unwarpData(v,dimension) match
                                 case Failure(exception) => throw exception
                                 case Success((_,data)) =>
                                     val so = SpatialObject(e.mbr,e.key,data,e.mbr.isPoint)
@@ -533,17 +896,63 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
     def getData(key:String):Try[String] = 
         try 
             val v = bk(key)
-            RTreeBucket.unwarpData(v) match
+            RTreeBucket.unwarpData(v,dimension) match
                 case Failure(exception) => throw exception
                 case Success((_,data)) => Success(data)
         catch
             case e:Exception => Failure(e)
-
-    def nodeOrBlock(id:Long):Try[(Option[RNode],Option[Block])] = ???
-    def nodeEntries(block:Option[Block]):Try[ArrayBuffer[Entry]] = ???
-    def getNodeByBlock(block:Block):Try[RNode] = ???
-    def getNodeChild(node:Option[RNode],idx:Int):Try[RNode] = ???
-    def getNode(id:Long):Try[RNode] = ???
+    //
+    def nodeOrBlock(id:Long):Try[(Option[RNode],Option[Block])] = 
+        if nodes.contains(id) then 
+            Success((nodes.get(id),None))
+        else 
+            if id < 0 then
+                // if id <0 means the bucket is a new created in memory, not loaded from disk.
+                return Success((root,None))
+            tx.block(id) match
+                case Success(bk) => Success((None,Some(bk)))
+                case Failure(e) => Failure(e)
+    //
+    def nodeEntries(block:Option[Block]):Try[ArrayBuffer[Entry]] = 
+        block match
+            case None => Failure(new Exception("block is null,cannot get entries from it")) 
+            case Some(blk) => 
+                if nodes.contains(blk.id) then
+                    Success(nodes(blk.id).entries)
+                else
+                    RNode.entries(blk,dimension)
+    //
+    def getNodeByBlock(block:Block):Try[RNode] = 
+        if nodes.contains(block.id) then 
+            Success(nodes(block.id))
+        else
+            RNode(block,dimension) match
+                case Failure(e) => Failure(e)
+                case Success(node) => 
+                    nodes(node.id) = node
+                    Success(node)
+    //
+    def getNodeChild(node:Option[RNode],idx:Int):Try[RNode] = 
+        node match
+            case None => Failure(new Exception("node is null,cannot get its child"))
+            case Some(n) =>
+                if n.isLeaf || idx<0 || idx>=n.length then
+                    Failure(new Exception("node is leaf or index out of bound"))
+                else
+                    getNode(n.entries(idx).child) match
+                        case Failure(e) => Failure(e)
+                        case Success(child) =>
+                            child.parent = Some(n)
+                            n.children += child
+                            Success(child)
+    //
+    def getNode(id:Long):Try[RNode] =
+        if nodes.contains(id) then 
+            Success(nodes(id))
+        else
+            tx.block(id) match
+                case Failure(e) => Failure(e)
+                case Success(block) => getNodeByBlock(block)
     //
     def merge():Unit =
         reInsertNodes = List[RNode]()
@@ -800,8 +1209,7 @@ private[platdb] class RTreeBucketIter(val rbk:RTreeBucket) extends Iterator[Spat
                 var idx = -1
                 var area = Double.MaxValue
                 for i <- 0 until entries.length do
-                    val er = entries(i).mbr.enlarge(rect)
-                    val ar = er.areaDifference(entries(i).mbr)
+                    val (ar,er) = entries(i).mbr.enlargeAreaToCover(rect)
                     if ar < area then
                         idx = i
                         area = ar
@@ -819,8 +1227,7 @@ private[platdb] class RTreeBucketIter(val rbk:RTreeBucket) extends Iterator[Spat
         var idx = -1
         var area = Double.MaxValue
         for i <- 0 until node.entries.length do
-            val er = node.entries(i).mbr.enlarge(rect)
-            val ar = er.areaDifference(node.entries(i).mbr)
+            val (ar,er) = node.entries(i).mbr.enlargeAreaToCover(rect)
             if ar < area then
                 idx = i
                 area = ar
