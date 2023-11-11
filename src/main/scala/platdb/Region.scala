@@ -1091,8 +1091,19 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                     reInsertNodes :+= node
                 condense(p,threshold)
     //
-    def clear():Try[Unit] = ???
-    // 释放子树或叶子节点
+    def clear():Try[Unit] = 
+        try
+            root match
+                case None => 
+                    getNode(value.root) match
+                        case Failure(e) => throw e
+                        case Success(node) => freeNode(node) 
+                case Some(node) => freeNode(node)
+            Success(None)
+        catch
+            case e:Exception => Failure(e)
+        
+    // release subtree or node.
     private def freeNode(node:RNode):Unit = 
         if node.isLeaf then
             if node.id > DB.meta1Page then
