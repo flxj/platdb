@@ -1,6 +1,6 @@
 ## PlatDB
 
-PlatDB is an embedded key value engine for disk storage, with the goal of providing a simple and lightweight data persistence solution. Has the following characteristics
+PlatDB is an embedded key value engine for disk storage, with the goal of providing a simple, easy-to-use, and lightweight data persistence solution. It has the following characteristics：
 
 1) Organize data using a single file for easy migration
 
@@ -64,15 +64,15 @@ Platdb's data objects are thread unsafe, so do not operate on the same data obje
 
 Platdb's Transaction supports management methods for built-in data structure objects. for example
 ```shell
-createBucket:
-createBucketIfNotExists:
-openBucket:
-deleteBucket:
+createBucket: Create a map (alias bucket)
+createBucketIfNotExists: Create a map if it does not exist
+openBucket: Open an existing map
+deleteBucket: Delete a map
 ...
-createList:
-createListIfNotExists:
-openList:
-deleteList:
+createList: Create List
+createListIfNotExists: Create a list if it does not exist
+openList: Open an existing list
+deleteList: Delete a list
 ```
 The following example executes a read-only transaction, where `view` is a convenient method provided by the DB instance to execute read-only transactions
 ```scala
@@ -397,7 +397,6 @@ val path = "/path/to/you/backup/file.db"
 db.backup(path) match
     case Failure(e) => // backup failed
     case Success(_) => // backup success
-
 ```
 
 ### TODO

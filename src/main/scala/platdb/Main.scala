@@ -261,10 +261,11 @@ object PlatDB:
         //deleteBk(db,name)
         //openBk(db,name)
         //openBkAndWrite(db,name,500)
-        //openBkAndTravel(db,name)
+        openBkAndTravel(db,name)
         //openBkAndRead(db,name,List[String]("key3"))
         //openBkAndCheck(db,name,List[String]("key0","key100","key123","key300","key500","key450","key600","key789"))
 
+        /*
         val arr1 = Array[Int](1,2,3,4,5,6,7,8,9,10,11,12,13)
         val arr2 = Array[Int](-1,-5,5,7,9)
 
@@ -276,6 +277,7 @@ object PlatDB:
 
         val diff = testDifference(arr1,arr2)
         println(s"3 ${diff}")
+        */
 
 
 

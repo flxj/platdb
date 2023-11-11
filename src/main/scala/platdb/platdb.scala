@@ -144,7 +144,9 @@ class DB(val path:String)(using ops:Options):
             if fileManager.size ==0 then
                 init()
             // read meta info.
-            meta = loadMeta(0)
+            val meta0 = loadMeta(0)
+            val meta1 = loadMeta(1)
+            meta = if meta0.txid > meta1.txid then meta0 else meta1 
             DB.pageSize = meta.pageSize
           
             rTx = new ArrayBuffer[Tx]()
@@ -179,6 +181,7 @@ class DB(val path:String)(using ops:Options):
             m.root = new BucketValue(3L,0L,0L,bucketDataType)
 
             var bk = blockBuffer.get(DB.defaultPageSize)
+            bk.setid(m.id)
             m.writeTo(bk)
             blockBuffer.write(bk) match
                 case Success(_) => None

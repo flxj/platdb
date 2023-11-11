@@ -1,6 +1,6 @@
 ## PlatDB
 
-PlatDB是一个面向磁盘存储的嵌入式key-value引擎,目标是提供一种使用简单，轻量级的数据持久化方案。具有如下特点 
+PlatDB是一个面向磁盘存储的嵌入式key-value引擎,目标是提供一种简单易用，轻量级的数据持久化方案。它具有如下特点 
 1)使用单一文件组织数据，便于迁移 
 2)支持ACID事务
 3)支持读写事务并发执行(mvcc,一写多读)
@@ -14,6 +14,9 @@ platdb实现参考了boltdb等项目，本人开发platdb的主要目的之一�
 在你的项目中导入platdb
 
 sbt
+```scala
+
+```
 
 使用platdb非常简单，你只需要提供一个数据文件路径，创建一个DB实例并打开它即可
 
@@ -44,17 +47,17 @@ platdb支持一个DB实例上同时打开多个只读事务和至多一个读写
 
 platdb的数据对象都是线程不安全的，因此不要在一个事务中并发的操作同一个数据对象，如果有该需求则应该每个线程各自打开一个事务
 
-platdb的Transaction支持对内置数据结构对象的管理方法
+platdb的Transaction支持对内置数据结构对象的管理方法，比如
 ```shell
-createBucket:
-createBucketIfNotExists:
-openBucket:
-deleteBucket:
+createBucket: 创建map(别名bucket)
+createBucketIfNotExists: 如果不存在则创建map
+openBucket: 打开一个已经存在的map
+deleteBucket: 删除一个map
 ...
-createList:
-createListIfNotExists:
-openList:
-deleteList:
+createList: 创建列表
+createListIfNotExists: 如果不存在则创建列表
+openList: 打开一个已经存在的列表
+deleteList: 删除一个列表
 ```
 
 如下示例执行一个只读事务,view是DB实例提供的执行只读事务的便捷方法

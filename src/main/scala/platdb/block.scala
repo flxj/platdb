@@ -494,7 +494,7 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
         if bk.size == 0 then 
             return true
         if bk.id < 0 then
-            throw new Exception(s"block type error: block id is ${bk.id}")
+            throw new Exception(s"block type error: block id is ${bk.id},flag is ${bk.btype}")
         if bk.id <=1 && bk.btype != metaType then // TODO remove this check to tx
             throw new Exception(s"block type error: block id is ${bk.id} type is ${bk.btype}")
         
