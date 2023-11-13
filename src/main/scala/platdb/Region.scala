@@ -109,7 +109,16 @@ trait Region:
       */
     def boundary():Try[Rectangle]
     /**
-      * Query k objects closest to obj objects
+      * 
+      *
+      * @param obj
+      * @param filter
+      * @param distFunc
+      * @return
+      */
+    def nearby(obj:SpatialObject,filter:(SpatialObject)=>Boolean)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]]
+    /**
+      * Query k objects closest to obj object.
       *
       * @param obj
       * @param k
@@ -157,6 +166,18 @@ trait Region:
       * @throws
       */
     def update(key:String,obj:SpatialObject):Unit
+/**
+  * 
+  *
+  * @param obj1
+  * @param obj2
+  * @return
+  */
+def centreDistFunc(obj1:SpatialObject,obj2:SpatialObject):Double = obj1.coord.centreDistTo(obj2.coord)
+/**
+  * 
+  */
+given defaultDistFunc:((SpatialObject,SpatialObject)=>Double)  = centreDistFunc
 
 /**
   * A spatial rectangle used to describe the boundary range of a spatial object.
@@ -889,9 +910,147 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                 getNode(value.root) match
                     case Failure(e) => Failure(e)
                     case Success(node) => Success(node.mbr)
-    def nearby(obj:SpatialObject,k:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]] = ???
-    def nearby(key:String,k:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]] = ???
-    def nearby(obj: SpatialObject, d: Double, limit: Int)(using distFunc: (SpatialObject,SpatialObject) => Double): Try[Seq[(SpatialObject, Double)]] = ???
+    //
+    def nearby(obj:SpatialObject,filter:(SpatialObject)=>Boolean)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]] =
+        var list = List[(SpatialObject,Double)]()
+        var que = new queue()
+        root match
+            case None => getNode(value.root) match
+                case Failure(e) => return Failure(e)
+                case Success(node) =>
+                    root = Some(node)
+                    que.push(element(0.0,node.mbr,Some(node),None))
+            case Some(node) => que.push(element(0.0,node.mbr,Some(node),None))
+        var err:Option[String] = None
+        breakable(
+            while true do
+                que.pop() match
+                    case None => break()
+                    case Some(elem) =>
+                        elem.node match
+                            case None =>
+                                elem.obj match 
+                                    case None => None
+                                    case Some(ob) => 
+                                        if filter(ob) then
+                                           list:+=(ob,elem.dist) 
+                            case Some(node) =>
+                                for e <- node.entries do
+                                    val sobj =  SpatialObject(e.mbr,e.key,"",e.mbr.isPoint)
+                                    var elt:element = null
+                                    if node.isLeaf then
+                                        elt = element(distFunc(obj,sobj),e.mbr,None,Some(sobj))
+                                    else 
+                                        getNode(e.child) match
+                                            case Failure(e) => 
+                                                err = Some(e.getMessage())
+                                                break()
+                                            case Success(n) =>
+                                                elt = element(distFunc(obj,sobj),e.mbr,Some(n),None)
+                                    que.push(elt)       
+        )
+        err match
+            case Some(msg) => Failure(new Exception(msg))
+            case None => Success(list)
+    //
+    def nearby(obj:SpatialObject,k:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]] = 
+        if k<=0 then
+            return Failure(new Exception("parameter k should larger than zero"))
+        var list = List[(SpatialObject,Double)]()
+        var que = new queue()
+        root match
+            case None => getNode(value.root) match
+                case Failure(e) => return Failure(e)
+                case Success(node) =>
+                    root = Some(node)
+                    que.push(element(0.0,node.mbr,Some(node),None))
+            case Some(node) => que.push(element(0.0,node.mbr,Some(node),None))
+        var err:Option[String] = None
+        breakable(
+            while true do
+                que.pop() match
+                    case None => break()
+                    case Some(elem) =>
+                        elem.node match
+                            case None =>
+                                elem.obj match 
+                                    case None => None
+                                    case Some(ob) => 
+                                        if list.length < k then
+                                            list:+=(ob,elem.dist) 
+                                        if list.length >= k then
+                                            break()
+                            case Some(node) =>
+                                for e <- node.entries do
+                                    val sobj = SpatialObject(e.mbr,e.key,"",e.mbr.isPoint)
+                                    var elt:element = null
+                                    if node.isLeaf then
+                                        elt = element(distFunc(obj,sobj),e.mbr,None,Some(sobj))
+                                    else 
+                                        getNode(e.child) match
+                                            case Failure(e) => 
+                                                err = Some(e.getMessage())
+                                                break()
+                                            case Success(n) =>
+                                                elt = element(distFunc(obj,sobj),e.mbr,Some(n),None)
+                                    que.push(elt)       
+        )
+        err match
+            case Some(msg) => Failure(new Exception(msg))
+            case None => Success(list)
+    //
+    def nearby(key:String,k:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]] = 
+        get(key) match
+            case Failure(e) => Failure(e)
+            case Success(obj) => nearby(obj,k)(using distFunc)
+    //
+    def nearby(obj:SpatialObject,d:Double,limit:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]] = 
+        if limit <= 0 then
+            return Failure(new Exception("parameter limit should larger than zero"))
+        if d < 0.0 then
+            return Failure(new Exception("parameter d should larger than zero"))
+        var list = List[(SpatialObject,Double)]()
+        var que = new queue()
+        root match
+            case None => getNode(value.root) match
+                case Failure(e) => return Failure(e)
+                case Success(node) =>
+                    root = Some(node)
+                    que.push(element(0.0,node.mbr,Some(node),None))
+            case Some(node) => que.push(element(0.0,node.mbr,Some(node),None))
+        var err:Option[String] = None
+        breakable(
+            while true do
+                que.pop() match
+                    case None => break()
+                    case Some(elem) =>
+                        elem.node match
+                            case None =>
+                                elem.obj match 
+                                    case None => None
+                                    case Some(ob) => 
+                                        if list.length < limit then
+                                            list:+=(ob,elem.dist) 
+                                        if list.length >= limit then
+                                            break()
+                            case Some(node) =>
+                                for e <- node.entries do
+                                    val sobj =  SpatialObject(e.mbr,e.key,"",e.mbr.isPoint)
+                                    if node.isLeaf then
+                                        val elt = element(distFunc(obj,sobj),e.mbr,None,Some(sobj))
+                                        if elt.dist <= d then
+                                            que.push(elt)
+                                    else
+                                        getNode(e.child) match
+                                            case Failure(e) => 
+                                                err = Some(e.getMessage())
+                                                break()
+                                            case Success(n) =>
+                                                que.push(element(distFunc(obj,sobj),e.mbr,Some(n),None))                   
+        )
+        err match
+            case Some(msg) => Failure(new Exception(msg))
+            case None => Success(list)
     //
     def getData(key:String):Try[String] = 
         try 
@@ -1119,7 +1278,62 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                 tx.free(node.id)
                 node.header.pgid = 0
                 nodes.remove(node.id)
-
+//
+private[platdb] case class element(dist:Double,rect:Rectangle,node:Option[RNode],obj:Option[SpatialObject])
+//
+private[platdb] class queue:
+    private var nodes = new ArrayBuffer[element]()
+    def length:Int = nodes.length
+    //
+    def push(elem:element):Unit  = 
+        nodes+=elem
+        // shiftUp
+        var i = nodes.length-1
+        breakable(
+            while i > 0 do
+                val p = (i-1)/2
+                if nodes(p).dist > nodes(i).dist then 
+                    val tmp = nodes(i)
+                    nodes(i) = nodes(p)
+                    nodes(p) = tmp
+                    i = p
+                else
+                    break()
+        )
+    //
+    def pop():Option[element] = 
+        if nodes.length == 0 then
+            return None
+        val e = nodes(0)
+        nodes(0) = nodes(nodes.length-1)
+        nodes.dropRight(1)
+        // shiftDown
+        var i = 0
+        breakable(
+            while i < nodes.length do
+                val p1 = i*2 + 1
+                val p2 = i*2+2
+                if p1 < nodes.length && p2 < nodes.length then
+                    if nodes(i).dist <= nodes(p1).dist && nodes(i).dist <= nodes(p2).dist then 
+                        break()
+                    else
+                        val p = if nodes(p1).dist < nodes(p2).dist then p1 else p2
+                        val tmp = nodes(i)
+                        nodes(i) = nodes(p)
+                        nodes(p) = tmp
+                        i = p
+                else if p1 < nodes.length then 
+                    if nodes(i).dist <= nodes(p1).dist then
+                        break()
+                    else
+                        val tmp = nodes(i)
+                        nodes(i) = nodes(p1)
+                        nodes(p1) = tmp
+                        i = p1
+                else
+                    break()
+        )
+        Some(e)
 //
 private[platdb] class RRecord(var node:Option[RNode],var block:Option[Block],var index:Int):
     def isLeaf:Boolean =
