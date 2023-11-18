@@ -1,11 +1,19 @@
 /*
- * Copyright (C) 2023 flxj(https://github.com/flxj)
- *
- * All Rights Reserved.
- *
- * Use of this source code is governed by an Apache-style
- * license that can be found in the LICENSE file.
- */
+   Copyright (C) 2023 flxj(https://github.com/flxj)
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package platdb
 
 import java.nio.ByteBuffer
@@ -36,10 +44,9 @@ private[platdb] object Meta:
                 if data.length != elementSize then
                     return None 
                 val arr = for i <- 0 to 5 yield
-                    val n:Long = (data(8*i) & 0xff) << 56 | (data(8*i+1) & 0xff) << 48 
-                    | (data(8*i+2) & 0xff) << 40 | (data(8*i+3) & 0xff) << 32 | (data(8*i+4) & 0xff) << 24 
-                    | (data(8*i+5) & 0xff) << 16 | (data(8*i+6) & 0xff) << 8 | (data(8*i+7) & 0xff)
-                    n
+                    val a = (data(8*i) & 0xff) << 24 | (data(8*i+1) & 0xff) << 16 | (data(8*i+2) & 0xff) << 8 | (data(8*i+3) & 0xff)
+                    val b = (data(8*i+4) & 0xff) << 24 | (data(8*i+5) & 0xff) << 16 | (data(8*i+6) & 0xff) << 8 | (data(8*i+7) & 0xff)
+                    (a & 0x00000000ffffffffL) << 32 | (b & 0x00000000ffffffffL)
                 val sz =  (data(48) & 0xff) << 24 | (data(49) & 0xff) << 16 | (data(50) & 0xff) << 8 | (data(51) & 0xff)
                 meta.pageId = arr(0)
                 meta.freelistId = arr(1)
@@ -331,9 +338,9 @@ private[platdb] object Freelist:
     def unmarshalHeader(data:Array[Byte]):Option[FreelistHeader] =
         if data.length != headerSize then
             throw new Exception("illegal freelist header data")
-        var count:Long = (data(0) & 0xff) << 56 | (data(1) & 0xff) << 48 | (data(2) & 0xff) << 40 | (data(3) & 0xff) << 32
-        count = count | (data(4) & 0xff) << 24 | (data(5) & 0xff) << 16 | (data(6) & 0xff) << 8 | (data(7) & 0xff)
-        Some(FreelistHeader(count,data(headerSize-1)))
+        val a = (data(0) & 0xff) << 24 | (data(1) & 0xff) << 16 | (data(2) & 0xff) << 8 | (data(3) & 0xff)
+        val b = (data(4) & 0xff) << 24 | (data(5) & 0xff) << 16 | (data(6) & 0xff) << 8 | (data(7) & 0xff)
+        Some(FreelistHeader((a & 0x00000000ffffffffL) << 32 | (b & 0x00000000ffffffffL),data(headerSize-1)))
     // 
     def marshalHeader(hd:FreelistHeader):Array[Byte] = 
         var c = hd.count
@@ -347,8 +354,9 @@ private[platdb] object Freelist:
     def unmarshalElement(data:Array[Byte]):Option[FreeFragment] =
         if data.length != elementSize then
             throw new Exception("illegal freelist element data")
-        var s:Long = (data(0) & 0xff) << 56 | (data(1) & 0xff) << 48 | (data(2) & 0xff) << 40 | (data(3) & 0xff) << 32
-        s = s | (data(4) & 0xff) << 24 | (data(5) & 0xff) << 16 | (data(6) & 0xff) << 8 | (data(7) & 0xff) 
+        val a = (data(0) & 0xff) << 24 | (data(1) & 0xff) << 16 | (data(2) & 0xff) << 8 | (data(3) & 0xff)
+        val b = (data(4) & 0xff) << 24 | (data(5) & 0xff) << 16 | (data(6) & 0xff) << 8 | (data(7) & 0xff) 
+        val s = (a & 0x00000000ffffffffL) << 32 | (b & 0x00000000ffffffffL)
         val l = (data(8) & 0xff) << 24 | (data(9) & 0xff) << 16 | (data(10) & 0xff) << 8 | (data(11) & 0xff)
         Some(FreeFragment(s,s+l-1,l))
     //

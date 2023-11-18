@@ -1,11 +1,19 @@
 /*
- * Copyright (C) 2023 flxj(https://github.com/flxj)
- *
- * All Rights Reserved.
- *
- * Use of this source code is governed by an Apache-style
- * license that can be found in the LICENSE file.
- */
+   Copyright (C) 2023 flxj(https://github.com/flxj)
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package platdb
 
 import java.nio.ByteBuffer
@@ -161,10 +169,9 @@ private[platdb] object BTreeBucket:
         if data.length!=valueSize then
             return None 
         val arr = for i <- 0 to 2 yield
-            val n:Long = (data(8*i) & 0xff) << 56 
-            | (data(8*i+1) & 0xff) << 48 | (data(8*i+2) & 0xff) << 40 | (data(8*i+3) & 0xff) << 32 
-            | (data(8*i+4) & 0xff) << 24 | (data(8*i+5) & 0xff) << 16 | (data(8*i+6) & 0xff) << 8 | (data(8*i+7) & 0xff)
-            n
+            val a = (data(8*i) & 0xff) << 24 | (data(8*i+1) & 0xff) << 16 | (data(8*i+2) & 0xff) << 8 | (data(8*i+3) & 0xff)
+            val b = (data(8*i+4) & 0xff) << 24 | (data(8*i+5) & 0xff) << 16 | (data(8*i+6) & 0xff) << 8 | (data(8*i+7) & 0xff)
+            (a & 0x00000000ffffffffL) << 32 | (b & 0x00000000ffffffffL)
         Some(new BucketValue(arr(0),arr(1),arr(2),data(valueSize-1)))
 
 /**
