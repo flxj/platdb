@@ -706,18 +706,13 @@ private[platdb] object RTreeBucket:
                 Success((Rectangle(a.slice(0,dimension).toArray,a.slice(dimension+1,a.length).toArray),d))
     //
     def wrapData(obj:SpatialObject):String = 
-        val s = "|".getBytes()
-        val d = obj.data.getBytes()
-
-        var buf:ByteBuffer = ByteBuffer.allocate(obj.coord.size+s.length+d.length) // TODO TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+        var buf:ByteBuffer = ByteBuffer.allocate(obj.coord.size)
         for i <- 0 until obj.dimension do
             buf.putDouble(obj.coord.min(i))
         for i <- 0 until obj.dimension do
             buf.putDouble(obj.coord.max(i))
-        //
-        buf.put(s)
-        buf.put(d)
-        buf.toString()
+        val c = Base64.getEncoder().encodeToString(buf.array())
+        c+"|"+obj.data
     //
     def apply(bk:Bucket,tx:Tx):Try[RTreeBucket] = 
         bk.get(metaKey) match

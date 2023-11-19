@@ -156,7 +156,7 @@ private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
       * @param startid
       * @param tail
       */
-    def free(txid:Long,start:Long,tail:Int):Unit = // TODO Int-->Long
+    def free(txid:Long,start:Long,tail:Int):Unit =
         val end = start+tail
         for f <- idle do
             if !(end < f.start || f.end < start) then

@@ -288,7 +288,7 @@ private[platdb] object KList:
 private[platdb] case class IndexSlice(idx:Int,start:Long,end:Long)
 
 /**
-  * 
+  * TODO: if index is to large,we need split the index list to multiple fragments to store.
   *
   * @param bk
   */
@@ -665,7 +665,7 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
                 //val start  = getKey(0)
                 val (s,e,n) = index(0)
                 var i = 0
-                for elem <- elems do
+                for elem <- elems.reverse do
                     i+=1
                     bk+=(formatKey(s-i),elem)
                 cp = copyIndex()
@@ -673,7 +673,7 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
                 //mergeIndexSlice(cp,IndexSlice(0,start-i,start-1))
             else 
                 var i = 0L
-                for elem <- elems do
+                for elem <- elems.reverse do
                     bk+=(formatKey(i),elem)
                     i+=1
                 cp = ArrayBuffer[(Long,Long,Int)]((0L,i-1,elems.length))
