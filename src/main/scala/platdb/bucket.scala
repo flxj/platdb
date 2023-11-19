@@ -22,6 +22,7 @@ import scala.util.control.Breaks._
 import scala.util.Try
 import scala.util.Success
 import scala.util.Failure
+import java.util.Base64
 
 /**
   * Bucket represents an ordered (lexicographic) set of key-value pairs.
@@ -157,14 +158,14 @@ private[platdb] class BucketValue(var root:Long,var count:Long,var sequence:Long
             s = s >> 8
         arr(BTreeBucket.valueSize-1) = dataType
         arr
-    override def toString(): String = new String(getBytes,"ascii")
+    override def toString(): String = Base64.getEncoder().encodeToString(getBytes)
     override def clone:BucketValue = new BucketValue(root,count,sequence,dataType)
 
 //
 private[platdb] object BTreeBucket:
     // bucket value size when convert byte array.
-    // val valueSize:Int = 24
     val valueSize:Int = 25
+    /*
     def apply(data:Array[Byte]):Option[BucketValue] =
         if data.length!=valueSize then
             return None 
@@ -173,6 +174,17 @@ private[platdb] object BTreeBucket:
             val b = (data(8*i+4) & 0xff) << 24 | (data(8*i+5) & 0xff) << 16 | (data(8*i+6) & 0xff) << 8 | (data(8*i+7) & 0xff)
             (a & 0x00000000ffffffffL) << 32 | (b & 0x00000000ffffffffL)
         Some(new BucketValue(arr(0),arr(1),arr(2),data(valueSize-1)))
+    */
+    def getValue(value:String):Option[BucketValue] = 
+        val data = Base64.getDecoder().decode(value)
+        if data.length!=valueSize then
+            return None 
+        val arr = for i <- 0 to 2 yield
+            val a = (data(8*i) & 0xff) << 24 | (data(8*i+1) & 0xff) << 16 | (data(8*i+2) & 0xff) << 8 | (data(8*i+3) & 0xff)
+            val b = (data(8*i+4) & 0xff) << 24 | (data(8*i+5) & 0xff) << 16 | (data(8*i+6) & 0xff) << 8 | (data(8*i+7) & 0xff)
+            (a & 0x00000000ffffffffL) << 32 | (b & 0x00000000ffffffffL)
+        Some(new BucketValue(arr(0),arr(1),arr(2),data(valueSize-1)))
+
 
 /**
   * bucket trait implement by b+ tree.
@@ -399,165 +411,6 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       * @return success flag
       */
     def deleteBucket(name:String):Try[Unit] = deleteBucket(name,bucketDataType)
-    /*
-    /**
-      * getBucket method retrieve a sub bucket in current bucket.
-      * The returned bucket instance is only valid during transaction current lifecycle.
-      * @param name: subbucket name
-      * @return subbucket
-      */
-    def getBucket(name:String):Try[BTreeBucket] = 
-        if tx.closed then
-            return Failure(DB.exceptionTxClosed) 
-        else if name.length==0 then 
-            return Failure(DB.exceptionKeyIsNull)
-
-        if buckets.contains(name) then 
-            buckets.get(name) match
-                case Some(bk) => return Success(bk)
-                case None =>  return Failure(new Exception(s"buckets cache failed,not found $name"))
-
-        var c = new BTreeBucketIter(this)
-        c.search(name) match
-            case (None,_,_) => return Failure(new Exception(s"not found bucket $name"))
-            case (Some(k),v,f) => 
-                if k!=name || f!=bucketType then 
-                    return Failure(new Exception(s"not found bucket $name"))
-                v match 
-                    case None => Failure(new Exception(s"query bucket $name value failed"))
-                    case Some(data) =>
-                        val bytes = data.getBytes("ascii")
-                        BTreeBucket(bytes) match
-                            case None => Failure(new Exception(s"parse bucket $name value failed,expect data length is ${BTreeBucket.valueSize} but actual get ${bytes.length}")) 
-                            case Some(value) =>
-                                var bk = new BTreeBucket(name,tx)
-                                bk.bkv = value 
-                                buckets(name) = bk
-                                Success(bk)
-    /**
-      * createBucket try to create a new bucket and return it.
-      * The create operation will failed if the key is already exists,or the name parameter is null or too large
-      * The returned bucket instance is only valid during current transaction lifecycle.
-      * @param name: bucket name
-      * @return subbucket
-      */
-    def createBucket(name:String):Try[BTreeBucket] = 
-        if tx.closed then
-            return Failure(DB.exceptionTxClosed) 
-        else if !tx.writable then 
-            return Failure(DB.exceptionNotAllowOp) 
-        else if name.length()<=0 then 
-            return Failure(DB.exceptionKeyIsNull)
-        else if name.length() >= DB.maxKeySize then
-            return Failure(DB.exceptionKeyTooLarge)
-        else if buckets.contains(name) then 
-            return Failure(new Exception(s"bucket $name is already exists"))
-        
-        var c = new BTreeBucketIter(this)
-        c.search(name) match
-            //case (None,_,_) => return Failure(new Exception("bucket create failed: not found create node"))
-            case (None,_,_) => None
-            case (Some(k),v,f) => 
-                if k == name && f != bucketType then
-                    return Failure(new Exception(s"bucket create failed: key $name is already exists")) 
-                if k == name && f == bucketType then
-                    v match 
-                        case None => None
-                        case Some(data) =>
-                            BTreeBucket(data.getBytes("ascii")) match
-                                case None => return Failure(new Exception(s"parse bucket $name value failed"))  
-                                case Some(value) =>
-                                    var bk = new BTreeBucket(name,tx)
-                                    bk.bkv = value 
-                                    bk.root = getNode(value.root)
-                                    buckets(name) = bk
-                    return Failure(new Exception(s"bucket create failed: bucket $name is already exists"))
-        // create a new bucket
-        var bk = new BTreeBucket(name,tx)
-        bk.bkv = new BucketValue(-1,0,0,bucketDataType) // null bkv
-        bk.root = Some(new Node(new BlockHeader(-1L,leafType,0,0,0))) // null root node
-        buckets(name) = bk
-        c.node() match 
-            case None => Failure(new Exception("bucket create failed: not found create node"))
-            case Some(n) =>
-                n.put(name,name,bk.value.toString(),bucketType,0)
-                bkv.count+=1
-                Success(bk)
-    /**
-      * create a new bucket if it doesn't exist,if already exists or create success then return it. 
-      * create operation will failed if name is null or too large.
-      * The returned bucket instance is only valid during current transaction lifecycle.
-      * @param name: bucket name
-      * @return subbucket
-      */
-    def createBucketIfNotExists(name:String):Try[BTreeBucket] =
-        if tx.closed then
-            return Failure(DB.exceptionTxClosed) 
-        else if !tx.writable then 
-            return Failure(DB.exceptionNotAllowOp)  
-        else if name.length()<=0 then 
-            return Failure(DB.exceptionKeyIsNull)
-        else if name.length() >= DB.maxKeySize then
-            return Failure(DB.exceptionKeyTooLarge)
-
-        getBucket(name) match
-            case Success(bk) => Success(bk)
-            case Failure(e) => createBucket(name) // TODO check if the exception is not exists
-    /**
-      * delete a subbucket.
-      * delete opreation will failed if the bucket doesn't exist.
-      * @param name: subbucket name
-      * @return success flag
-      */
-    def deleteBucket(name:String):Try[Unit] =
-        if tx.closed then
-            return Failure(DB.exceptionTxClosed)  
-        else if !tx.writable then 
-            return Failure(DB.exceptionNotAllowOp)
-        else if name.length()<=0 then 
-            return Failure(DB.exceptionKeyIsNull)
-        else if name.length() >= DB.maxKeySize then
-            return Failure(DB.exceptionKeyTooLarge)
-        
-        var c = new BTreeBucketIter(this)
-        c.search(name) match 
-            case (None,_,_) => return Failure(new Exception(s"not found key $name")) 
-            case (Some(k),_,f) => 
-                // key not exists or exists but not a bucket
-                if k!=name then 
-                    return Failure(new Exception(s"$name not exists")) 
-                if f!=bucketType then
-                    return Failure(new Exception(s"$name is not a bucket"))
-
-                // delete subbuckets recursively
-                getBucket(name) match
-                    case Failure(e) => return Failure(new Exception(s"query bucket $name failed:${e.getMessage()}")) 
-                    case Success(childBk) => 
-                        try 
-                            for (k,v) <- childBk.iterator do
-                                k match
-                                    case None => throw new Exception(s"query get null key in bucket ${childBk.name}")
-                                    case Some(key) =>
-                                        v match
-                                            case Some(_) => None // k is not a bucket,so do nothing for it
-                                            case None => 
-                                                childBk.deleteBucket(key) match
-                                                    case Success(_) => None
-                                                    case Failure(e) => throw e
-                        catch
-                            case e:Exception => return Failure(e)
-                        // delete current bucket
-                        buckets.remove(name) // clean cache
-                        childBk.nodes.clear()  // clean cache nodes
-                        childBk.root = None 
-                        childBk.freeAll() // release all pages about the bucket
-                        c.node() match 
-                            case None => return Failure(new Exception(s"not found bucket $name node")) 
-                            case Some(node) => 
-                                node.del(name) // delete bucket record from the node.
-                                bkv.count-=1
-                Success(None)
-    */
     /** 
      * try to get node or block by block id.
      * 
@@ -970,9 +823,8 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                 v match 
                     case None => Failure(new Exception(s"query $dt $name value failed"))
                     case Some(data) =>
-                        val bytes = data.getBytes("ascii")
-                        BTreeBucket(bytes) match
-                            case None => Failure(new Exception(s"parse $dt $name value failed,expect data length is ${BTreeBucket.valueSize} but actual get ${bytes.length}")) 
+                        BTreeBucket.getValue(data) match
+                            case None => Failure(new Exception(s"parse $dt $name value failed,expect data length is ${BTreeBucket.valueSize} but actual get ${data}")) 
                             case Some(value) =>
                                 if value.dataType != dataType then
                                     return Failure(new Exception(s"already exists collection $name data type is ${dataTypeName(value.dataType)} not $dt"))
@@ -1011,7 +863,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                     v match 
                         case None => None
                         case Some(data) =>
-                            BTreeBucket(data.getBytes("ascii")) match
+                            BTreeBucket.getValue(data) match
                                 case None => return Failure(new Exception(s"parse collection $name value failed"))  
                                 case Some(value) => return Failure(new Exception(s"already exists ${dataTypeName(value.dataType)} collection name $name"))  
                     return Failure(new Exception(s"already exists collection name $name"))
@@ -1219,9 +1071,8 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                         v match 
                             case None => throw new Exception(s"query $k value failed")
                             case Some(data) =>
-                                val bytes = data.getBytes("ascii")
-                                BTreeBucket(bytes) match
-                                    case None => throw new Exception(s"parse $k value failed,expect data length is ${BTreeBucket.valueSize} but actual get ${bytes.length}")
+                                BTreeBucket.getValue(data) match
+                                    case None => throw new Exception(s"parse $k value failed,expect data length is ${BTreeBucket.valueSize} but actual get ${data}")
                                     case Some(value) => arr(i) = (k,dataTypeName(value.dataType))
             Success(arr.toList)
         catch

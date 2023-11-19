@@ -20,6 +20,7 @@ import scala.collection.mutable.{ArrayBuffer,Map}
 import scala.util.{Try,Failure,Success}
 import scala.util.control.Breaks._
 import java.nio.ByteBuffer
+import java.util.Base64
 
     
 /**
@@ -395,7 +396,8 @@ private[platdb] class RegionValue(var root:Long,val dimension:Int,val maxEntries
             d = d >> 8
             e = e >> 8
         arr
-    override def toString():String = new String(getBytes,"ascii")
+    //
+    override def toString():String = Base64.getEncoder().encodeToString(getBytes)
 
 // for leaf node child is -1, for branch node key is null.
 private[platdb] class Entry(var mbr:Rectangle,var child:Long,var key:String):
@@ -492,7 +494,7 @@ private[platdb] object RNode:
         val a = for i <- Range(0,off/2,8) yield ByteBuffer.wrap(d.slice(8*i,8*i+8).toArray).getDouble()
         val offset =  (d(off) &0xff) << 24 | (d(off+1) & 0xff) << 16 | (d(off+2) & 0xff) << 8 | (d(off+3) & 0xff)
         val keySize = (d(off+4) &0xff) << 24 | (d(off+5) & 0xff) << 16 | (d(off+6) & 0xff) << 8 | (d(off+7) & 0xff)
-        Some(EntryIndex(Rectangle(a.slice(0,dimension).toArray,a.takeRight(dimension+1).toArray),offset,keySize))
+        Some(EntryIndex(Rectangle(a.slice(0,dimension).toArray,a.slice(dimension+1,a.length).toArray),offset,keySize))
 
 /**
   * 
@@ -662,7 +664,8 @@ private[platdb] class RNode(var header:BlockHeader) extends Persistence:
 private[platdb] object RTreeBucket:
     val metaKey = "region-meta-value-o8h6d4sva3e9"
     val metaSize = 20
-    def unmashalValue(d:Array[Byte]):Option[RegionValue] = 
+    def unmashalValue(value:String):Option[RegionValue] = 
+        val d = Base64.getDecoder().decode(value)
         if d.length!=metaSize then
             return None
         val arr = for i <- 0 to 4 yield
@@ -675,19 +678,19 @@ private[platdb] object RTreeBucket:
         if i < 0 then
             Failure(new Exception(s"not found coordinate info from data"))
         else 
-            val bs = data.slice(0,i).getBytes("ascii")
+            val bs = Base64.getDecoder().decode(data.slice(0,i))
             if bs.length != 16*dimension then
                 Failure(new Exception(s"not found coordinate info from data"))
             else 
                 val a = for j <- Range(0,bs.length/8,8) yield ByteBuffer.wrap(bs.slice(8*j,8*j+8)).getDouble()
-                Success(Rectangle(a.slice(0,dimension).toArray,a.takeRight(dimension+1).toArray))
+                Success(Rectangle(a.slice(0,dimension).toArray,a.slice(dimension+1,a.length).toArray))
     //
     def getData(data:String):Try[String] = 
         val i = data.indexOf("|")
         if i < 0 then
             Failure(new Exception(s"not found data info"))
         else 
-            Success(data.takeRight(i+1))
+            Success(data.slice(i+1,data.length()))
     //
     def unwarpData(data:String,dimension:Int):Try[(Rectangle,String)] = 
         val i = data.indexOf("|")
@@ -695,21 +698,23 @@ private[platdb] object RTreeBucket:
             Failure(new Exception(s"not found coordinate info from data"))
         else 
             val (c,d) = data.splitAt(i)
-            val bs = c.getBytes("ascii")
+            val bs = Base64.getDecoder().decode(c)
             if bs.length != 16*dimension then
                 Failure(new Exception(s"not found coordinate info from data"))
             else 
                 val a = for j <- Range(0,bs.length/8,8) yield ByteBuffer.wrap(bs.slice(8*j,8*j+8)).getDouble()
-                Success((Rectangle(a.slice(0,dimension).toArray,a.takeRight(dimension+1).toArray),d))
+                Success((Rectangle(a.slice(0,dimension).toArray,a.slice(dimension+1,a.length).toArray),d))
     //
     def wrapData(obj:SpatialObject):String = 
         val s = "|".getBytes()
         val d = obj.data.getBytes()
-        var buf:ByteBuffer = ByteBuffer.allocate(obj.coord.size+s.length+d.length)
+
+        var buf:ByteBuffer = ByteBuffer.allocate(obj.coord.size+s.length+d.length) // TODO TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
         for i <- 0 until obj.dimension do
             buf.putDouble(obj.coord.min(i))
         for i <- 0 until obj.dimension do
             buf.putDouble(obj.coord.max(i))
+        //
         buf.put(s)
         buf.put(d)
         buf.toString()
@@ -718,7 +723,7 @@ private[platdb] object RTreeBucket:
         bk.get(metaKey) match
             case Failure(e) => Failure(e)
             case Success(v) =>
-                unmashalValue(v.getBytes("ascii")) match
+                unmashalValue(v) match
                     case None => Failure(new Exception("parse region meta info failed"))
                     case Some(value) => 
                         var rbk = new RTreeBucket(bk,tx)

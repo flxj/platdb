@@ -21,6 +21,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.{Try,Success,Failure}
 import scala.util.control.Breaks._
 import java.nio.ByteBuffer
+import java.util.Base64
 
 
 /**
@@ -241,7 +242,7 @@ private[platdb] object KList:
                 else 
                     Failure(e)
             case Success(value) =>
-                indexElements(value.getBytes("ascii")) match
+                indexElements(value) match
                     case None => Failure(new Exception("parse list index failed"))
                     case Some(idx) =>
                         var list = new KList(bk,readonly)
@@ -252,8 +253,8 @@ private[platdb] object KList:
                         list.len = n
                         Success(list)
     //
-    def indexElements(data:Array[Byte]):Option[ArrayBuffer[(Long,Long,Int)]] = 
-        println(s"data length=${data.length}")
+    def indexElements(value:String):Option[ArrayBuffer[(Long,Long,Int)]] = 
+        val data = Base64.getDecoder().decode(value)
         if data.length < indexHeaderSize then
             return None
         val count = (data(0) & 0xff) << 24 | (data(1) & 0xff) << 16 | (data(2) & 0xff) << 8 | (data(3) & 0xff)
@@ -275,10 +276,8 @@ private[platdb] object KList:
         for (a,_,b) <- index do
             buf.putLong(a)
             buf.putInt(b)
-            println(s"a=$a,b=$b")
-        val bs = buf.array()
-        println(s"len=${bs.length}")
-        new String(bs,"ascii")
+        Base64.getEncoder().encodeToString(buf.array())
+
 /**
   * 
   *
@@ -954,7 +953,7 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         var arr1 = ArrayBuffer[(Long,Long,Int)]()
         var arr2 = ArrayBuffer[(Long,Long,Int)]()
         if idx+1 < arr.length then
-            arr2 = arr.takeRight(idx+1)
+            arr2 = arr.slice(idx+1,arr.length)
         if idx > 0 then
             arr1 = arr.slice(0,idx)
         
