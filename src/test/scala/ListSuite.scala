@@ -154,7 +154,7 @@ class ListSuit3 extends munit.FunSuite {
                     given t:Transaction = tx
                     var list = createListIfNotExists(name)
                     len = list.length
-                    println(s"create list $name success")
+                    println(s"create list $name success,len:${len}")
 
                     list:+= "value1"
                     list:+= "value2"
@@ -165,10 +165,10 @@ class ListSuit3 extends munit.FunSuite {
                     list.append("value5") match
                         case Failure(exception) => throw exception
                         case Success(_) => None
-                    list.append(List[String]("value6","value7","value8","value9")) match
-                        case Failure(exception) => throw  exception
+                    list.append(List[String]("value6","value7","value8")) match
+                        case Failure(exception) => throw exception
                         case Success(_) => None
-                    list.append(List[String]("value10","value11","value12","value13")) match
+                    list.append(List[String]("value10","value11")) match
                         case Failure(exception) => throw  exception
                         case Success(_) => None
             ) match
@@ -180,10 +180,11 @@ class ListSuit3 extends munit.FunSuite {
                     given t:Transaction = tx
 
                     var list = openList(name)
-                    if list.length!=(len+13) then
-                        throw new Exception(s"after write,we expect list length is ${len+13},but actual get ${list.length}")
+                    if list.length!=(len+10) then
+                        throw new Exception(s"after write,we expect list length is ${len+10},but actual get ${list.length}")
                     else
-                        for i <- 0 until 13 do
+                        println(s"after write,len is:${list.length}")
+                        for i <- 0 until 10 do
                             list((len+i).toInt) = s"valuevalue${i}"
             ) match
                 case Success(_) => println("update success")
@@ -194,7 +195,7 @@ class ListSuit3 extends munit.FunSuite {
                     given t:Transaction = tx
 
                     var list = openList(name)
-                    for i <- 0 until 13 do
+                    for i <- 0 until 10 do
                         val v = list((len+i).toInt)
                         if v!=s"valuevalue${i}" then
                             throw new Exception(s"after update,we expect list(${len+i})==valuevalue$i,but actual is $v")

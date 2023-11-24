@@ -195,6 +195,7 @@ private[platdb] object Tx:
         tx.root.bkv = tx.meta.root.clone
         if !readonly then
             tx.meta.txid+=1
+        println(s"[debug] new create a Tx, id:${tx.meta.txid} root:${tx.root.bkv.root}")
         tx
 
 /*
@@ -367,6 +368,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
                 if !flag then
                     throw new Exception(s"tx ${id} write freelist to db file failed")
                 meta.freelistId = bk.id
+                db.freelist.setId(bk.id,bk.header.overflow)
                 db.blockBuffer.revert(bk.id)
     // write all dirty blocks to db file
     private def writeBlock():Unit =

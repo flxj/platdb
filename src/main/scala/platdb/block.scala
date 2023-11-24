@@ -65,6 +65,7 @@ private[platdb] val regionType:Byte = 6
   * @param size
   */
 private[platdb] class BlockHeader(var pgid:Long,var flag:Byte,var count:Int,var overflow:Int,var size:Int):
+    override def clone:BlockHeader = new BlockHeader(pgid,flag,count,overflow,size)
     def getBytes():Array[Byte] =
         var buf:ByteBuffer = ByteBuffer.allocate(BlockHeader.size)
         buf.putLong(pgid)
@@ -144,7 +145,7 @@ private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
     // Save some useless blocks that have been kicked out of the cache queue to speed up the creation of block structures.
     val poolsize:Int = 16
     var idleLock:ReentrantReadWriteLock = new ReentrantReadWriteLock()
-    var idle:ArrayBuffer[Block] = new ArrayBuffer[Block]() // TODO: 加入一些统计，对get频率高的size多缓存几个
+    var idle:ArrayBuffer[Block] = new ArrayBuffer[Block]() // TODO: add some statistic
     
     // Records the blocks that are currently in use and maintains a reference count of them.
     var lock:ReentrantReadWriteLock = new ReentrantReadWriteLock()
@@ -300,22 +301,22 @@ private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
             fm.write(bk)
             lock.writeLock().lock()
             writed = true
-
             if !full then
                 if !blocks.contains(bk.id) then
-                    blocks(bk.id) = bk
                     count+=1
+                blocks(bk.id) = bk
             else
-                None // TODO 
+                if blocks.contains(bk.id) then
+                    blocks(bk.id) = bk 
             Success(writed)
         catch
             case e:Exception => return Failure(e)
         finally
             if writed then
                 lock.writeLock().unlock()
-        
-    // TODO: sync将所有脏block写入文件？
+    //
     def sync():Unit = None
+    //
     def close():Unit = 
         link.clear()
         pinned.clear()
@@ -515,6 +516,7 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
 
         w.seek(bk.id*DB.pageSize)
         w.write(bk.all)
+        println(s"[debug] write block [${bk.id},${bk.id+bk.header.overflow}] to disk")
         true
     
     /**

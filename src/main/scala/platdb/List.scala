@@ -662,7 +662,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         try
             var cp:ArrayBuffer[(Long,Long,Int)] = null
             if index.length > 0 then
-                //val start  = getKey(0)
                 val (s,e,n) = index(0)
                 var i = 0
                 for elem <- elems.reverse do
@@ -670,7 +669,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
                     bk+=(formatKey(s-i),elem)
                 cp = copyIndex()
                 cp(0) = (s-i,e,n+elems.length)
-                //mergeIndexSlice(cp,IndexSlice(0,start-i,start-1))
             else 
                 var i = 0L
                 for elem <- elems.reverse do
@@ -698,7 +696,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
                     bk+=(formatKey(e+i),elem)
                 cp = copyIndex()
                 cp(cp.length-1) = (s,e+i,n+elems.length)
-                //mergeIndexSlice(cp,IndexSlice(index.length-1,e+1,e+i))
             else 
                 var i = 0L
                 for elem <- elems do
@@ -757,8 +754,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         bk+=(formatKey(getKey(idx)),elem) 
 
     def apply(idx: Int):String = 
-        if readonly then
-            throw new Exception("current list is readonly mode")
         if idx < 0 || idx >= length then
             throw new Exception(s"index $idx out of bound [0,${length})")
         bk(formatKey(getKey(idx)))

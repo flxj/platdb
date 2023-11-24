@@ -252,9 +252,11 @@ def createList(db:DB,name:String):Unit =
             case Success(value) => println("open success")
 
         db.update((tx:Transaction) => 
-            tx.createList(name) match
+            tx.createListIfNotExists(name) match
                 case Failure(e) => throw e
-                case Success(list) => println(s"create list ${list.name} success")
+                case Success(list) => 
+                    println(s"create list ${list.name} success")
+                    println(s"list length is ${list.length}")
         ) match
             case Success(_) => println("op success")
             case Failure(e) => throw e
@@ -265,42 +267,13 @@ def createList(db:DB,name:String):Unit =
             case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
             case Success(value) => println("close success")  
 
-def openListAndWrite(db:DB,name:String,count:Int):Unit =
-    try
-        db.open() match
-            case Failure(exception) => throw exception
-            case Success(value) => println("open success")
-
-        db.update(
-            (tx:Transaction) =>
-                tx.openList(name) match
-                    case Failure(e) => throw e
-                    case Success(list) => 
-                        val len = list.length
-                        println(s"init length is $len")
-                        for i <- 1 to count do
-                            //val v = BigInt(500, scala.util.Random).toString(36)
-                            val v = (i*100).toString
-                            list.append(v) match
-                                case Failure(e) => throw e
-                                case Success(_) => println(s"WRITE:$i")
-                        println(s"after write length is ${list.length} expect ${len+count}")   
-        ) match
-            case Success(_) => println(s"WRITE list $name success")
-            case Failure(e) => throw e
-    catch
-        case e:Exception => throw e
-    finally
-        db.close() match
-            case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
-            case Success(value) => println("close success")
-    
 def openListAndRead(db:DB,name:String,nums:Seq[Int]):Unit =
     try
         db.open() match
             case Failure(exception) => throw exception
             case Success(value) => println("open success")
-
+        
+        println(s"[debug] ===========================> read tx A start")
         db.view(
             (tx:Transaction) =>
                 tx.openList(name) match
@@ -312,7 +285,21 @@ def openListAndRead(db:DB,name:String,nums:Seq[Int]):Unit =
                                 case Failure(e) => throw e
                                 case Success(v) => println(s"GET idx:$n value ${v}")
         ) match
-            case Success(_) => println(s"READ list $name success")
+            case Success(_) => println(s"READ A list $name success")
+            case Failure(e) => throw e
+        println(s"[debug] ===========================> read tx B start")
+        db.view(
+            (tx:Transaction) =>
+                tx.openList(name) match
+                    case Failure(e) => throw e
+                    case Success(list) => 
+                        println(s"list length is:${list.length}")
+                        for n <- nums do
+                            list.get(n) match
+                                case Failure(e) => throw e
+                                case Success(v) => println(s"GET idx:$n value ${v}")
+        ) match
+            case Success(_) => println(s"READ B list $name success")
             case Failure(e) => throw e
     catch
         case e:Exception => throw e
@@ -320,6 +307,7 @@ def openListAndRead(db:DB,name:String,nums:Seq[Int]):Unit =
         db.close() match
             case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
             case Success(value) => println("close success")
+
 def openListAndTravel(db:DB,name:String):Unit =
     try
         db.open() match
@@ -353,6 +341,109 @@ def openListAndTravel(db:DB,name:String):Unit =
             case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
             case Success(value) => println("close success")
 
+def openListAndPend(db:DB,name:String,prepend:Boolean,count:Int):Unit =
+    try
+        db.open() match
+            case Failure(exception) => throw exception
+            case Success(value) => println("open success")
+        println(s"=========================> update start")
+        var len = 0L 
+        db.update((tx:Transaction) => 
+            tx.openList(name) match
+                case Failure(e) => throw e
+                case Success(list) => 
+                    len = list.length
+                    println(s"open list ${list.name} success,list len is ${len}")
+                    for i <- 0 until count do
+                        if prepend then
+                            list+:=(i*1000).toString
+                        else 
+                            list:+=(i+1000).toString 
+                    println(s"Pend count $count, list length is:${list.length}")
+        ) match
+            case Success(_) => println("pend success")
+            case Failure(e) => throw e
+        println(s"=======================> view start")
+        db.view((tx:Transaction) => 
+            tx.openList(name) match
+                case Failure(e) => throw e
+                case Success(list) => 
+                    println(s"open list ${list.name} success")
+                    for i <- 0 until count do
+                        val v = list((len+i).toInt)
+                        println(s"${len+i} --> $v")
+        ) match
+            case Success(_) => println("delete success")
+            case Failure(e) => throw e
+    catch
+        case e:Exception => throw e
+    finally
+        db.close() match
+            case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
+            case Success(value) => println("close success")
+
+def openListAndWriteUpdate(db:DB,name:String,count:Int):Unit =
+    try
+        db.open() match
+            case Failure(exception) => throw exception
+            case Success(value) => println("open success")
+        println(s"============================================> tx A start")
+        var len = 0L
+        var lenA = 0L 
+        db.update(
+            (tx:Transaction) =>
+                tx.openList(name) match
+                    case Failure(e) => throw e
+                    case Success(list) => 
+                        len = list.length
+                        println(s"init length is $len")
+                        for i <- 0 until count do
+                            //val v = BigInt(500, scala.util.Random).toString(36)
+                            val v = (i*100).toString
+                            list.append(v) match
+                                case Failure(e) => throw e
+                                case Success(_) => None
+                        lenA = list.length 
+        ) match
+            case Success(_) => println(s"Write list $name success,after write list length is $lenA")
+            case Failure(e) => throw e
+        println(s"============================================> tx B start")
+        var lenB = 0L 
+        db.update(
+            (tx:Transaction) =>
+                tx.openList(name) match
+                    case Failure(e) => throw e
+                    case Success(list) => 
+                        println(s"current length is ${list.length}")
+                        for i <- 0 until count do
+                            val v = (i*1000).toString
+                            list((len+i).toInt) = v 
+                        lenB = list.length          
+        ) match
+            case Success(_) => println(s"Update list $name success,after update list length is $lenB")
+            case Failure(e) => throw e
+        println(s"===============================================> tx C start")
+        db.view(
+            (tx:Transaction) =>
+                tx.openList(name) match
+                    case Failure(e) => throw e
+                    case Success(list) => 
+                        println(s"tx id is ${tx.id}")
+                        println(s"current length is ${list.length}")
+                        for i <- 0 until count do
+                            val v = list((len+i).toInt)
+                            if v != (i*1000).toString then
+                                throw new Exception("check failed")
+        ) match
+            case Success(_) => println(s"Chcek list $name success")
+            case Failure(e) => throw e
+    catch
+        case e:Exception => throw e
+    finally
+        db.close() match
+            case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
+            case Success(value) => println("close success")
+//
 def copyArray(a:ArrayBuffer[Int]):ArrayBuffer[Int] = 
     var dest = new Array[Int](a.length)
     val _ = a.copyToArray(dest,0,a.length)
@@ -377,10 +468,11 @@ object PlatDB:
         println(s"freelist is ${freelist.toString()}")
         */
         val path:String =s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test"
+        //val path = "/tmp/db.test"
         var db = new DB(path)
 
         // test bucket
-        val name:String ="bk1"
+        //val name:String ="bk1"
         //
         //createBk(db,name)
         //openBk(db,name)
@@ -392,11 +484,13 @@ object PlatDB:
         //openBkAndCheck(db,name,List[String]("key0","key100","key123","key300","key500","key450","key600","key789"))
 
         // test list
-        //val name = "list1"
-        //createList(db,name)
-        //openListAndWrite(db,name,500)
-        //openListAndRead(db,name,List[Int](0,100,200,3,45,300,123,456,499))
+        val name = "list1"
+        createList(db,name)
+        //openListAndRead(db,name,List[Int](0,1,3,5,7,9,11,13,15,17,19))
         //openListAndTravel(db,name)
+
+        openListAndWriteUpdate(db,name,10)
+        //openListAndPend(db,name,false,10)
 
         /*
         var arr = new ArrayBuffer[(Long,Long,Int)]()
@@ -408,4 +502,3 @@ object PlatDB:
             case None => println("failed")
             case Some(a) => println(a)
         */
-
