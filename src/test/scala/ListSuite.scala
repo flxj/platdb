@@ -9,7 +9,7 @@ class ListSuit1 extends munit.FunSuite {
     val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
     val name:String = "list1"
 
-    test("create list and append elements"){
+    test("open list and append elements"){
         var len = 0L
         var db = new DB(path)
         db.open() match
@@ -74,7 +74,7 @@ class ListSuit2 extends munit.FunSuite {
     val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
     val name:String = "list1"
 
-    test("create list and prepend elements"){
+    test("open list and prepend elements"){
         var len = 0L
         var db = new DB(path)
         db.open() match
@@ -139,7 +139,7 @@ class ListSuit3 extends munit.FunSuite {
     val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
     val name:String = "list1"
 
-    test("create list and update elements"){
+    test("open list and update 10 elements"){
         var len = 0L 
         var db = new DB(path)
         db.open() match
@@ -210,3 +210,213 @@ class ListSuit3 extends munit.FunSuite {
                 case Success(value) => println("close success")
     }
 }
+
+class ListSuit4 extends munit.FunSuite {
+    val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+    val name:String = "list1"
+
+    test("open list and remove elements"){
+        val count = 20
+        var db = new DB(path)
+        db.open() match
+                case Failure(exception) => throw exception
+                case Success(value) => println("open success")
+        assertEquals(db.closed,false)
+        assertEquals(db.readonly,false)
+        
+        try
+            println(s"============================================> tx A Write")
+            var len = 0L
+            var lenA = 0L 
+            db.update(
+                (tx:Transaction) =>
+                    tx.openList(name) match
+                        case Failure(e) => throw e
+                        case Success(list) => 
+                            len = list.length
+                            println(s"init length is $len")
+                            for i <- 0 until count do
+                                //val v = BigInt(500, scala.util.Random).toString(36)
+                                val v = (i*123).toString
+                                list.append(v) match
+                                    case Failure(e) => throw e
+                                    case Success(_) => None
+                            lenA = list.length 
+            ) match
+                case Success(_) => println(s"Append list $name success,after write list length is $lenA")
+                case Failure(e) => throw e
+            println(s"============================================> tx B Write")
+            var lenB = 0L 
+            db.update(
+                (tx:Transaction) =>
+                    tx.openList(name) match
+                        case Failure(e) => throw e
+                        case Success(list) => 
+                            if list.length != lenA then 
+                                throw new Exception(s"current length is ${list.length},but expect is $lenA")
+                            for i <- 0 until count do
+                                val v = (i*1000).toString
+                                list.append(v) match
+                                    case Failure(e) => throw e
+                                    case Success(_) => None
+                            lenB = list.length      
+            ) match
+                case Success(_) => println(s"Append list $name success,after update list length is $lenB")
+                case Failure(e) => throw e
+            println(s"============================================> tx C Remove")
+            var lenC = 0L 
+            db.update(
+                (tx:Transaction) =>
+                    tx.openList(name) match
+                        case Failure(e) => throw e
+                        case Success(list) => 
+                            if list.length != lenB then 
+                                throw new Exception(s"current length is ${list.length},but expect is $lenB")
+                            list.remove(len.toInt,count) match
+                                case Failure(e) => throw e
+                                case Success(_) => None    
+                            lenC = list.length   
+            ) match
+                case Success(_) => println(s"remove list $name success,after update list length is $lenC")
+                case Failure(e) => throw e
+            println(s"===============================================> tx D check")
+            db.view(
+                (tx:Transaction) =>
+                    tx.openList(name) match
+                        case Failure(e) => throw e
+                        case Success(list) => 
+                            if list.length != lenC then
+                                throw new Exception(s"current length is ${list.length},but expect is $lenC")
+                            for i <- 0 until count do
+                                val v = list((len+i).toInt)
+                                if v != (i*1000).toString then
+                                    throw new Exception("check failed")
+            ) match
+                case Success(_) => println(s"Chcek list $name success")
+                case Failure(e) => throw e
+        catch
+            case e:Exception => throw e
+        finally
+            db.close() match
+                case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
+                case Success(value) => println("close success")
+    }
+}
+
+class ListSuit5 extends munit.FunSuite {
+    val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+    val name:String = "list1"
+
+    test("open list and travel"){
+        var len = 0L 
+        var db = new DB(path)
+        db.open() match
+                case Failure(exception) => throw exception
+                case Success(value) => println("open success")
+        assertEquals(db.closed,false)
+        assertEquals(db.readonly,false)
+        
+        try
+            db.view((tx:Transaction) => 
+                tx.openList(name) match
+                    case Failure(e) => throw e
+                    case Success(list) => 
+                        println(s"open list ${list.name} success")
+                        var count:Int = 0
+                        var it = list.iterator
+                        while it.hasNext() do
+                            it.next() match
+                                case (None,_) => println(s"ITER None elements")
+                                case (Some(key),None) => 
+                                    count+=1
+                                    println(s"ITER key $key is a None")
+                                case (Some(key),Some(value)) => 
+                                    count+=1
+                                    println(s"ITER key: $key value:$value")
+                        println(s"ITER count $count, list length is:${list.length}")
+            ) match
+                case Success(_) => println("delete success")
+                case Failure(e) => throw e
+        catch
+            case e:Exception => throw e
+        finally
+            db.close() match
+                case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
+                case Success(value) => println("close success")
+    }
+}
+
+class ListSuit6 extends munit.FunSuite {
+    val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+    val name:String = "list1"
+    var count = 20
+
+    test("open list and update"){
+        var len = 0L 
+        var db = new DB(path)
+        db.open() match
+                case Failure(exception) => throw exception
+                case Success(value) => println("open success")
+        assertEquals(db.closed,false)
+        assertEquals(db.readonly,false)
+        
+        try
+            println(s"============================================> tx A start")
+            var len = 0L
+            var lenA = 0L 
+            db.update(
+                (tx:Transaction) =>
+                    tx.openList(name) match
+                        case Failure(e) => throw e
+                        case Success(list) => 
+                            len = list.length
+                            println(s"init length is $len")
+                            for i <- 0 until count do
+                                //val v = BigInt(500, scala.util.Random).toString(36)
+                                val v = (i*100).toString
+                                list.append(v) match
+                                    case Failure(e) => throw e
+                                    case Success(_) => None
+                            lenA = list.length 
+            ) match
+                case Success(_) => println(s"Write list $name success,after write list length is $lenA")
+                case Failure(e) => throw e
+            println(s"============================================> tx B start")
+            var lenB = 0L 
+            db.update(
+                (tx:Transaction) =>
+                    tx.openList(name) match
+                        case Failure(e) => throw e
+                        case Success(list) => 
+                            println(s"current length is ${list.length}")
+                            for i <- 0 until count do
+                                val v = (i*1000).toString
+                                list((len+i).toInt) = v 
+                            lenB = list.length          
+            ) match
+                case Success(_) => println(s"Update list $name success,after update list length is $lenB")
+                case Failure(e) => throw e
+            println(s"===============================================> tx C start")
+            db.view(
+                (tx:Transaction) =>
+                    tx.openList(name) match
+                        case Failure(e) => throw e
+                        case Success(list) => 
+                            println(s"tx id is ${tx.id}")
+                            println(s"current length is ${list.length}")
+                            for i <- 0 until count do
+                                val v = list((len+i).toInt)
+                                if v != (i*1000).toString then
+                                    throw new Exception("check failed")
+            ) match
+                case Success(_) => println(s"Chcek list $name success")
+                case Failure(e) => throw e
+        catch
+            case e:Exception => throw e
+        finally
+            db.close() match
+                case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
+                case Success(value) => println("close success")
+    }
+}
+
