@@ -516,7 +516,7 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
 
         w.seek(bk.id*DB.pageSize)
         w.write(bk.all)
-        println(s"[debug] write block [${bk.id},${bk.id+bk.header.overflow}] to disk")
+        //println(s"[debug] write block [${bk.id},${bk.id+bk.header.overflow}] to disk")
         true
     
     /**

@@ -18,9 +18,11 @@ package platdb
 
 import java.io.File
 import scala.collection.mutable.ArrayBuffer
-import scala.util.{Failure,Success}
+import scala.util.{Failure,Success,Try}
 import java.nio.ByteBuffer
+import scala.concurrent.{Future,Await}
 
+/*
 def createBk(db:DB,name:String):Unit =
     try
         db.open() match
@@ -443,33 +445,61 @@ def openListAndWriteUpdate(db:DB,name:String,count:Int):Unit =
         db.close() match
             case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
             case Success(value) => println("close success")
-//
 def copyArray(a:ArrayBuffer[Int]):ArrayBuffer[Int] = 
     var dest = new Array[Int](a.length)
     val _ = a.copyToArray(dest,0,a.length)
     dest.toBuffer.asInstanceOf[ArrayBuffer[Int]]
+*/
 
-import java.util.Base64
+def openDBAndGetCollections(db:DB):Unit =
+    try
+        db.open() match
+            case Failure(exception) => throw exception
+            case Success(value) => println("open success")
+
+        db.view((tx:Transaction) => 
+            tx.allCollection() match
+                case Failure(e) => throw e
+                case Success(list) => 
+                    for (k,v) <- list do
+                        println(s"[$k, ${v}]")    
+        ) match
+            case Success(_) => None
+            case Failure(e) => throw e
+    catch
+        case e:Exception => throw e
+    finally
+        db.close() match
+            case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
+            case Success(value) => println("close success")
+
+import java.util.Date 
+import scala.concurrent.ExecutionContext
+implicit val ec:ExecutionContext = ExecutionContext.global
+
+def testTimeout(timeout:Int,success:Boolean):Future[Try[Int]] = Future {
+        val start = new Date()
+        var stop = false
+        var n:Try[Int] = Failure(new Exception("get int timeout"))
+        while !stop do
+            println(s"do something...")
+            Thread.sleep(1000)
+            if success then
+                n = Success(100000)
+                stop = true
+            else
+                val now = new Date()
+                if now.getTime() - start.getTime() > timeout then
+                    stop = true
+        n
+    }
+
+import scala.concurrent.duration._
 object PlatDB:
     @main def main(args: String*) =
-        /*
-        var freelist = new Freelist(new BlockHeader(2,freelistType,0,0,0))
-        
-        for i <- Range(9,0,-2) do
-            freelist.free(1,i,0)
-        freelist.free(2,8,0)
-
-        freelist.unleash(1,2)
-        println(s"after release freelist is ${freelist.toString()}")
-
-        for i <- 1 to 5 do
-            val id = freelist.allocate(i,1)
-            println(s"txid ${i} allocated pgid $id")
-        println(s"freelist is ${freelist.toString()}")
-        */
         val path:String =s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test"
         //val path = "/tmp/db.test"
-        var db = new DB(path)
+        //var db = new DB(path)
 
         // test bucket
         //val name:String ="bk1"
@@ -484,21 +514,23 @@ object PlatDB:
         //openBkAndCheck(db,name,List[String]("key0","key100","key123","key300","key500","key450","key600","key789"))
 
         // test list
-        val name = "list1"
-        createList(db,name)
+        //val name = "list1"
+        //createList(db,name)
         //openListAndRead(db,name,List[Int](0,1,3,5,7,9,11,13,15,17,19))
         //openListAndTravel(db,name)
-
-        openListAndWriteUpdate(db,name,10)
+        //openListAndWriteUpdate(db,name,10)
         //openListAndPend(db,name,false,10)
 
-        /*
-        var arr = new ArrayBuffer[(Long,Long,Int)]()
-        arr+=((0L,499L,500))
-        arr+=((1200L,1299L,100))
-        val v = KList.indexValue(arr)
+        //openDBAndGetCollections(db)
 
-        KList.indexElements(v.getBytes("ascii")) match
-            case None => println("failed")
-            case Some(a) => println(a)
+        var server = new Server(ServerOptions(path,defaultOptions,"",0,""))
+        server.run()
+
+        /*
+        val res = testTimeout(2000,false)
+        val n = Await.result(res, 10.seconds)
+        n match
+            case Success(m) => println(s"get number $m")
+            case Failure(e) => println(s"get number failed ${e.getMessage()}")
         */
+      

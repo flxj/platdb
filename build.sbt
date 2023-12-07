@@ -1,12 +1,14 @@
 val scala3Version = "3.2.2"
+val projectName = "platdb"
+val projectVersion = "0.12.0"
 
 lazy val root = project
   .in(file("."))
   .settings(
-    name := "platdb",
-    version := "0.10.0",
-
+    name := projectName,
+    version := projectVersion,
     scalaVersion := scala3Version,
+    assembly / assemblyJarName := s"${projectName}-server-${projectVersion}.jar",
 
     libraryDependencies += "org.scalameta" %% "munit" % "0.7.29" % Test
   )
@@ -18,10 +20,11 @@ Compile / doc / scalacOptions ++= Seq("-project", "platdb")
 
 resolvers += "Akka library repository".at("https://repo.akka.io/maven")
 
-val AkkaVersion = "2.7.0"
-val AkkaHttpVersion = "10.5.2"
+val AkkaVersion = "2.8.3"
+val AkkaHttpVersion = "10.5.0"
 libraryDependencies ++= Seq(
       "com.typesafe.akka" %% "akka-actor-typed" % AkkaVersion,
       "com.typesafe.akka" %% "akka-stream" % AkkaVersion,
-      "com.typesafe.akka" %% "akka-http" % AkkaHttpVersion
+      "com.typesafe.akka" %% "akka-http" % AkkaHttpVersion,
+      "com.typesafe.akka" %% "akka-http-spray-json" % AkkaHttpVersion
     )

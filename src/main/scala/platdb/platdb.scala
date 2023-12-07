@@ -25,6 +25,8 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.control.Breaks._
 import scala.util.{Try,Failure,Success}
 import java.util.concurrent.locks.ReentrantLock
+import java.util.concurrent.TimeUnit
+import scala.concurrent.Future
 
 /**
   * 
@@ -34,31 +36,42 @@ import java.util.concurrent.locks.ReentrantLock
   * @param readonly
   * @param fillPercent
   */
-case class Options(val timeout:Int,val bufSize:Int,val readonly:Boolean,val fillPercent:Double)
+case class Options(timeout:Int,bufSize:Int,readonly:Boolean,fillPercent:Double,tmpDir:String)
 
 /**
   * The DB object contains some default constant information as well as exception information.
   */
 object DB:
-    /**
-      * 
-      */
+    //
     val maxKeySize = 32768 // 32k
+    //
     val maxValueSize = (1 << 31) - 2
+    //
     val defaultBufSize = 128
+    //
     val defaultPageSize = 4096 // 4k
+    //
     val defaultTimeout = 2000 // 2s
+    //
     val defaultFillPercent = 0.5
+    //
     val minFillPercent = 0.1
+    //
     val maxFillPercent = 1.0
+    //
     val maxEntries = 64
+    //
     val minEntries = 32
+    //
+    val collectionTypeBucket = "Bucket"
+    val collectionTypeBSet = "BSet"
+    val collectionTypeBList = "BList"
+    val collectionTypeRegion = "Region"
     private[platdb] var pageSize = defaultPageSize
     private[platdb] var fillPercent = defaultFillPercent
     private[platdb] val meta0Page = 0
     private[platdb] val meta1Page = 1
-
-
+    //
     val exceptionTxClosed = new Exception("transaction is closed")
     val exceptionNotAllowOp = new Exception("readonly transaction not allow current operation")
     val exceptionKeyIsNull = new Exception("param key is null")
@@ -71,7 +84,8 @@ object DB:
     val exceptionNotAllowRollbackSysTx = new Exception("not allow to rollback system transaction manually")
     val exceptionNotAllowCommitRTx = new Exception("cannot commit read-only tx")
     val exceptionListIsEmpty = new Exception("the list is empty")
-    
+    val exceptOpenTxTimeout = new Exception("open transaction timeout")
+    //
     def isNotExists(e:Throwable):Boolean = 
         if e != null then
             e match
@@ -84,7 +98,7 @@ object DB:
                 case _ => false
         else
             false
-
+    //
     def isAlreadyExists(e:Throwable):Boolean = 
         if e!=null then
             e match
@@ -97,11 +111,17 @@ object DB:
                 case _ => false
         else 
             false
+    //
+    def open(path:String)(using Options):DB =
+        val db = new DB(path)
+        db.open() match
+            case Failure(e) => throw e
+            case Success(_) => db
 
 /**
   * Default DB configuration.
   */
-given defaultOptions:Options = Options(DB.defaultTimeout,DB.defaultBufSize,false,DB.defaultFillPercent)
+given defaultOptions:Options = Options(DB.defaultTimeout,DB.defaultBufSize,false,DB.defaultFillPercent,System.getProperty("java.io.tmpdir"))
 
 /**
   * DB represents a database object consisting of several buckets, each of which is a collection of key-value pairs (nested buckets are supported).
@@ -128,10 +148,36 @@ class DB(val path:String)(using ops:Options):
     private var openFlag:Boolean = false
 
     def name:String = path
+    /**
+      * 
+      *
+      * @return
+      */
     def readonly:Boolean = ops.readonly
+    /**
+      * 
+      *
+      * @return
+      */
     def closed:Boolean = !openFlag
+    /**
+      * 
+      *
+      * @return
+      */
     def pageSize:Int = DB.pageSize
+    /**
+      * 
+      *
+      * @return
+      */
     def fillPercent:Double = DB.fillPercent
+    /**
+      * 
+      *
+      * @return
+      */
+    def tmpDir:String = ops.tmpDir
     /**
       * The open method is used to open the DB, and if any exception is encountered, 
       * it will cause the opening to fail and return an error message. 
@@ -288,7 +334,35 @@ class DB(val path:String)(using ops:Options):
       * @param timeout The unit is milliseconds
       * @return
       */
-    def tryBegin(writable:Boolean,timeout:Int):Try[Transaction] = Failure(new Exception("not implement now"))
+    def tryBegin(writable:Boolean,timeout:Long):Future[Try[Transaction]] = Future {
+        if !writable then
+            beginRTx()
+        else
+            if ops.readonly then
+                Failure(DB.exceptionNotAllowRWTx)
+            else
+                var locked = false
+                try 
+                    if  rwLock.writeLock().tryLock() || rwLock.writeLock().tryLock(timeout,TimeUnit.MILLISECONDS) then
+                        if metaLock.tryLock() || metaLock.tryLock(timeout,TimeUnit.MILLISECONDS) then
+                            locked = true
+                            if closed then
+                                throw DB.exceptionDBClosed
+                            val tx = Tx(false,this)
+                            rwTx = Some(tx)
+                            free()
+                            Success(tx)
+                        else
+                            Failure(DB.exceptOpenTxTimeout)
+                    else
+                        Failure(DB.exceptOpenTxTimeout)
+                catch
+                    case e:Exception => Failure(e)
+                finally
+                    if locked then
+                        metaLock.unlock()
+    }
+        
     /**
       * Retrieves the element of the specified key from the specified bucket.
       * returns a key-value pair if the element exists; If the element is a child bucket, an exception is returned.
@@ -407,6 +481,101 @@ class DB(val path:String)(using ops:Options):
                 finally
                     tx.rollbackTx()
     /**
+      * 
+      *
+      * @param bucket
+      * @param ignoreNotExists
+      * @param keys
+      * @return
+      */
+    def delete(bucket:String,ignoreNotExists:Boolean,keys:Seq[String]):Try[Unit] = 
+        beginRWTx() match
+            case Failure(e) => Failure(e)
+            case Success(tx) =>
+                try 
+                    tx.sysCommit = true
+                    tx.openBucket(bucket) match
+                        case Failure(e) => throw e
+                        case Success(bk) => 
+                            for k <- keys do
+                                bk.delete(k) match
+                                    case Success(_) => None
+                                    case Failure(e) => 
+                                        if !(ignoreNotExists && DB.isNotExists(e)) then
+                                            throw e 
+                    tx.sysCommit = false
+                    tx.commit()
+                catch
+                    case e:Exception =>
+                        tx.rollback() match
+                            case _ => None
+                        Failure(e)
+                finally
+                    tx.rollbackTx()
+    /**
+      * query collections objects in current db.
+      *
+      * @return
+      */
+    def listCollection(collectionType:String):Try[Seq[(String,String)]] =
+        var s = List[(String,String)]()
+        view(
+            (tx:Transaction) =>
+                tx.allCollection() match
+                    case Failure(exception) => throw exception
+                    case Success(cls) => 
+                        for (name,tp) <- cls do
+                            if tp == collectionType || collectionType == "" then
+                                s:+=(name,tp)
+        ) match
+            case Failure(e) => Failure(e)
+            case Success(_) => Success(s)
+    /**
+      * 
+      *
+      * @param name
+      * @param collectionType
+      * @param dimension only when collectionType is Region,this paremeter worked.
+      * @param ignoreExists if this parameter is true,will ignore collecction object already exists error.
+      * @return
+      */
+    def createCollection(name:String,collectionType:String,dimension:Int,ignoreExists:Boolean):Try[Unit] = 
+        update(
+            (tx:Transaction) =>
+                val res = collectionType match
+                    case DB.collectionTypeBucket => if !ignoreExists then tx.createBucket(name) else tx.createBucketIfNotExists(name)
+                    case DB.collectionTypeBSet => if !ignoreExists then tx.createBSet(name) else tx.createBSetIfNotExists(name)
+                    case DB.collectionTypeBList => if !ignoreExists then tx.createList(name) else tx.createListIfNotExists(name)
+                    case DB.collectionTypeRegion => if !ignoreExists then tx.createRegion(name,dimension) else tx.createRegionIfNotExists(name,dimension)
+                    case _ => Failure(new Exception(s"unknown collection type $collectionType"))
+                res match
+                    case Failure(exception) => throw exception
+                    case Success(_) => None 
+        )
+    /**
+      * 
+      *
+      * @param name
+      * @param collectionType
+      * @param ignoreNotExists
+      * @return
+      */
+    def deleteCollection(name:String,collectionType:String,ignoreNotExists:Boolean):Try[Unit] = 
+        update(
+            (tx:Transaction) =>
+                val res = collectionType match
+                    case DB.collectionTypeBucket => tx.deleteBucket(name) 
+                    case DB.collectionTypeBSet => tx.deleteBSet(name) 
+                    case DB.collectionTypeBList => tx.deleteList(name) 
+                    case DB.collectionTypeRegion => tx.deleteRegion(name)
+                    case _ => Failure(new Exception(s"unknown collection type $collectionType"))
+                res match
+                    case Failure(exception) => 
+                        if !(ignoreNotExists && DB.isNotExists(exception)) then 
+                            throw exception
+                    case Success(_) => None
+        )
+    /**
       * Executes user functions in the context of a read-write transaction. 
       * If the function does not produce any exceptions, the transaction is automatically committed; Otherwise, automatic rollback.
       *
@@ -494,8 +663,6 @@ class DB(val path:String)(using ops:Options):
             metaLock.lock()
             if closed then
                 throw DB.exceptionDBClosed
-            //var tx = new Tx(false)
-            //tx.init(this)
             var tx = Tx(false,this)
             rwTx = Some(tx)
             free()
@@ -514,8 +681,6 @@ class DB(val path:String)(using ops:Options):
             metaLock.lock()
             if closed then
                 throw DB.exceptionDBClosed
-            //var tx = new Tx(true)
-            //tx.init(this)
             var tx = Tx(true,this)
             rTx.addOne(tx)
             Success(tx)
@@ -562,7 +727,7 @@ class DB(val path:String)(using ops:Options):
             fileManager.grow(sz)
             Success(true)
         catch
-            case e:Exception => return Failure(new Exception(s"grow db failed:${e.getMessage()}"))
+            case e:Exception => Failure(new Exception(s"grow db failed:${e.getMessage()}"))
     /**
       * remove the transcation object from db tx cache.
       *

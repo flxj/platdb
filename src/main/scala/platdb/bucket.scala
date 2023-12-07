@@ -668,7 +668,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         // split current node.
         for n <- splitNode(node,DB.pageSize) do 
             if n.id > 0 then 
-                println(s"[debug] tx ${tx.id} free node ${n.id}")
+                //println(s"[debug] tx ${tx.id} free node ${n.id}")
                 tx.free(n.id)
                 n.header.pgid = 0
             
@@ -680,7 +680,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
             n.header.pgid = bk.id
             n.writeTo(bk)
             n.spilled = true
-            println(s"[debug] tx ${tx.id} allocated node id $nid")
+            //println(s"[debug] tx ${tx.id} allocated node id $nid")
             // insert the new node info to its parent.
             n.parent match
                 case None => None
@@ -752,7 +752,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
      */
     private def freeNode(node:Node):Unit = 
         if node.id > DB.meta1Page then
-            println(s"[debug] tx ${tx.id} freeNode ${node.id}")
+            //println(s"[debug] tx ${tx.id} freeNode ${node.id}")
             tx.free(node.id)
             node.header.pgid = 0
             nodes.remove(node.id)
@@ -1046,7 +1046,6 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
     def allCollection():Try[Seq[(String,String)]] = 
         var arr = ArrayBuffer[(String,String)]()
         try
-            var iter = new BTreeBucketIter(this)
             for (k,v) <- iterator do
                 k match
                     case None => None
@@ -1054,19 +1053,20 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                         v match 
                             case Some(_) => None
                             case None => arr+=((key,""))
+            var iter = new BTreeBucketIter(this)
             for i <- 0 until arr.length do
-                val (k,_) = arr(i)
-                iter.search(k) match
-                    case (None,_,_) => throw new Exception(s"not found collection info of $k")
+                val (key,_) = arr(i)
+                iter.search(key) match
+                    case (None,_,_) => throw new Exception(s"not found collection info of $key")
                     case (Some(k),v,f) => 
-                        if k!=name || f!=bucketType then 
-                            throw new Exception(s"not found collection info of $k")
+                        if k!=key || f!=bucketType then 
+                            throw new Exception(s"not found collection info of $key,get ($k,_,$f)")
                         v match 
-                            case None => throw new Exception(s"query $k value failed")
+                            case None => throw new Exception(s"query $key value failed")
                             case Some(data) =>
                                 BTreeBucket.getValue(data) match
-                                    case None => throw new Exception(s"parse $k value failed,expect data length is ${BTreeBucket.valueSize} but actual get ${data}")
-                                    case Some(value) => arr(i) = (k,dataTypeName(value.dataType))
+                                    case None => throw new Exception(s"parse $key value failed,expect data length is ${BTreeBucket.valueSize} but actual get ${data}")
+                                    case Some(value) => arr(i) = (key,dataTypeName(value.dataType))
             Success(arr.toList)
         catch
             case e:Exception => Failure(e)

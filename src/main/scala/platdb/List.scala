@@ -1055,32 +1055,44 @@ private[platdb] class KListIter(val list:KList) extends CollectionIterator:
     def hasPrev():Boolean = ???
     def prev():(Option[String],Option[String]) = ???
 
-
+/**
+  * 
+  *
+  * @param list
+  */
 class BListIter(val list:BList) extends CollectionIterator:
     private var idx = 0
+    // find element by index.
     def find(key:String):(Option[String],Option[String]) = (None,None)
+    // index = 0
     def first():(Option[String],Option[String]) = 
         idx = 0
         list.head match
             case Failure(_) => (None,None)
             case Success(v) => (Some("0"),Some(v))
+    // index = list.length-1
     def last():(Option[String],Option[String]) = 
         idx = list.length.toInt
         list.last match
             case Failure(_) => (None,None)
             case Success(v) => (Some((list.length-1).toString),Some(v))
+    // 
     def hasNext():Boolean = idx < list.length
+    // 
     def next():(Option[String],Option[String]) = 
         list.get(idx) match
             case Failure(_) => (None,None)
             case Success(v) => 
+                val item = (Some(idx.toString),Some(v))
                 idx+=1
-                (Some(idx.toString),Some(v))
+                item
+    //
     def hasPrev():Boolean = idx >= 0
+    //
     def prev():(Option[String],Option[String]) = 
         list.get(idx) match
             case Failure(_) => (None,None)
             case Success(v) => 
+                val item = (Some(idx.toString),Some(v))
                 idx-=1
-                (Some(idx.toString),Some(v))
-
+                item

@@ -37,19 +37,31 @@ trait BSet extends Iterable:
       */
     def contains(key:String):Try[Boolean]
     /**
+      * Add one element to the current collection.
+      *
+      * @param key
+      */
+    def +=(key:String):Unit
+    /**
+      * Remove one element from the current collection.
+      *
+      * @param key
+      */
+    def -=(key:String):Unit
+    /**
       * Add one or more elements to the current collection.
       *
       * @param keys
       * @return
       */
-    def add(keys:String*):Try[Unit]
+    def add(keys:Seq[String]):Try[Unit]
     /**
       * Remove one or more elements from the current collection.
       *
       * @param keys
       * @return
       */
-    def remove(keys:String*):Try[Unit]
+    def remove(keys:Seq[String]):Try[Unit]
     /**
       * Calculate the intersection of the current set and the target set, and the result is still a BSet (the object is stored in memory).
       *
@@ -177,7 +189,7 @@ private[platdb] class BTreeSet(var bk:BTreeBucket) extends BSet:
       * @param keys
       * @return
       */
-    def add(keys:String*):Try[Unit] = 
+    def add(keys:Seq[String]):Try[Unit] = 
         try 
             bk+=(for k<- keys yield (k,""))
             Success(None)
@@ -189,7 +201,7 @@ private[platdb] class BTreeSet(var bk:BTreeBucket) extends BSet:
       * @param keys
       * @return
       */
-    def remove(keys:String*):Try[Unit] = 
+    def remove(keys:Seq[String]):Try[Unit] = 
         try 
             bk-=(keys)
             Success(None)
@@ -395,8 +407,8 @@ private[platdb] class TempBSet(val name:String) extends BSet:
     var map = new TreeMap[String,Boolean]()
     def length:Long = map.size
     def contains(key:String):Try[Boolean] = Success(map.contains(key))
-    def add(keys:String*):Try[Unit] = Success(map.addAll(for k <- keys yield (k,true)))
-    def remove(keys:String*):Try[Unit] = Success(map--=(keys))
+    def add(keys:Seq[String]):Try[Unit] = Success(map.addAll(for k <- keys yield (k,true)))
+    def remove(keys:Seq[String]):Try[Unit] = Success(map--=(keys))
     def +=(key:String):Unit = map+=(key,true)
     def -=(key:String):Unit = map-=key
     def iterator: CollectionIterator = new TempBSetIter(this)

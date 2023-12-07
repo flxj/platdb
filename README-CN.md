@@ -384,9 +384,223 @@ db.backup(path) match
 
 ```
 
-### TODO
+### http接口
 
-1.补充一些测试用例
-2.实现Server模式，使得可以通过http接口访问platdb DB实例
-3.实现一些内存数据结构
-4.实现分布式版本platdb-cluster
+当前支持将platdb作为一个serevr来运行，并通过http接口访问db数据. 
+
+用户可以导入platdb项目，通过构造一个Server实例的方式运行platdb http服务
+
+```scala
+
+
+```
+
+也可以直接运行platdb的jar包的方式运行platdb server
+```shell
+
+```
+
+
+
+如下示例展示了如何通过http接口操作单个集合对象（每个请求在后端均以一个platdb事务来响应）
+
+1.查看当前db包含的集合对象名称
+
+```shell
+curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/collections" | python -m json.tool
+```
+返回数据结构如下所示：
+```json
+{
+    "collections": [
+    {
+        "collectionType": "Bucket",
+        "name": "bucket2"
+    },
+    {
+        "collectionType": "BList",
+        "name": "list1"
+    }
+    ]
+}
+```
+
+2.查询当前db中的bucket对象名称
+
+```shell
+curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/buckets" | python -m json.tool
+```
+返回数据结构如下所示：
+```json
+{
+"collections": [
+{
+"collectionType": "Bucket",
+"name": "bucket2"
+}
+]
+}
+
+```
+
+3.创建一个bucekt
+```shell
+curl -H "Content-Type: application/json" -X POST -d '{"name": "bucket1", "ignoreExists":true}' "http://localhost:8080/v1/buckets"
+```
+
+4.向bucket中添加元素
+```shell
+curl -H "Content-Type: application/json" -X POST -d '{"name": "bucket1", "elems":[{"key":"key1","value":"aaa"},{"key":"key2","value":"aaa"},{"key":"key3","value":"ccc"}]}' "http://localhost:8080/v1/buckets/elements"
+```
+
+
+5.查询bucket中的元素(当前仅支持获取所有元素), url参数name为要查询的bucket名称
+```shell
+curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/buckets/elements?name=bucket1" | python -m json.tool
+```
+返回数据结构如下所示：
+```json
+[
+    {
+        "key": "key1",
+        "value": "aaa"
+    },
+    {
+        "key": "key2",
+        "value": "aaa"
+    },
+    {
+        "key": "key3",
+        "value": "ccc"
+    }
+]
+```
+
+6.删除bucket中的元素
+```shell
+curl -H "Content-Type: application/json" -X DELETE -d '{"name":"bucket1","keys":["key1","key2"]}' "http://localhost:8080/v1/buckets/elements"
+```
+
+7.删除bucket
+```shell
+curl -H "Content-Type: application/json" -X DELETE -d '{"name":"bucket1","ignoreNotExists":true}' "http://localhost:8080/v1/buckets"
+```
+
+8.创建一个Blist
+```shell
+curl -H "Content-Type: application/json" -X POST -d '{"name": "list2", "ignoreExists":true}' "http://localhost:8080/v1/blists"
+```
+
+9.向Blist尾部添加元素
+```shell
+curl -H "Content-Type: application/json" -X POST -d '{"name": "list2","prepend":false, "elems":["elem1","elem2","elem3"]}' "http://localhost:8080/v1/blists/elements"
+```
+
+10.向Blist头部添加元素
+```shell
+curl -H "Content-Type: application/json" -X POST -d '{"name": "list2","prepend":true, "elems":["elem4","elem5","elem6"]}' "http://localhost:8080/v1/blists/elements"
+```
+
+
+11.查询Blist元素(当前仅支持获取所有元素), url参数name为要查询的blist名称
+```shell
+curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/blists/elements?name=list2" | python -m json.tool
+```
+返回数据结构如下所示：
+```json
+[
+    {
+        "index": "0",
+        "value": "elem4"
+    },
+    {
+        "index": "1",
+        "value": "elem5"
+    },
+    {
+        "index": "2",
+        "value": "elem6"
+    },
+    {
+        "index": "3",
+        "value": "elem1"
+    },
+    {
+        "index": "4",
+        "value": "elem2"
+    },
+    {
+        "index": "5",
+        "value": "elem3"
+    }
+]
+```
+
+12.更新Blist某个元素
+```shell
+curl -H "Content-Type: application/json" -X PUT -d '{"name":"list2","index":5,"elem":"vvvvvvvv"}' "http://localhost:8080/v1/blists/elements"
+```
+
+13.删除Blist元素
+```shell
+curl -H "Content-Type: application/json" -X DELETE -d '{"name":"list2","index":2,"count":2}' "http://localhost:8080/v1/blists/elements"
+```
+
+14.删除Blist
+```shell
+curl -H "Content-Type: application/json" -X DELETE -d '{"name":"list2","ignoreNotExists":true}' "http://localhost:8080/v1/blists"
+```
+
+
+如下示例展示了通过http接口执行一个包含多个操作的事务
+
+1.只读事务
+
+假设用户想要在一个事务中读取bucket中的某些元素，读取Blis中的某些元素，则可以定义如下的操作序列
+```json
+{
+    "operations":[
+        {"collection":"bucket1","collectionOp":"","elementOp":"get","elems":[{"key":"key1"},{"key":"key2"}]},
+        {"collection":"list1","collectionOp":"","elementOp":"get","elems":[{"key":"0"},{"key":"1"}]}
+    ]
+}
+```
+
+最终于请求为：
+```shell
+curl -H "Content-Type: application/json" -X POST -d '{"readonly": true,"operations":[{"collection":"bucket1","collectionOp":"","elementOp":"get","elems":[{"key":"key1"},{"key":"key2"}]},{"collection":"list1","collectionOp":"","elementOp":"get","elems":[{"key":"0"},{"key":"1"}]}]}' "http://localhost:8080/v1/txns"
+```
+执行结果的结构如下所示：注意到如果执行成功，则请求中的每条操作均对应生成一个操作结果条目
+```json
+{
+    "success":true,
+    "err":"",
+    "results":[
+        {"success":true,"err":"","data":[{"key":"key1","value":"value1"},{"key":"key2","value":"value2"}]},
+        {"success":true,"err":"","data":[{"key":"0","value":"elem1"},{"key":"1","value":"elem2"}]},
+    ]
+}
+```
+如果事务执行失败，则返回的json结构中success字段取值为false, err字段为对应的错误信息，results字段为空
+```json
+{
+    "success":false,
+    "err":"this is some error info",
+    "results":[]
+}
+```
+
+
+2.读写事务
+
+
+
+
+其它没有列出的api可参看swagger文档(TODO)
+
+
+// TODO 信号处理
+// TODO main命令行参数
+// TODO http日志
+// TODO Dockerfile
+

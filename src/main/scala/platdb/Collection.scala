@@ -19,6 +19,14 @@ package platdb
 import scala.collection.immutable.{Set}
 import scala.util.{Try,Success,Failure}
 
+enum CollectionType:
+    case Bucket
+    case BList
+    case BSet
+    case Region
+    case Unknown
+    case Nothing
+
 
 // collection data type.
 private[platdb] val bucketDataType:Byte = 1
@@ -33,6 +41,15 @@ private[platdb] def dataTypeName(t:Byte):String =
         case 3 => "BList"
         case 4 => "Region"
         case _ => "Unknown"
+
+private[platdb] def collectionType(tp:String):CollectionType = 
+    tp.toLowerCase() match
+        case "bucket" => CollectionType.Bucket
+        case "bset" | "set" => CollectionType.BSet
+        case "blist" | "list" => CollectionType.BList
+        case "region" | "rtree" => CollectionType.Region
+        case "" => CollectionType.Nothing
+        case _ => CollectionType.Unknown
 
 /**
   * some collection methods with transaction parameter.

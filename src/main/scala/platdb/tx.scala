@@ -184,6 +184,13 @@ trait Transaction:
       * @return
       */
     def deleteRegion(name:String):Try[Unit]
+    /**
+      * backup the database file in current transaction view to a file.
+      *
+      * @param path
+      * @return
+      */
+    def copyToFile(path:String):Try[Long] 
 
 
 private[platdb] object Tx:
@@ -195,7 +202,7 @@ private[platdb] object Tx:
         tx.root.bkv = tx.meta.root.clone
         if !readonly then
             tx.meta.txid+=1
-        println(s"[debug] new create a Tx, id:${tx.meta.txid} root:${tx.root.bkv.root}")
+        println(s"[debug] begin a tx ${tx.id}")
         tx
 
 /*
@@ -340,10 +347,12 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
 
         for (id,bk)<- blocks do
             db.blockBuffer.revert(bk.id)
+        val txid = id
         db = null
         meta = null
         root = new BTreeBucket("",this)
         blocks.clear()
+        println(s"[debug] tx ${txid} closed")
 
     /**
       * write freelist to db file.
@@ -514,7 +523,11 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
         finally
             if writer != null then 
                 writer.close()
-    //
+    /**
+      * 
+      *
+      * @return
+      */
     def allCollection(): Try[Seq[(String, String)]] = root.allCollection()
     // BSet methods
     def openBSet(name:String):Try[BSet] = root.getBSet(name)
