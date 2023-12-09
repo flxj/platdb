@@ -494,6 +494,10 @@ def testTimeout(timeout:Int,success:Boolean):Future[Try[Int]] = Future {
         n
     }
 
+import com.typesafe.scalalogging.Logger
+import org.slf4j.LoggerFactory
+import ch.qos.logback.classic.Level
+
 import scala.concurrent.duration._
 object PlatDB:
     @main def main(args: String*) =
@@ -523,8 +527,8 @@ object PlatDB:
 
         //openDBAndGetCollections(db)
 
-        var server = new Server(ServerOptions(path,defaultOptions,"",0,""))
-        server.run()
+        var server = Server(ServerOptions(path,defaultOptions,"",0,""))
+        //server.run()
 
         /*
         val res = testTimeout(2000,false)
@@ -532,5 +536,16 @@ object PlatDB:
         n match
             case Success(m) => println(s"get number $m")
             case Failure(e) => println(s"get number failed ${e.getMessage()}")
+        */
+
+        /*
+        val logger = Logger(LoggerFactory.getLogger(getClass.getName))
+        logger.underlying.asInstanceOf[ch.qos.logback.classic.Logger].setLevel(Level.INFO)
+
+        logger.trace("This is a TRACE level log message")
+        logger.debug("This is a DEBUG level log message")
+        logger.info("This is an INFO level log message")
+        logger.warn("This is a WARN level log message")
+        logger.error("This is an ERROR level log message {} {}","AAA","BBB")
         */
       

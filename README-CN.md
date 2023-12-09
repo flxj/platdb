@@ -599,8 +599,7 @@ curl -H "Content-Type: application/json" -X POST -d '{"readonly": true,"operatio
 其它没有列出的api可参看swagger文档(TODO)
 
 
-// TODO 信号处理
-// TODO main命令行参数
-// TODO http日志
+// TODO main命令行参数/配置文件
 // TODO Dockerfile
+// TODO 生成一个logo
 

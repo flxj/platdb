@@ -31,7 +31,7 @@ import akka.stream.scaladsl.Source
 import akka.stream.scaladsl._
 import scala.concurrent.ExecutionContext
 import scala.concurrent.{Future,Promise,Await}
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.{Duration,DurationInt}
 import scala.io.StdIn
 import scala.util.{Failure,Success,Try}
 import scala.util.control.Breaks._
@@ -42,6 +42,10 @@ import spray.json.{DefaultJsonProtocol,RootJsonFormat}
 import java.io.{File,RandomAccessFile}
 import java.nio.ByteBuffer
 import java.nio.file.Paths
+
+import com.typesafe.scalalogging.Logger
+import org.slf4j.LoggerFactory
+import ch.qos.logback.classic.Level
 
 /**
   * 
@@ -87,6 +91,23 @@ object Server:
     case class Tx(readonly:Boolean,operations:Array[TxOperation])
     case class TxOperationResult(success:Boolean,err:String,data:List[KVPair])
     case class TxResult(success:Boolean,err:String,results:List[TxOperationResult])
+    /**
+      * 
+      *
+      * @param ops
+      * @return
+      */
+    def apply(ops:ServerOptions):Server = 
+        val logger = Logger(LoggerFactory.getLogger(getClass.getName))
+        var level:Level = Level.INFO
+        ops.logLevel.toLowerCase()  match
+            case ""|"info" => None
+            case "debug" => level = Level.DEBUG
+            case "err"|"error" => level = Level.ERROR
+            case "warn" => level = Level.WARN
+            case _ => None 
+        logger.underlying.asInstanceOf[ch.qos.logback.classic.Logger].setLevel(level)
+        new Server(ops,logger)
 
 /**
   * 
@@ -130,7 +151,7 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
   *
   * @param ops
   */
-class Server(val ops:ServerOptions) extends JsonSupport:
+class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
     // needed to run the route
     implicit val system: ActorSystem[_] = ActorSystem(Behaviors.empty, "platdb")
     // needed for the future map/flatmap in the end and future in fetchItem and saveOrder
@@ -144,14 +165,15 @@ class Server(val ops:ServerOptions) extends JsonSupport:
       */
     def run():Unit = 
         val db = DB.open(ops.path)(using ops.conf)
-        println(s"open database ${ops.path} success")
-    
+        log.info("open database at {} success",ops.path)
+        // TODO outpot logo
+
         val route =
             pathPrefix("v1"){
                 concat (
                     (pathEnd | pathSingleSlash) {
                         get {
-                            complete(HttpEntity(ContentTypes.`text/html(UTF-8)`, "<h1>hello platdb</h1>"))
+                            complete(HttpEntity(ContentTypes.`text/html(UTF-8)`, "<h1>hello platdb</h1>")) // TODO add logo 
                         }
                     },
                     path("backup")(routeBackup(db)),
@@ -167,36 +189,21 @@ class Server(val ops:ServerOptions) extends JsonSupport:
             }
         //
         val bindingFuture = Http().newServerAt("localhost", 8080).bind(route)
-
-        println(s"Server now online. Please navigate to http://localhost:8080/v1")
-
-        /*
-        StdIn.readLine() // let it run until user presses return
-        bindingFuture
-            .flatMap(_.unbind()) // trigger unbinding from the port
-            .onComplete(_ => 
-                db.close() match
-                    case Failure(e) => println(s"close db failed:${e.getMessage()}")
-                    case Success(_) => println("db closed")
-                system.terminate()
-            ) // and shutdown when done
-        */
+        log.info("server now online,please navigate to http://localhost:{}/v1",ops.port)
+        //
         val waitOnFuture = Promise[Done].future 
         val shutdownHook = ShutdownHookThread{
-                println("Shutdown hook is running")
-                // cleanup logic
-                //
-                bindingFuture.flatMap(_.unbind()).onComplete(_ => println("unbind"))
-                //
-                println("close db...")
+                log.info("shutdown hook is running")
+                val unbind = bindingFuture.flatMap(_.unbind())
+                Await.ready(unbind, Duration.Inf) 
+                log.info("unbinded routes")
                 db.close() match
-                    case Failure(e) => println(s"close db failed:${e.getMessage()}")
-                    case Success(_) => println("db closed")
-                println("terminate system...")
+                    case Failure(e) => log.error(s"close db failed:${e.getMessage()}")
+                    case Success(_) => log.info("db closed")
                 system.terminate()
-                println(s"shutdown platdb server")
+                log.info("shutdown platdb server")
         }
-        println(s"waiting...")
+        log.info(s"waiting for conncetion...")
         Await.ready(waitOnFuture, Duration.Inf)
     
     //
@@ -208,29 +215,29 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                 var resp:Option[Try[HttpResponse]] = None
                 val t:Future[Try[Unit]] = Future {
                     try
-                        println(s"start work...")
+                        log.debug("start work...")
                         for i <- 0 to 10 do
                             if i == 5 then
                                 val hr = HttpResponse(200, entity = "OOOOOOOOOOOOOOKKKKKKKKKKKKKKK!")
                                 resp = Some(Success(hr))
-                                println(s"[resp] prepared the response")
+                                log.debug("prepared the response")
                             Thread.sleep(1000)
                             val tt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date())
-                            println(s"[work] time is ${tt}")
+                            log.debug(s"work time is ${tt}")
                         Success(None)
                     catch
                         case e:Exception => Failure(e)
                     finally 
-                        println(s"[work] completed")
+                        log.debug(s"work completed")
                 }
-                println("waiting httpResponse....")
+                log.debug("waiting httpResponse....")
                 var flag = false
                 while !flag do
                     resp match
                         case None => Thread.sleep(500)
                         case Some(r) => flag = true
                 
-                println("get response")
+                log.debug("get response")
                 resp match
                     case None => complete(StatusCodes.InternalServerError,"failed")
                     case Some(r) => 
@@ -239,15 +246,20 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                             case Success(tp) => complete(tp)
             }
         }
+    /**
+      * test file download.
+      *
+      * @param db
+      */
     private def routeTest2(db:DB):Route =
         pathEnd {
             get {
                 var file:Option[Try[(String,Long)]] = None
                 val t:Future[Try[Unit]] = Future {
                     try
-                        println(s"[work] start...")
+                        log.debug("work start...")
                         val path:String =s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}server.test"
-                        // TODO1: create a file
+                        // create a file
                         val f = new File(path)
                         if !f.exists() then
                             f.createNewFile()
@@ -256,7 +268,7 @@ class Server(val ops:ServerOptions) extends JsonSupport:
 
                         val s1 = "aaa".getBytes
                         val size = s1.length*4
-                        // TODO 2: write some content
+                        // write some content
 
                         val buf = ByteBuffer.allocate(64)
                         buf.put(s1)
@@ -266,10 +278,10 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                         ch.force(true)
                         buf.clear()
 
-                        // TODO 3: (file name, file size)
+                        // (file name, file size)
                         file = Some(Success((path,size)))
                         
-                        // TODO 4: write continue
+                        // write continue
                         for s <- List[String]("bbb","ccc","ddd") do
                             buf.put(s.getBytes)
                             buf.flip()
@@ -278,7 +290,7 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                             buf.clear()
 
                         // TODO 5. stop
-                        println(s"[work] write file completed")
+                        log.debug("work write file completed")
                         ch.close()
                         Success(None)
                     catch
@@ -287,23 +299,22 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                            Failure(e)
                     finally 
                         // TODO: close
-                        println(s"[work] completed")
+                        log.debug("work completed")
                 }
-                println("waiting ....")
+                log.debug("waiting ....")
                 var flag = false
                 while !flag do
                     file match
                         case None => Thread.sleep(500)
                         case Some(r) => flag = true
                 //
-                println("response...")
+                log.debug("response...")
                 file match
                     case None => complete(StatusCodes.InternalServerError,"failed")
                     case Some(info) =>  
                         info match
                             case Failure(e) => complete(StatusCodes.InternalServerError,"failed")
                             case Success((name,size)) =>
-                                // TODO httpresponse
                                 val source = FileIO.fromPath(Paths.get(name))
                                 complete(HttpEntity(ContentTypes.`application/octet-stream`,size,source))     
             }
@@ -562,43 +573,40 @@ class Server(val ops:ServerOptions) extends JsonSupport:
         concat (
             get {
                 // TODO: timeout
+                log.info("start backup database...")
                 var backupFile:Option[(String,Long)] = None
                 val copy: Future[Try[Unit]] = Future {
                     db.view(
                         (tx:Transaction) =>
-                            // template file
+                            // create a temp file
                             try
                                 val path = db.tmpDir+File.separator+s"backup-${System.currentTimeMillis()}"
                                 val tmpFile = new File(path)
                                 if !tmpFile.exists() then
                                     tmpFile.createNewFile()
-                                //
                                 backupFile = Some((path,tx.size))
                                 //
                                 tx.copyToFile(path) match
                                     case Failure(e) => throw e
-                                    case Success(_) => None
+                                    case Success(_) => log.info("backup db to temp file {} completed",path)
                             catch
                                 case e:Exception => throw e
                             finally
-                                println(s"[debug] copy backup file completed")
+                                log.debug("backup completed")
                     ) match
-                        case Failure(e) => Failure(e)
+                        case Failure(e) => 
+                            log.error("backup failed: {}",e.getMessage())
+                            Failure(e)
                         case Success(_) => Success(None)
                 }
-                println("waiting ....")
+                log.debug("waiting backup temp file generate")
                 var flag = false
                 while !flag do
                     backupFile match
                         case None => Thread.sleep(500)
                         case Some(_) => flag = true
-                //
-                //onSuccess(copy) { 
-                //    case Success(_) => complete(StatusCodes.OK,s"backup success")
-                //    case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
-                //}
 
-                println("response...")
+                log.debug("prepare download backup")
                 backupFile match
                     case None => complete(StatusCodes.InternalServerError,"failed")
                     case Some((name,size)) => 
@@ -607,7 +615,7 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                                 result.onComplete( _ =>
                                     val file = new File(name)
                                     if file.delete() then
-                                        println(s"[debug] template deleted.")
+                                        log.debug(s"backup temp file {} deleted.",name)
                                 )
                         }
                         complete(HttpEntity(ContentTypes.`application/octet-stream`,size,source))              
@@ -623,6 +631,7 @@ class Server(val ops:ServerOptions) extends JsonSupport:
         pathEnd {
             concat (
                 get {
+                    log.debug("start get collectins info")
                     val res:Future[Try[Seq[(String,String)]]] = Future{
                         db.listCollection("") match
                             case Failure(e) => Failure(e)
@@ -630,30 +639,41 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                     }
                     onSuccess(res) {
                         case Success(value) =>
-                            val s = (for (k,v) <- value yield Server.CollectionInfo(k,v)).toList
-                            complete(StatusCodes.OK,Server.CollectionGetResponse(s))
-                        case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                            val s = (for (k,v) <- value yield CollectionInfo(k,v)).toList
+                            complete(StatusCodes.OK,CollectionGetResponse(s))
+                        case Failure(e) => 
+                            val msg = e.getMessage()
+                            log.error("get collection info failed: {}",msg)
+                            complete(StatusCodes.InternalServerError,msg)
                     }      
                 },
                 post {
-                    entity(as[Server.CollectionCreateOptions]) { ops =>
+                    entity(as[CollectionCreateOptions]) { ops =>
+                        log.debug("start to create collection {}",ops.name)
                         val created: Future[Try[Unit]] = Future {
                             db.createCollection(ops.name,ops.collectionType,ops.dimension,ops.ignoreExists)
                         }
                         onSuccess(created) { 
                             case Success(_) => complete(StatusCodes.OK,s"create ${ops.collectionType} ${ops.name} success\n")
-                            case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                            case Failure(e) => 
+                                val msg = e.getMessage()
+                                log.error("create collection {} failed: {}",ops.name,msg)
+                                complete(StatusCodes.InternalServerError,msg)
                         }
                     }
                 },
                 delete {
-                    entity(as[Server.CollectionDeleteOptions]) { ops =>
+                    entity(as[CollectionDeleteOptions]) { ops =>
+                        log.debug("start to delete collection {}",ops.name)
                         val deleted: Future[Try[Unit]] = Future {
                             db.deleteCollection(ops.name,ops.collectionType,ops.ignoreNotExists)
                         }
                         onSuccess(deleted) { 
                             case Success(_) => complete(StatusCodes.OK,s"delete ${ops.collectionType} ${ops.name} success\n")
-                            case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                            case Failure(e) => 
+                                val msg = e.getMessage()
+                                log.error("delete collection {} failed: {}",ops.name,msg)
+                                complete(StatusCodes.InternalServerError,msg)
                         }
                     }
                 },
@@ -670,6 +690,7 @@ class Server(val ops:ServerOptions) extends JsonSupport:
             pathEnd{
                 concat(
                     get {
+                        log.debug("start to get Buckets info")
                         val res:Future[Try[Seq[(String,String)]]] = Future{
                             db.listCollection(DB.collectionTypeBucket) match
                                 case Failure(e) => Failure(e)
@@ -677,30 +698,41 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                         }
                         onSuccess(res) {
                             case Success(value) =>
-                                val s = (for (k,v) <- value yield Server.CollectionInfo(k,v)).toList
-                                complete(StatusCodes.OK,Server.CollectionGetResponse(s))
-                            case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                                val s = (for (k,v) <- value yield CollectionInfo(k,v)).toList
+                                complete(StatusCodes.OK,CollectionGetResponse(s))
+                            case Failure(e) => 
+                                val msg = e.getMessage()
+                                log.error("get Buckets info failed: {}",msg)
+                                complete(StatusCodes.InternalServerError,msg)
                         }
                     },
                     post {
-                        entity(as[Server.BucketCreateOptions]) { ops =>
+                        entity(as[BucketCreateOptions]) { ops =>
+                            log.debug("start to create Bucket {}",ops.name)
                             val created: Future[Try[Unit]] = Future {
                                 db.createCollection(ops.name,DB.collectionTypeBucket,0,ops.ignoreExists)
                             }
                             onSuccess(created) { 
                                 case Success(_) => complete(StatusCodes.OK,s"create Bucket ${ops.name} success\n")
-                                case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                                case Failure(e) => 
+                                    val msg = e.getMessage()
+                                    log.error("create Bucket {} failed: {}",ops.name,msg)
+                                    complete(StatusCodes.InternalServerError,msg)
                             }
                         }
                     },
                     delete {
-                        entity(as[Server.BucketDeleteOptions]) { ops =>
+                        entity(as[BucketDeleteOptions]) { ops =>
+                            log.debug("start to delete Bucket {}",ops.name)
                             val deleted: Future[Try[Unit]] = Future {
                                 db.deleteCollection(ops.name,DB.collectionTypeBucket,ops.ignoreNotExists)
                             }
                             onSuccess(deleted) { 
                                 case Success(_) => complete(StatusCodes.OK,s"delete Bucket ${ops.name} success\n")
-                                case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                                case Failure(e) => 
+                                    val msg = e.getMessage()
+                                    log.error("delete Bucket {} failed {}",ops.name,msg)
+                                    complete(StatusCodes.InternalServerError,msg)
                             }
                         }
                     },
@@ -709,16 +741,16 @@ class Server(val ops:ServerOptions) extends JsonSupport:
             path("elements"){
                 concat(
                     (get & parameter("name")) { name =>
-                        //
-                        val res:Future[Try[List[Server.KVPair]]] = Future{
-                            var list = List[Server.KVPair]()
+                        log.debug("query Bucket {} elements",name)
+                        val res:Future[Try[List[KVPair]]] = Future{
+                            var list = List[KVPair]()
                             db.view (
                                 (tx:Transaction) =>
                                     given t:Transaction = tx
                                     val bk = openBucket(name)
                                     for (k,v) <- bk.iterator do
                                         (k,v) match
-                                            case (Some(key),Some(value)) => list:+=Server.KVPair(key,value)
+                                            case (Some(key),Some(value)) => list:+=KVPair(key,value)
                                             case (Some(key),None) => None
                                             case (None,_) => throw new Exception(s"found null elements in bucket $name\n")
                             ) match
@@ -729,29 +761,40 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                             case Success(value) =>
                                 val pairs: Source[KVPair, NotUsed] = Source{value}
                                 complete(pairs)
-                            case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                            case Failure(e) => 
+                                val msg = e.getMessage()
+                                log.error("query Bucket {} elements failed {}",name,msg)
+                                complete(StatusCodes.InternalServerError,msg)
                         }
                     },
                     post {
-                        entity(as[Server.BucketPutOptions]) { ops => 
+                        entity(as[BucketPutOptions]) { ops => 
+                            log.debug("put elements to Bucket {}",ops.name)
                             val add: Future[Try[Unit]] = Future {
                                 val elems = for p <- ops.elems yield (p.key,p.value)
                                 db.put(ops.name,elems)
                             }
                             onSuccess(add) { 
                                 case Success(_) => complete(StatusCodes.OK,s"put elements to Bucket ${ops.name} success\n")
-                                case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                                case Failure(e) => 
+                                    val msg = e.getMessage()
+                                    log.error("put elements to Bucket {} failed {}",ops.name,msg)
+                                    complete(StatusCodes.InternalServerError,msg)
                             }
                         }
                     },
                     delete {
-                        entity(as[Server.BucketRemoveOptions]) { ops => 
+                        entity(as[BucketRemoveOptions]) { ops => 
+                            log.debug("delete elements of Bucket {}",ops.name)
                             val add: Future[Try[Unit]] = Future {
                                 db.delete(ops.name,true,ops.keys)
                             }
                             onSuccess(add) { 
                                 case Success(_) => complete(StatusCodes.OK,s"remove elements from Bucket ${ops.name} success\n")
-                                case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                                case Failure(e) => 
+                                    val msg = e.getMessage()
+                                    log.error("delete elements of Bucket {} failed: {}",ops.name,msg)
+                                    complete(StatusCodes.InternalServerError,msg)
                             }
                         }
                     }
@@ -769,6 +812,7 @@ class Server(val ops:ServerOptions) extends JsonSupport:
             pathEnd{
                 concat(
                     get {
+                        log.debug("start to get BList info")
                         val res:Future[Try[Seq[(String,String)]]] = Future{
                         db.listCollection(DB.collectionTypeBList) match
                             case Failure(e) => Failure(e)
@@ -778,28 +822,39 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                             case Success(value) =>
                                 val s = (for (k,v) <- value yield Server.CollectionInfo(k,v)).toList
                                 complete(StatusCodes.OK,Server.CollectionGetResponse(s))
-                            case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                            case Failure(e) => 
+                                val msg = e.getMessage()
+                                log.error("get BList info failed: {}",msg)
+                                complete(StatusCodes.InternalServerError,msg)
                         }
                     },
                     post {
-                        entity(as[Server.BListCreateOptions]) { ops =>
+                        entity(as[BListCreateOptions]) { ops =>
+                            log.debug("start to create BList {}",ops.name)
                             val created: Future[Try[Unit]] = Future {
                                 db.createCollection(ops.name,DB.collectionTypeBList,0,ops.ignoreExists)
                             }
                             onSuccess(created) { 
                                 case Success(_) => complete(StatusCodes.OK,s"create BList ${ops.name} success\n")
-                                case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                                case Failure(e) => 
+                                    val msg = e.getMessage()
+                                    log.error("create BList {} failed: {}",ops.name,msg)
+                                    complete(StatusCodes.InternalServerError,msg)
                             }
                         }
                     },
                     delete {
-                        entity(as[Server.BListDeleteOptions]) { ops =>
+                        entity(as[BListDeleteOptions]) { ops =>
+                            log.debug("start to delete BSet {}",ops.name)
                             val deleted: Future[Try[Unit]] = Future {
                                 db.deleteCollection(ops.name,DB.collectionTypeBList,ops.ignoreNotExists)
                             }
                             onSuccess(deleted) { 
                                 case Success(_) => complete(StatusCodes.OK,s"delete BList ${ops.name} success\n")
-                                case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                                case Failure(e) => 
+                                    val msg = e.getMessage()
+                                    log.error("delete BList {} failed: {}",ops.name,msg)
+                                    complete(StatusCodes.InternalServerError,msg)
                             }
                         }
                     }
@@ -808,15 +863,16 @@ class Server(val ops:ServerOptions) extends JsonSupport:
             path("elements"){
                 concat (
                     (get & parameter("name")) { name =>
-                        val res:Future[Try[List[Server.BListElement]]] = Future{
-                            var list = List[Server.BListElement]()
+                        log.debug("query BList {} elements",name)
+                        val res:Future[Try[List[BListElement]]] = Future{
+                            var list = List[BListElement]()
                             db.view (
                                 (tx:Transaction) =>
                                     given t:Transaction = tx
                                     val blist = openList(name)
                                     for (k,v) <- blist.iterator do
                                         (k,v) match
-                                            case (Some(key),Some(value)) => list:+=Server.BListElement(key,value)
+                                            case (Some(key),Some(value)) => list:+=BListElement(key,value)
                                             case (Some(key),None) => None
                                             case (None,_) => throw new Exception(s"found null elements in blist $name\n")          
                             ) match
@@ -825,13 +881,17 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                         }
                         onSuccess(res) {
                             case Success(value) =>
-                                val elems: Source[Server.BListElement, NotUsed] = Source{value}
+                                val elems: Source[BListElement, NotUsed] = Source{value}
                                 complete(elems)
-                            case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                            case Failure(e) => 
+                                val msg = e.getMessage()
+                                log.error("query BList {} elements failed {}",name,msg)
+                                complete(StatusCodes.InternalServerError,msg)
                         }
                     },
                     post {
-                        entity(as[Server.BListPendOptions]) { ops =>
+                        entity(as[BListPendOptions]) { ops =>
+                            log.debug("put elements to BList {}",ops.name)
                             val pended: Future[Try[Unit]] = Future {
                                 db.update(
                                     (tx:Transaction) =>
@@ -849,12 +909,16 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                             }
                             onSuccess(pended) { 
                                 case Success(_) => complete(StatusCodes.OK,s"add elements to BList ${ops.name} success\n")
-                                case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                                case Failure(e) => 
+                                    val msg = e.getMessage()
+                                    log.error("put elements to BList {} failed {}",ops.name,msg)
+                                    complete(StatusCodes.InternalServerError,msg)
                             }
                         }
                     },
                     put {
-                        entity(as[Server.BListUpdateOptions]) { ops =>
+                        entity(as[BListUpdateOptions]) { ops =>
+                            log.debug("update element of BList {}",ops.name)
                             val pended: Future[Try[Unit]] = Future {
                                 db.update(
                                     (tx:Transaction) =>
@@ -865,12 +929,16 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                             }
                             onSuccess(pended) { 
                                 case Success(_) => complete(StatusCodes.OK,s"update BList ${ops.name} element success\n")
-                                case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                                case Failure(e) => 
+                                    val msg = e.getMessage()
+                                    log.error("update element of BList {} failed {}",ops.name,msg)
+                                    complete(StatusCodes.InternalServerError,msg)
                             }
                         }
                     },
                     delete {
-                        entity(as[Server.BListRemoveOptions]) { ops =>
+                        entity(as[BListRemoveOptions]) { ops =>
+                            log.debug("start to delete elements of BList {}",ops.name)
                             val deleted: Future[Try[Unit]] = Future {
                                 db.update(
                                     (tx:Transaction) =>
@@ -883,7 +951,10 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                             }
                             onSuccess(deleted) { 
                                 case Success(_) => complete(StatusCodes.OK,s"delete elements from BList ${ops.name} success\n")
-                                case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                                case Failure(e) => 
+                                    val msg = e.getMessage()
+                                    log.error("delete elements of BList {} failed {}",ops.name,msg)
+                                    complete(StatusCodes.InternalServerError,msg)
                             }
                         }
                     },
@@ -900,7 +971,8 @@ class Server(val ops:ServerOptions) extends JsonSupport:
         concat(
             pathEnd{
                 concat(
-                    get{
+                    get {
+                        log.debug("start to get BSet info")
                         val res:Future[Try[Seq[(String,String)]]] = Future{
                             db.listCollection(DB.collectionTypeBSet) match
                                 case Failure(e) => Failure(e)
@@ -910,28 +982,39 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                             case Success(value) =>
                                 val s = (for (k,v) <- value yield Server.CollectionInfo(k,v)).toList
                                 complete(StatusCodes.OK,Server.CollectionGetResponse(s))
-                            case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                            case Failure(e) => 
+                                val msg = e.getMessage()
+                                log.error("get BSet info failed: {}",msg)
+                                complete(StatusCodes.InternalServerError,msg)
                         }
                     },
                     post {
-                        entity(as[Server.BSetCreateOptions]) { ops =>
+                        entity(as[BSetCreateOptions]) { ops =>
+                            log.debug("start to create BSet {}",ops.name)
                             val created: Future[Try[Unit]] = Future {
                                 db.createCollection(ops.name,DB.collectionTypeBSet,0,ops.ignoreExists)
                             }
                             onSuccess(created) { 
                                 case Success(_) => complete(StatusCodes.OK,s"create BSet ${ops.name} success")
-                                case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                                case Failure(e) => 
+                                    val msg = e.getMessage()
+                                    log.error("create BSet {} failed: {}",ops.name,msg)
+                                    complete(StatusCodes.InternalServerError,msg)
                             }
                         }
                     },
                     delete {
-                        entity(as[Server.BSetDeleteOptions]) { ops =>
+                        entity(as[BSetDeleteOptions]) { ops =>
+                            log.debug("start to delete BSet {}",ops.name)
                             val deleted: Future[Try[Unit]] = Future {
                                 db.deleteCollection(ops.name,DB.collectionTypeBSet,ops.ignoreNotExists)
                             }
                             onSuccess(deleted) { 
                                 case Success(_) => complete(StatusCodes.OK,s"delete BSet ${ops.name} success")
-                                case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                                case Failure(e) => 
+                                    val msg = e.getMessage()
+                                    log.error("delete BSet {} failed: {}",ops.name,msg)
+                                    complete(StatusCodes.InternalServerError,msg)
                             }
                         }
                     }
@@ -940,15 +1023,16 @@ class Server(val ops:ServerOptions) extends JsonSupport:
             path("elements"){
                 concat(
                     (get & path("") & parameter("name")) { name =>
-                        val res:Future[Try[List[Server.BSetElement]]] = Future{
-                            var list = List[Server.BSetElement]()
+                        log.debug("query BSet {} elements",name)
+                        val res:Future[Try[List[BSetElement]]] = Future{
+                            var list = List[BSetElement]()
                             db.view (
                                 (tx:Transaction) =>
                                     given t:Transaction = tx
                                     val set = openSet(name)
                                     for (k,v) <- set.iterator do
                                         (k,v) match
-                                            case (Some(key),Some(value)) => list:+=Server.BSetElement(key,value)
+                                            case (Some(key),Some(value)) => list:+=BSetElement(key,value)
                                             case (Some(key),None) => None
                                             case (None,_) => throw new Exception(s"found null elements in BSet $name")
                             ) match
@@ -957,13 +1041,17 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                         }
                         onSuccess(res) {
                             case Success(value) =>
-                                val elems: Source[Server.BSetElement, NotUsed] = Source{value}
+                                val elems: Source[BSetElement, NotUsed] = Source{value}
                                 complete(elems)
-                            case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                            case Failure(e) => 
+                                val msg = e.getMessage()
+                                log.error("query BSet {} elements failed: {}",name,msg)
+                                complete(StatusCodes.InternalServerError,msg)
                         }
                     },
                     post {
-                        entity(as[Server.BSetPutOptions]) { ops =>
+                        entity(as[BSetPutOptions]) { ops =>
+                            log.debug("put elements to BSet {}",ops.name)
                             val add: Future[Try[Unit]] = Future {
                                 db.update(
                                     (tx:Transaction) =>
@@ -976,12 +1064,16 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                             }
                             onSuccess(add) { 
                                 case Success(_) => complete(StatusCodes.OK,s"put elements to BSet ${ops.name} success")
-                                case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                                case Failure(e) => 
+                                    val msg = e.getMessage()
+                                    log.error("put elements to BSet {} failed: {}",ops.name,msg)
+                                    complete(StatusCodes.InternalServerError,msg)
                             }
                         }
                     },
                     delete {
-                        entity(as[Server.BSetRemoveOptions]) { ops => 
+                        entity(as[BSetRemoveOptions]) { ops => 
+                            log.debug("delete elements of BSet {}",ops.name)
                             val deleted: Future[Try[Unit]] = Future {
                                 db.update(
                                     (tx:Transaction) =>
@@ -994,10 +1086,14 @@ class Server(val ops:ServerOptions) extends JsonSupport:
                             }
                             onSuccess(deleted) { 
                                 case Success(_) => complete(StatusCodes.OK,s"remove elements from BSet ${ops.name} success")
-                                case Failure(e) => complete(StatusCodes.InternalServerError,e.getMessage())
+                                case Failure(e) => 
+                                    val msg = e.getMessage()
+                                    log.error("delete elements to BSet {} failed: {}",ops.name,msg)
+                                    complete(StatusCodes.InternalServerError,msg)
                             }
                         }
                     }
                 )
             }
         )
+//
