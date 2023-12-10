@@ -47,6 +47,20 @@ import com.typesafe.scalalogging.Logger
 import org.slf4j.LoggerFactory
 import ch.qos.logback.classic.Level
 
+private val logo = """
+|                 ___                                 ___ __
+|                /  /                   ___          /  /  /
+|               /  /                   /  /         /  /  /
+|      ______  /  /     _______    __ /  /__  _____/  /  /___  
+|     /  ___ \/  /     /  ___  |  /__   ___/ /  ___  /  ___  \
+|    /  /__/ /  /____ |  /__/  /___ /  /___ /  /__/ /  /__/  |
+|   /  _____/\ ______/ \__________/ \_____/ \ _____/ \______/  
+|  /  /                                                             
+| /__/________________________________________________________/
+| paltdb is a simple key-value storage engine.
+|___________________________________________________________/
+"""
+
 /**
   * 
   *
@@ -164,9 +178,9 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
       * 
       */
     def run():Unit = 
+        println(logo)
         val db = DB.open(ops.path)(using ops.conf)
         log.info("open database at {} success",ops.path)
-        // TODO outpot logo
 
         val route =
             pathPrefix("v1"){
@@ -188,8 +202,8 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                 )
             }
         //
-        val bindingFuture = Http().newServerAt("localhost", 8080).bind(route)
-        log.info("server now online,please navigate to http://localhost:{}/v1",ops.port)
+        val bindingFuture = Http().newServerAt(ops.host, ops.port).bind(route)
+        log.info("server now online,please navigate to http://{}:{}/v1",ops.host,ops.port)
         //
         val waitOnFuture = Promise[Done].future 
         val shutdownHook = ShutdownHookThread{

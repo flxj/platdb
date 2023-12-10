@@ -1,17 +1,17 @@
 ## PlatDB
 
-PlatDB是一个面向磁盘存储的嵌入式key-value引擎,目标是提供一种简单易用，轻量级的数据持久化方案。它具有如下特点 
+PlatDB是一个面向磁盘的key-value存储引擎,目标是提供一种简单易用，轻量级的数据持久化方案。它具有如下特点 
 1)使用单一文件组织数据，便于迁移 
 2)支持ACID事务
 3)支持读写事务并发执行(mvcc,一写多读)
 3)支持多种常用数据结构(Map/Set/List/RTree) 
-4)server模式下支持http接口访问数据 （TODO）
+4)支持嵌入式的使用方式，也支持作为service独立部署并提供访问数据的http接口
 
 platdb实现参考了boltdb等项目，本人开发platdb的主要目的之一是学习数据库相关知识
 
-### 使用
+### 在你的项目中使用platdb
 
-在你的项目中导入platdb
+首先需要在你的项目中导入platdb包
 
 sbt
 ```scala
@@ -384,7 +384,7 @@ db.backup(path) match
 
 ```
 
-### http接口
+### 以service方式部署platdb
 
 当前支持将platdb作为一个serevr来运行，并通过http接口访问db数据. 
 
@@ -392,14 +392,16 @@ db.backup(path) match
 
 ```scala
 
+val ops = ServerOptions()
+val svc = Server(ops)
+svc.run()
 
 ```
 
-也可以直接运行platdb的jar包的方式运行platdb server
+也可以通过直接运行编译好的platdb jar包的方式运行platdb server
 ```shell
-
+java -jar platdb-serevr-0.12.0.jar "path/to/you/config/file"
 ```
-
 
 
 如下示例展示了如何通过http接口操作单个集合对象（每个请求在后端均以一个platdb事务来响应）
@@ -597,6 +599,11 @@ curl -H "Content-Type: application/json" -X POST -d '{"readonly": true,"operatio
 
 
 其它没有列出的api可参看swagger文档(TODO)
+
+
+### Docker
+
+
 
 
 // TODO main命令行参数/配置文件

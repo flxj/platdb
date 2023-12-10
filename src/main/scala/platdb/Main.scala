@@ -473,35 +473,11 @@ def openDBAndGetCollections(db:DB):Unit =
             case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
             case Success(value) => println("close success")
 
-import java.util.Date 
-import scala.concurrent.ExecutionContext
-implicit val ec:ExecutionContext = ExecutionContext.global
-
-def testTimeout(timeout:Int,success:Boolean):Future[Try[Int]] = Future {
-        val start = new Date()
-        var stop = false
-        var n:Try[Int] = Failure(new Exception("get int timeout"))
-        while !stop do
-            println(s"do something...")
-            Thread.sleep(1000)
-            if success then
-                n = Success(100000)
-                stop = true
-            else
-                val now = new Date()
-                if now.getTime() - start.getTime() > timeout then
-                    stop = true
-        n
-    }
-
-import com.typesafe.scalalogging.Logger
-import org.slf4j.LoggerFactory
-import ch.qos.logback.classic.Level
-
-import scala.concurrent.duration._
+implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
+import com.typesafe.config.ConfigFactory
 object PlatDB:
     @main def main(args: String*) =
-        val path:String =s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test"
+        //val path:String =s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test"
         //val path = "/tmp/db.test"
         //var db = new DB(path)
 
@@ -524,28 +500,53 @@ object PlatDB:
         //openListAndTravel(db,name)
         //openListAndWriteUpdate(db,name,10)
         //openListAndPend(db,name,false,10)
-
         //openDBAndGetCollections(db)
 
-        var server = Server(ServerOptions(path,defaultOptions,"",0,""))
+
+        // C:\\Users\\flxj_\\test\\platdb\\db.conf
+        //val confPath = s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.conf"
+
+        if args.length == 0 || args(0) == "" then
+            throw new Exception("not found config file path parameter")
+        
+        val confPath = args(0)
+
+        val config = ConfigFactory.parseFile(new File(confPath))
+        //
+        val dbPath = config.getString("database.path")
+        if dbPath.length == 0 then
+            throw new Exception("Illegal database.path parameter: data file cannot be empty")
+
+        var dbTimeout = config.getInt("database.timeout")
+        if dbTimeout < 0 then
+            throw new Exception(s"Illegal database.timeout parameter ${dbTimeout}: the timeout cannot be negative")
+        else if dbTimeout == 0 then
+            dbTimeout = DB.defaultTimeout
+
+        var dbBufSize = config.getInt("database.bufSize")
+        if dbBufSize < 0 then
+            throw new Exception(s"Illegal database.bufSize parameter ${dbBufSize}: the bufSize cannot be negative")
+        else if dbBufSize == 0 then
+            dbBufSize = DB.defaultBufSize
+        
+        var dbReadonly = config.getBoolean("database.readonly")
+        var dbFillPercent = config.getDouble("database.fillPercent")
+        if dbFillPercent < 0.0 || dbFillPercent > 1.0 then
+            throw new Exception(s"Illegal database.fillPercent parameter ${dbFillPercent}: the fillPercent cannot be negative or lager than 1.0")
+        else if dbFillPercent == 0.0 then
+            dbFillPercent = DB.defaultFillPercent
+        
+        var dbTmpDir = config.getString("database.tmpDir")
+        if dbTmpDir == "" then
+            dbTmpDir = System.getProperty("java.io.tmpdir")
+
+        val svcPort = config.getInt("service.port")
+        if svcPort <= 0 then
+            throw new Exception(s"Illegal service.port parameter ${svcPort}: the port cannot be negative")
+
+        val svcLogLeval = config.getString("service.logLevel")
+        val svcHost = "localhost"
+
+        val server = Server(ServerOptions(dbPath,Options(dbTimeout,dbBufSize,dbReadonly,dbFillPercent,dbTmpDir),svcHost,svcPort,svcLogLeval))
         //server.run()
-
-        /*
-        val res = testTimeout(2000,false)
-        val n = Await.result(res, 10.seconds)
-        n match
-            case Success(m) => println(s"get number $m")
-            case Failure(e) => println(s"get number failed ${e.getMessage()}")
-        */
-
-        /*
-        val logger = Logger(LoggerFactory.getLogger(getClass.getName))
-        logger.underlying.asInstanceOf[ch.qos.logback.classic.Logger].setLevel(Level.INFO)
-
-        logger.trace("This is a TRACE level log message")
-        logger.debug("This is a DEBUG level log message")
-        logger.info("This is an INFO level log message")
-        logger.warn("This is a WARN level log message")
-        logger.error("This is an ERROR level log message {} {}","AAA","BBB")
-        */
       

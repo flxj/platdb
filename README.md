@@ -1,6 +1,8 @@
 ## PlatDB
 
-PlatDB is an embedded key value engine for disk storage, with the goal of providing a simple, easy-to-use, and lightweight data persistence solution. It has the following characteristics：
+PlatDB is a disk oriented key value storage engine aimed at providing a simple, easy-to-use, lightweight data persistence solution.
+
+It has the following characteristics：
 
 1) Organize data using a single file for easy migration
 
@@ -10,9 +12,9 @@ PlatDB is an embedded key value engine for disk storage, with the goal of provid
 
 3) Supports multiple commonly used data structures (Map/Set/List/RTree)
 
-4) Support HTTP interface to access data in server mode (TODO)
+4) Supports both embedded usage and independent deployment as a service, providing an HTTP interface for accessing data.
 
-### Usage
+### Usage platdb in you project
 
 
 Import platdb into your project first
@@ -185,7 +187,7 @@ catch
         // process the error if need
    
 ```
-When manually managing a transaction, it is important to remember to manually close the transaction (explicitly calling the rollback/commit method). For more documentation on transaction methods, refer to [xxxxxx]
+When manually managing a transaction, it is important to remember to manually close the transaction (explicitly calling the rollback/commit method). 
 
 
 Additionally, it should be noted that the results of querying data objects in a transaction are only valid during the current transaction lifecycle, and will be garbage collected when the transaction is closed. Therefore, if you want to use the read content outside of a transaction, you need to copy it out in the transaction.
@@ -252,7 +254,7 @@ db.update(
     case Failure(e) => println(e.getMessage())
     case Success(_) => None  
 ```
-For more introduction to bucket methods, please refer to [xxxxxxxxxxx]
+For more introduction to the method of bucket, please refer to [TODO]
 
 The common operations of BSet are as follows
 ```scala
@@ -302,7 +304,7 @@ db.update(
     case Failure(e) => println(e.getMessage())
     case Success(_) => None  
 ```
-For more introduction to the method of set, please refer to [xxxxxxxxxxx]
+For more introduction to the method of set, please refer to [TODO]
 
 The common operations for KList are as follows
 ```scala
@@ -349,7 +351,7 @@ db.update(
     case Failure(e) => println(e.getMessage())
     case Success(_) => None 
 ```
-KList also supports other methods such as drop/dropRight, take/taskRight, find/filter, etc. For an introduction to these methods, please refer to the document [xxxxxxxxxxx]
+KList also supports other methods such as drop/dropRight, take/taskRight, find/filter, etc.For more introduction to the method of list, please refer to [TODO]
 
 
 The commonly used methods for Region are as follows
@@ -361,19 +363,19 @@ db.update(
     (tx:Transaction) =>
         given tx = tx
         
-        // 创建一个二维region
+        // create a region with dimension 2.
         val reg = createRegionIfNotExists("regionName"，2) 
 
-        // 添加空间对象
+        // add a spatial object to the region.
         val obj = SpatialObject(Rectange(Array[Double](10.2,10.5),Array[Double](17.8,19.3)),"key","data")
         reg+=(obj)
 
-        // 查询对象
+        // query objects.
         
 
-        // 删除对象
+        // delete objects
         
-        // 范围查询
+        // range query.
 ) match
     case Failure(e) => println(e.getMessage())
     case Success(_) => None 
@@ -382,7 +384,7 @@ Platdb uses Rectangle to describe the boundary of an object, with the min field 
 
 Platdb uses SpatialObject to represent a spatial object, the coord field to represent its boundaries, the key field to be a globally unique name, and the data field to be the data associated with the object (can be empty)
 
-For more introductions to other region methods, refer to the document [xxxxxxx]
+For more introduction to the method of region, please refer to [TODO]
 
 ### Backup
 
@@ -391,7 +393,7 @@ The backup of platdb is very simple, just call the backup method on a DB instanc
 import platdb._
 import platdb.defaultOptions
 
-// 打开一个DB实例
+// open a db instance
 
 val path = "/path/to/you/backup/file.db"
 db.backup(path) match
@@ -399,12 +401,235 @@ db.backup(path) match
     case Success(_) => // backup success
 ```
 
+### Deploying platdb as a service
+
+Currently, it supports running platdb as a serevr and accessing db data through an HTTP interface
+
+
+Users can import Platdb projects and run Platdb HTTP services by constructing a Server instance
+
+```scala
+val ops = ServerOptions()
+val svc = Server(ops)
+svc.run()
+
+```
+
+You can also run the platdb server by directly running the compiled platdb jar package
+```shell
+java -jar platdb-serevr-0.12.0.jar "path/to/you/config/file"
+```
+
+
+The following example shows how to operate a single collection object through an HTTP interface (each request responds with a platdb transaction in the backend)
+
+
+1. View the collection object names contained in the current db
+
+```shell
+curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/collections" | python -m json.tool
+```
+The returned data structure is as follows:
+```json
+{
+    "collections": [
+    {
+        "collectionType": "Bucket",
+        "name": "bucket2"
+    },
+    {
+        "collectionType": "BList",
+        "name": "list1"
+    }
+    ]
+}
+```
+
+2. Query the bucket object names in the current database
+
+```shell
+curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/buckets" | python -m json.tool
+```
+The returned data structure is as follows:
+```json
+{
+    "collections": [
+        {
+            "collectionType": "Bucket",
+            "name": "bucket2"
+        }
+    ]
+}
+```
+
+3. Create a bucekt
+```shell
+curl -H "Content-Type: application/json" -X POST -d '{"name": "bucket1", "ignoreExists":true}' "http://localhost:8080/v1/buckets"
+```
+
+4. Add elements to the bucket
+```shell
+curl -H "Content-Type: application/json" -X POST -d '{"name": "bucket1", "elems":[{"key":"key1","value":"aaa"},{"key":"key2","value":"aaa"},{"key":"key3","value":"ccc"}]}' "http://localhost:8080/v1/buckets/elements"
+```
+
+
+5. Query the elements in the bucket (currently only supports obtaining all elements), with the URL parameter name being the name of the bucket to be queried
+```shell
+curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/buckets/elements?name=bucket1" | python -m json.tool
+```
+The returned data structure is as follows:
+```json
+[
+    {
+        "key": "key1",
+        "value": "aaa"
+    },
+    {
+        "key": "key2",
+        "value": "aaa"
+    },
+    {
+        "key": "key3",
+        "value": "ccc"
+    }
+]
+```
+
+6. Delete elements from bucket
+```shell
+curl -H "Content-Type: application/json" -X DELETE -d '{"name":"bucket1","keys":["key1","key2"]}' "http://localhost:8080/v1/buckets/elements"
+```
+
+7. Delete bucket
+```shell
+curl -H "Content-Type: application/json" -X DELETE -d '{"name":"bucket1","ignoreNotExists":true}' "http://localhost:8080/v1/buckets"
+```
+
+8. Create a Blist
+```shell
+curl -H "Content-Type: application/json" -X POST -d '{"name": "list2", "ignoreExists":true}' "http://localhost:8080/v1/blists"
+```
+
+9. Add elements to the tail of the Blist
+```shell
+curl -H "Content-Type: application/json" -X POST -d '{"name": "list2","prepend":false, "elems":["elem1","elem2","elem3"]}' "http://localhost:8080/v1/blists/elements"
+```
+
+10. Add elements to the Blist header
+```shell
+curl -H "Content-Type: application/json" -X POST -d '{"name": "list2","prepend":true, "elems":["elem4","elem5","elem6"]}' "http://localhost:8080/v1/blists/elements"
+```
+
+
+11. Query the Blist element (currently only supports obtaining all elements), with the URL parameter name being the name of the Blist to be queried
+```shell
+curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/blists/elements?name=list2" | python -m json.tool
+```
+The returned data structure is as follows:
+```json
+[
+    {
+        "index": "0",
+        "value": "elem4"
+    },
+    {
+        "index": "1",
+        "value": "elem5"
+    },
+    {
+        "index": "2",
+        "value": "elem6"
+    },
+    {
+        "index": "3",
+        "value": "elem1"
+    },
+    {
+        "index": "4",
+        "value": "elem2"
+    },
+    {
+        "index": "5",
+        "value": "elem3"
+    }
+]
+```
+
+12. Update an element in the Blist
+```shell
+curl -H "Content-Type: application/json" -X PUT -d '{"name":"list2","index":5,"elem":"vvvvvvvv"}' "http://localhost:8080/v1/blists/elements"
+```
+
+13. Delete Blist element
+```shell
+curl -H "Content-Type: application/json" -X DELETE -d '{"name":"list2","index":2,"count":2}' "http://localhost:8080/v1/blists/elements"
+```
+
+14. Delete Blist
+```shell
+curl -H "Content-Type: application/json" -X DELETE -d '{"name":"list2","ignoreNotExists":true}' "http://localhost:8080/v1/blists"
+```
+
+
+The following example shows executing a transaction containing multiple operations through an HTTP interface
+
+
+1. Read only transactions
+
+
+Assuming that the user wants to read certain elements from a bucket and Blis in a transaction, the following sequence of operations can be defined
+```json
+{
+    "operations":[
+        {"collection":"bucket1","collectionOp":"","elementOp":"get","elems":[{"key":"key1"},{"key":"key2"}]},
+        {"collection":"list1","collectionOp":"","elementOp":"get","elems":[{"key":"0"},{"key":"1"}]}
+    ]
+}
+```
+
+The final request is:
+```shell
+curl -H "Content-Type: application/json" -X POST -d '{"readonly": true,"operations":[{"collection":"bucket1","collectionOp":"","elementOp":"get","elems":[{"key":"key1"},{"key":"key2"}]},{"collection":"list1","collectionOp":"","elementOp":"get","elems":[{"key":"0"},{"key":"1"}]}]}' "http://localhost:8080/v1/txns"
+```
+The structure of the execution result is as follows: Note that if executed successfully, each operation in the request generates a corresponding operation result entry
+```json
+{
+    "success":true,
+    "err":"",
+    "results":[
+        {"success":true,"err":"","data":[{"key":"key1","value":"value1"},{"key":"key2","value":"value2"}]},
+        {"success":true,"err":"","data":[{"key":"0","value":"elem1"},{"key":"1","value":"elem2"}]},
+    ]
+}
+```
+If the transaction execution fails, the success field in the returned JSON structure takes a value of false, the err field is the corresponding error message, and the results field is empty
+```json
+{
+    "success":false,
+    "err":"this is some error info",
+    "results":[]
+}
+```
+
+
+2. Read and write transactions
+
+
+
+
+
+Other APIs not listed can be found in the Swagger documentation (TODO)
+
+
+
+### Docker
+
+
+
 ### TODO
 
 1. Supplement some test cases
 
-2. Implement the Server mode, allowing access to platdb DB instances through the HTTP interface
+2. Implement some memory data structures
 
-3. Implement some memory data structures
-
-4. Implement a distributed version of platdb cluster
+3. Implement a distributed version of platdb cluster
