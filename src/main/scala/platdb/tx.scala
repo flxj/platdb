@@ -404,6 +404,10 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
     private def writeMeta():Unit  =
         var bk = db.blockBuffer.get(meta.size())
         bk.setid(meta.id)
+        meta.writeHeader(bk)
+        val bkdata = bk.header.getBytes()
+        val metadata = meta.getMetaBytes()
+        meta.checkSum = getCheckSum32(Array.concat(bkdata,metadata))
         meta.writeTo(bk)
         try
             db.blockBuffer.write(bk) match

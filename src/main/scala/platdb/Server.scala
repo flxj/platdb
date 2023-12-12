@@ -576,7 +576,40 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                 case CollectionType.Nothing => Failure(new Exception(s"collection ${op.collection} not exists"))
                 case _ => Failure(new Exception(s"not support such collection type in transaction:${tp}"))
         else
-            Success(TxOperationResult(false,"ignore",List[KVPair]()))
+            try
+                op.collectionOp match
+                    case "" | "get" => Success(TxOperationResult(false,"ignore",List[KVPair]()))
+                    case "create" => 
+                        for p <- op.elems if p.key!="" do
+                            p.value.toLowerCase() match
+                                case "bucket" => 
+                                    createBucketIfNotExists(p.key)
+                                    cols(p.key) = p.value
+                                case "blist" | "list" => 
+                                    createListIfNotExists(p.key)
+                                    cols(p.key) = p.value
+                                case "bset" | "set" => 
+                                    createSetIfNotExists(p.key) 
+                                    cols(p.key) = p.value
+                                case _ => throw new Exception(s"not support such collection type ${p.value} now")
+                        successResult
+                    case "delete" =>
+                        for p <- op.elems if p.key!="" do
+                            p.value.toLowerCase() match
+                                case "bucket" => 
+                                    deleteBucket(p.key)
+                                    cols.remove(p.key)
+                                case "blist" | "list" => 
+                                    deleteList(p.key)
+                                    cols.remove(p.key)
+                                case "bset" | "set" => 
+                                    deleteSet(p.key) 
+                                    cols.remove(p.key)
+                                case _ => throw new Exception(s"not support such collection type ${p.value} now")
+                        successResult
+                    case _ => Failure(new Exception(s"not support such collection operation in transaction:${op.collectionOp}"))
+            catch
+              case e:Exception => Failure(e)  
     /**
       * 
       *

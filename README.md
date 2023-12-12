@@ -615,6 +615,55 @@ If the transaction execution fails, the success field in the returned JSON struc
 2. Read and write transactions
 
 
+The request structure for read/write transactions is similar to that of read-only transactions, except that the readonly parameter needs to be set to false
+
+
+Assuming that the user wants to create a bucket, a list, and write some elements to it in a transaction, the following operation sequence can be defined
+
+```json
+{
+	"operations":[
+		{"collection":"","collectionOp":"create","elementOp":"","index":0,"count":0,"elems":[{"key":"bucket2","value":"bucket"}]},
+		{"collection":"","collectionOp":"create","elementOp":"","index":0,"count":0,"elems":[{"key":"list1","value":"list"}]},
+		{"collection":"bucket2","collectionOp":"","elementOp":"put","index":0,"count":0,"elems":[{"key":"key1","value":"11111"},{"key":"key2","value":"22222"}]},
+		{"collection":"list1","collectionOp":"","elementOp":"append","index":0,"count":0,"elems":[{"key":"","value":"aaaaa"},{"key":"","value":"bbbbb"}]},
+	]
+}
+```
+
+The final request is:
+```shell
+curl -H "Content-Type: application/json" -X POST -d '{"readonly": false,"operations":[{"collection":"","collectionOp":"create","elementOp":"","index":0,"count":0,"elems":[{"key":"bucket2","value":"bucket"}]},{"collection":"","collectionOp":"create","elementOp":"","index":0,"count":0,"elems":[{"key":"list1","value":"list"}]},{"collection":"bucket2","collectionOp":"","elementOp":"put","index":0,"count":0,"elems":[{"key":"key1","value":"11111"},{"key":"key2","value":"22222"}]},{"collection":"list1","collectionOp":"","elementOp":"append","index":0,"count":0,"elems":[{"key":"","value":"aaaaa"},{"key":"","value":"bbbbb"}]}]}'  "http://localhost:8080/v1/txns" | python -m json.tool
+```
+The structure of the execution result is as follows: Note that if executed successfully, each operation in the request generates a corresponding operation result entry
+```json
+{
+    "err": "",
+    "results": [
+        {
+            "data": [],
+            "err": "",
+            "success": true
+        },
+        {
+            "data": [],
+            "err": "",
+            "success": true
+        },
+        {
+            "data": [],
+            "err": "",
+            "success": true
+        },
+        {
+            "data": [],
+            "err": "",
+            "success": true
+        }
+    ],
+    "success": true
+}
+```
 
 
 

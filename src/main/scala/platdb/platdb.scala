@@ -270,10 +270,13 @@ class DB(val path:String)(using ops:Options):
       */
     private def loadMeta(id:Long):Meta =
         val data = fileManager.readAt(id,Meta.size)
+        val chk = getCheckSum32(data.take(Meta.size-Meta.checkSumSize))
         Meta(data) match
-            case None => throw new Exception(s"not found meta data from page ${id}")
-            case Some(m) => return m
-
+            case Failure(e) => throw new Exception(s"load meta data from page ${id} failed:${e.getMessage()}")
+            case Success(meta) => 
+                if chk != meta.checkSum then
+                    throw new Exception(s"metadata page ${id} has been damaged:checksum is ${chk},expect is ${meta.checkSum}")
+                meta
     /**
       * read freelist info from page.
       *

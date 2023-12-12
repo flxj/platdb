@@ -595,18 +595,57 @@ curl -H "Content-Type: application/json" -X POST -d '{"readonly": true,"operatio
 
 2.读写事务
 
+读写事务的请求结构个只读事务一样，只不过需要将readonly参数设为false
 
+假设用户想要在一个事务中创建一个bucket，创建一个list,并向其中写入一些元素，则可以定义如下的操作序列
+```json
+{
+	"operations":[
+		{"collection":"","collectionOp":"create","elementOp":"","index":0,"count":0,"elems":[{"key":"bucket2","value":"bucket"}]},
+		{"collection":"","collectionOp":"create","elementOp":"","index":0,"count":0,"elems":[{"key":"list1","value":"list"}]},
+		{"collection":"bucket2","collectionOp":"","elementOp":"put","index":0,"count":0,"elems":[{"key":"key1","value":"11111"},{"key":"key2","value":"22222"}]},
+		{"collection":"list1","collectionOp":"","elementOp":"append","index":0,"count":0,"elems":[{"key":"","value":"aaaaa"},{"key":"","value":"bbbbb"}]},
+	]
+}
+```
+
+最终于请求为：
+```shell
+curl -H "Content-Type: application/json" -X POST -d '{"readonly": false,"operations":[{"collection":"","collectionOp":"create","elementOp":"","index":0,"count":0,"elems":[{"key":"bucket2","value":"bucket"}]},{"collection":"","collectionOp":"create","elementOp":"","index":0,"count":0,"elems":[{"key":"list1","value":"list"}]},{"collection":"bucket2","collectionOp":"","elementOp":"put","index":0,"count":0,"elems":[{"key":"key1","value":"11111"},{"key":"key2","value":"22222"}]},{"collection":"list1","collectionOp":"","elementOp":"append","index":0,"count":0,"elems":[{"key":"","value":"aaaaa"},{"key":"","value":"bbbbb"}]}]}'  "http://localhost:8080/v1/txns" | python -m json.tool
+```
+执行结果的结构如下所示：注意到如果执行成功，则请求中的每条操作均对应生成一个操作结果条目
+```json
+{
+    "err": "",
+    "results": [
+        {
+            "data": [],
+            "err": "",
+            "success": true
+        },
+        {
+            "data": [],
+            "err": "",
+            "success": true
+        },
+        {
+            "data": [],
+            "err": "",
+            "success": true
+        },
+        {
+            "data": [],
+            "err": "",
+            "success": true
+        }
+    ],
+    "success": true
+}
+```
 
 
 其它没有列出的api可参看swagger文档(TODO)
 
 
 ### Docker
-
-
-
-
-// TODO main命令行参数/配置文件
-// TODO Dockerfile
-// TODO 生成一个logo
 
