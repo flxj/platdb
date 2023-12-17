@@ -1,9 +1,9 @@
 
 ![platdb](./platdb.png)
 
-## 😀 PlatDB
+## PlatDB 
 
-PlatDB is a disk oriented key value storage engine aimed at providing a simple, easy-to-use, lightweight data persistence solution.
+PlatDB is a disk oriented key value storage engine aimed at providing a simple, easy-to-use, lightweight data persistence solution. 📣
 
 It has the following characteristics：
 
@@ -22,9 +22,18 @@ The implementation of Platdb refers to projects such as [boltdb](https://github.
 
 Import platdb into your project first
 
-Sbt
+sbt
 ```scala
+libraryDependencies += "io.github.flxj" %% "platdb" % "0.12.0-SNAPSHOT"
+```
 
+maven
+```xml
+<dependency>
+  <groupId>io.github.flxj</groupId>
+  <artifactId>platdb_3</artifactId>
+  <version>0.12.0-SNAPSHOT</version>
+</dependency>
 ```
 
 Using platdb is very simple. You only need to provide a data file path, create a DB instance, and open it

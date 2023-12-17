@@ -16,7 +16,16 @@ platdb实现参考了boltdb等项目，本人开发platdb的主要目的之一�
 
 sbt
 ```scala
+libraryDependencies += "io.github.flxj" %% "platdb" % "0.12.0-SNAPSHOT"
+```
 
+maven
+```xml
+<dependency>
+  <groupId>io.github.flxj</groupId>
+  <artifactId>platdb_3</artifactId>
+  <version>0.12.0-SNAPSHOT</version>
+</dependency>
 ```
 
 使用platdb非常简单，你只需要提供一个数据文件路径，创建一个DB实例并打开它即可

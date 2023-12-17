@@ -1,6 +1,6 @@
 val scala3Version = "3.2.2"
 val projectName = "platdb"
-val projectVersion = "0.12.0"
+val projectVersion = "0.12.0-SNAPSHOT"
 
 lazy val root = project
   .in(file("."))
@@ -34,3 +34,42 @@ libraryDependencies ++=Seq(
       "ch.qos.logback" % "logback-classic" % "1.2.10",
       "com.typesafe" % "config" % "1.4.3"
 )
+
+ThisBuild / organization := "io.github.flxj"
+ThisBuild / organizationName := "platdb"
+ThisBuild / organizationHomepage := Some(url("https://github.com/flxj/platdb"))
+ThisBuild / versionScheme := Some("early-semver")
+
+name := projectName
+
+ThisBuild / scmInfo := Some(
+  ScmInfo(
+    url("https://github.com/flxj/platdb"),
+    "scm:git@github.com:flxj/platdb.git"
+
+  )
+)
+ThisBuild / developers := List(
+  Developer(
+    id = "flxj",
+    name = "flxj",
+    email = "your@email",
+    url = url("http://your.url")
+  )
+)
+
+ThisBuild / description := "paltdb is a simple key-value storage engine implement by scala."
+ThisBuild / licenses := List(
+  "Apache 2" -> new URL("http://www.apache.org/licenses/LICENSE-2.0.txt")
+)
+ThisBuild / homepage := Some(url("https://github.com/flxj/platdb"))
+
+// Remove all additional repository other than Maven Central from POM
+ThisBuild / pomIncludeRepository := { _ => false }
+ThisBuild / publishTo := {
+  // For accounts created after Feb 2021:
+  val nexus = "https://s01.oss.sonatype.org/"
+  if (isSnapshot.value) Some("snapshots" at nexus + "content/repositories/snapshots")
+  else Some("releases" at nexus + "service/local/staging/deploy/maven2")
+}
+ThisBuild / publishMavenStyle := true
