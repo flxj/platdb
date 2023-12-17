@@ -8,7 +8,7 @@ lazy val root = project
     name := projectName,
     version := projectVersion,
     scalaVersion := scala3Version,
-    assembly / assemblyJarName := s"${projectName}-server-${projectVersion}.jar",
+    assembly / assemblyJarName := s"${projectName}-${projectVersion}.jar",
 
     libraryDependencies += "org.scalameta" %% "munit" % "0.7.29" % Test
   )

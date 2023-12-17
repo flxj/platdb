@@ -8,7 +8,7 @@ import java.io.{File,PrintWriter}
 
 import platdb.defaultOptions
 
-val path:String = s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+val path:String = s"C:${File.separator}platdb${File.separator}db.test" 
 
 
 class DBSuit1 extends munit.FunSuite {
@@ -55,7 +55,7 @@ class DBSuit2 extends munit.FunSuite {
 
 class DBSuit3 extends munit.FunSuite {
     test("open db: file format is not platdb"){
-        val p:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}notdb.test" 
+        val p:String= s"C:${File.separator}platdb${File.separator}db.test"  
         var writer = new PrintWriter(new File(p))
         for i <- Range(1,100) do
             writer.println(i)

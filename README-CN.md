@@ -1,15 +1,16 @@
-## PlatDB
+## 😁 PlatDB
 
 PlatDB是一个面向磁盘的key-value存储引擎,目标是提供一种简单易用，轻量级的数据持久化方案。它具有如下特点 
-1)使用单一文件组织数据，便于迁移 
-2)支持ACID事务
-3)支持读写事务并发执行(mvcc,一写多读)
-3)支持多种常用数据结构(Map/Set/List/RTree) 
-4)支持嵌入式的使用方式，也支持作为service独立部署并提供访问数据的http接口
 
-platdb实现参考了boltdb等项目，本人开发platdb的主要目的之一是学习数据库相关知识
+- 使用单一文件组织数据，便于迁移 👌
+- 支持ACID事务👌
+- 支持读写事务并发执行(mvcc,一写多读)👌
+- 支持多种常用数据结构(Map/Set/List/RTree)👌
+- 支持嵌入式的使用方式，也支持作为service独立部署并提供访问数据的http接口👌
 
-### 在你的项目中使用platdb
+platdb实现参考了boltdb等项目，本人开发platdb的主要目的之一是学习数据库相关知识. ⚠️注意当前本项目尚未进行充分的测试，请不要在生产环境中使用！
+
+### 使用platdb 👉
 
 首先需要在你的项目中导入platdb包
 
@@ -39,7 +40,7 @@ db.close() match
 ```
 platdb允许同一时刻只有一个进程能够打开数据文件，因此其它尝试打开的进程或线程将一直阻塞或超时退出(超时时间可在Options中设置)。多个线程操作同一个DB实例是安全的。
 
-### 事务
+### 事务 👉
 
 所有针对platdb数据对象的操作都应该封装到事务上下文中进行，以确保db数据内容的一致性.
 当前platdb支持在DB实例上创建读或写事务，其中可读写事务允许更新数据对象状态，只读事务中只允许读取数据对象信息。
@@ -173,7 +174,7 @@ catch
 另外需要注意的是在事务中查询数据对象的结果仅在当前事务生命周期中有效，当事务关闭后会被垃圾回收。因此如果想要在事务之外使用读取到的内容，需要在事务中将其拷贝出来。
 
 
-### 数据结构
+### 数据结构 👉
 
 platdb支持一些常见的数据结构:
 
@@ -367,7 +368,7 @@ platdb使用SpatialObject表示一个空间对象，coord字段表示其边界�
 更多其它Region方法的介绍，参考文档 [xxxxxxx]
 
 
-### 备份
+### 备份 👉
 
 platdb的备份很简单，只需要对一个已经打开状态的DB实例，调用backup方法即可. 该方法会开启一个只读事务，复制一个一致的db视图到目标文件中，备份过程不会阻塞其它读/写事务。
 
@@ -384,7 +385,7 @@ db.backup(path) match
 
 ```
 
-### 以service方式部署platdb
+### 以service方式部署platdb 👉
 
 当前支持将platdb作为一个serevr来运行，并通过http接口访问db数据. 
 
@@ -406,7 +407,7 @@ java -jar platdb-serevr-0.12.0.jar "path/to/you/config/file"
 
 如下示例展示了如何通过http接口操作单个集合对象（每个请求在后端均以一个platdb事务来响应）
 
-1.查看当前db包含的集合对象名称
+⭐ 1.查看当前db包含的集合对象名称
 
 ```shell
 curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/collections" | python -m json.tool
@@ -427,7 +428,7 @@ curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/collec
 }
 ```
 
-2.查询当前db中的bucket对象名称
+⭐ 2.查询当前db中的bucket对象名称
 
 ```shell
 curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/buckets" | python -m json.tool
@@ -445,12 +446,12 @@ curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/bucket
 
 ```
 
-3.创建一个bucekt
+⭐ 3.创建一个bucekt
 ```shell
 curl -H "Content-Type: application/json" -X POST -d '{"name": "bucket1", "ignoreExists":true}' "http://localhost:8080/v1/buckets"
 ```
 
-4.向bucket中添加元素
+⭐ 4.向bucket中添加元素
 ```shell
 curl -H "Content-Type: application/json" -X POST -d '{"name": "bucket1", "elems":[{"key":"key1","value":"aaa"},{"key":"key2","value":"aaa"},{"key":"key3","value":"ccc"}]}' "http://localhost:8080/v1/buckets/elements"
 ```
@@ -478,33 +479,33 @@ curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/bucket
 ]
 ```
 
-6.删除bucket中的元素
+⭐ 6.删除bucket中的元素
 ```shell
 curl -H "Content-Type: application/json" -X DELETE -d '{"name":"bucket1","keys":["key1","key2"]}' "http://localhost:8080/v1/buckets/elements"
 ```
 
-7.删除bucket
+⭐ 7.删除bucket
 ```shell
 curl -H "Content-Type: application/json" -X DELETE -d '{"name":"bucket1","ignoreNotExists":true}' "http://localhost:8080/v1/buckets"
 ```
 
-8.创建一个Blist
+⭐ 8.创建一个Blist
 ```shell
 curl -H "Content-Type: application/json" -X POST -d '{"name": "list2", "ignoreExists":true}' "http://localhost:8080/v1/blists"
 ```
 
-9.向Blist尾部添加元素
+⭐ 9.向Blist尾部添加元素
 ```shell
 curl -H "Content-Type: application/json" -X POST -d '{"name": "list2","prepend":false, "elems":["elem1","elem2","elem3"]}' "http://localhost:8080/v1/blists/elements"
 ```
 
-10.向Blist头部添加元素
+⭐ 10.向Blist头部添加元素
 ```shell
 curl -H "Content-Type: application/json" -X POST -d '{"name": "list2","prepend":true, "elems":["elem4","elem5","elem6"]}' "http://localhost:8080/v1/blists/elements"
 ```
 
 
-11.查询Blist元素(当前仅支持获取所有元素), url参数name为要查询的blist名称
+⭐ 11.查询Blist元素(当前仅支持获取所有元素), url参数name为要查询的blist名称
 ```shell
 curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/blists/elements?name=list2" | python -m json.tool
 ```
@@ -538,17 +539,17 @@ curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/blists
 ]
 ```
 
-12.更新Blist某个元素
+⭐ 12.更新Blist某个元素
 ```shell
 curl -H "Content-Type: application/json" -X PUT -d '{"name":"list2","index":5,"elem":"vvvvvvvv"}' "http://localhost:8080/v1/blists/elements"
 ```
 
-13.删除Blist元素
+⭐ 13.删除Blist元素
 ```shell
 curl -H "Content-Type: application/json" -X DELETE -d '{"name":"list2","index":2,"count":2}' "http://localhost:8080/v1/blists/elements"
 ```
 
-14.删除Blist
+⭐ 14.删除Blist
 ```shell
 curl -H "Content-Type: application/json" -X DELETE -d '{"name":"list2","ignoreNotExists":true}' "http://localhost:8080/v1/blists"
 ```
@@ -647,5 +648,8 @@ curl -H "Content-Type: application/json" -X POST -d '{"readonly": false,"operati
 其它没有列出的api可参看swagger文档(TODO)
 
 
-### Docker
+### Docker 👉
 
+编辑一份配置文件platdb.conf，放到example目录下， sbt assembly构建项目，然后执行docker build构建镜像
+
+docker run --name xxxxx -p 8080:8080 -v /data:/var/lib/platdb image-name

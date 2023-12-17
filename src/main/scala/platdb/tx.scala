@@ -202,7 +202,6 @@ private[platdb] object Tx:
         tx.root.bkv = tx.meta.root.clone
         if !readonly then
             tx.meta.txid+=1
-        println(s"[debug] begin a tx ${tx.id}")
         tx
 
 /*
@@ -308,9 +307,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
         //
         if writable then
             db.freelist.rollback(id)
-            // TODO:
-            // Read free page list from freelist page.
-			// freelist.reload(db.meta.freelist))
+            // TODO: Rload free page list from freelist page.
         close()
         Success(true)
     
@@ -352,7 +349,6 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
         meta = null
         root = new BTreeBucket("",this)
         blocks.clear()
-        println(s"[debug] tx ${txid} closed")
 
     /**
       * write freelist to db file.

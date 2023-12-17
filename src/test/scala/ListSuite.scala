@@ -6,7 +6,7 @@ import platdb.defaultOptions
 import platdb.Collection._
 
 class ListSuit1 extends munit.FunSuite {
-    val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
     val name:String = "list1"
 
     test("open list and append elements"){
@@ -71,7 +71,7 @@ class ListSuit1 extends munit.FunSuite {
 }
 
 class ListSuit2 extends munit.FunSuite {
-    val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
     val name:String = "list1"
 
     test("open list and prepend elements"){
@@ -136,7 +136,7 @@ class ListSuit2 extends munit.FunSuite {
 }
 
 class ListSuit3 extends munit.FunSuite {
-    val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
     val name:String = "list1"
 
     test("open list and update 10 elements"){
@@ -212,7 +212,7 @@ class ListSuit3 extends munit.FunSuite {
 }
 
 class ListSuit4 extends munit.FunSuite {
-    val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
     val name:String = "list1"
 
     test("open list and remove elements"){
@@ -304,7 +304,7 @@ class ListSuit4 extends munit.FunSuite {
 }
 
 class ListSuit5 extends munit.FunSuite {
-    val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
     val name:String = "list1"
 
     test("open list and travel"){
@@ -347,7 +347,7 @@ class ListSuit5 extends munit.FunSuite {
 }
 
 class ListSuit6 extends munit.FunSuite {
-    val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
     val name:String = "list1"
     var count = 20
 

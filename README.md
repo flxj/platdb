@@ -1,30 +1,31 @@
-## PlatDB
+
+![platdb](./platdb.png)
+
+## 😀 PlatDB
 
 PlatDB is a disk oriented key value storage engine aimed at providing a simple, easy-to-use, lightweight data persistence solution.
 
 It has the following characteristics：
 
-1) Organize data using a single file for easy migration
+- ✅ Organize data using a single file for easy migration 👌
+- ✅ Support for ACID transactions 👌
+- ✅ Supports concurrent execution of read and write transactions (mvcc) 👌
+- ✅ Supports multiple commonly used data structures (Map/Set/List/RTree) 👌
+- ✅ Supports both embedded usage and independent deployment as a service, providing an HTTP interface for accessing data👌
 
-2) Support for ACID transactions
+The implementation of Platdb refers to projects such as [boltdb](https://github.com/boltdb/bolt), and one of my main purposes in developing Platdb is to learn database related knowledge.
 
-3) Supports concurrent execution of read and write transactions (mvcc)
+⚠️ Please note that this project has not been fully tested yet and should not be used in production environments❗️
 
-3) Supports multiple commonly used data structures (Map/Set/List/RTree)
-
-4) Supports both embedded usage and independent deployment as a service, providing an HTTP interface for accessing data.
-
-### Usage platdb in you project
+### 👇 Usage platdb
 
 
 Import platdb into your project first
-
 
 Sbt
 ```scala
 
 ```
-
 
 Using platdb is very simple. You only need to provide a data file path, create a DB instance, and open it
 
@@ -51,7 +52,7 @@ Platdb allows only one process to open a data file at the same time, so other pr
 
 It is safe for multiple threads to operate on the same DB instance.
 
-### Transaction
+### 👇 Transaction 
 
 
 All operations on platdb data objects should be encapsulated in the transaction context to ensure consistency of db data content.
@@ -192,7 +193,7 @@ When manually managing a transaction, it is important to remember to manually cl
 
 Additionally, it should be noted that the results of querying data objects in a transaction are only valid during the current transaction lifecycle, and will be garbage collected when the transaction is closed. Therefore, if you want to use the read content outside of a transaction, you need to copy it out in the transaction.
 
-### data structure
+### 👇 data structure 
 
 
 Platdb supports some common data structures:
@@ -386,7 +387,7 @@ Platdb uses SpatialObject to represent a spatial object, the coord field to repr
 
 For more introduction to the method of region, please refer to [TODO]
 
-### Backup
+### 👇 Backup
 
 The backup of platdb is very simple, just call the backup method on a DB instance that is already open This method will initiate a read-only transaction, copy a consistent db view to the target file, and the backup process will not block other read/write transactions.
 ```scala
@@ -401,7 +402,7 @@ db.backup(path) match
     case Success(_) => // backup success
 ```
 
-### Deploying platdb as a service
+### 👇 Deploying platdb as a service
 
 Currently, it supports running platdb as a serevr and accessing db data through an HTTP interface
 
@@ -424,7 +425,7 @@ java -jar platdb-serevr-0.12.0.jar "path/to/you/config/file"
 The following example shows how to operate a single collection object through an HTTP interface (each request responds with a platdb transaction in the backend)
 
 
-1. View the collection object names contained in the current db
+⭐ 1. View the collection object names contained in the current db
 
 ```shell
 curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/collections" | python -m json.tool
@@ -445,7 +446,7 @@ The returned data structure is as follows:
 }
 ```
 
-2. Query the bucket object names in the current database
+⭐ 2. Query the bucket object names in the current database
 
 ```shell
 curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/buckets" | python -m json.tool
@@ -462,18 +463,18 @@ The returned data structure is as follows:
 }
 ```
 
-3. Create a bucekt
+⭐ 3. Create a bucekt
 ```shell
 curl -H "Content-Type: application/json" -X POST -d '{"name": "bucket1", "ignoreExists":true}' "http://localhost:8080/v1/buckets"
 ```
 
-4. Add elements to the bucket
+⭐ 4. Add elements to the bucket
 ```shell
 curl -H "Content-Type: application/json" -X POST -d '{"name": "bucket1", "elems":[{"key":"key1","value":"aaa"},{"key":"key2","value":"aaa"},{"key":"key3","value":"ccc"}]}' "http://localhost:8080/v1/buckets/elements"
 ```
 
 
-5. Query the elements in the bucket (currently only supports obtaining all elements), with the URL parameter name being the name of the bucket to be queried
+⭐ 5. Query the elements in the bucket (currently only supports obtaining all elements), with the URL parameter name being the name of the bucket to be queried
 ```shell
 curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/buckets/elements?name=bucket1" | python -m json.tool
 ```
@@ -495,33 +496,33 @@ The returned data structure is as follows:
 ]
 ```
 
-6. Delete elements from bucket
+⭐ 6. Delete elements from bucket
 ```shell
 curl -H "Content-Type: application/json" -X DELETE -d '{"name":"bucket1","keys":["key1","key2"]}' "http://localhost:8080/v1/buckets/elements"
 ```
 
-7. Delete bucket
+⭐ 7. Delete bucket
 ```shell
 curl -H "Content-Type: application/json" -X DELETE -d '{"name":"bucket1","ignoreNotExists":true}' "http://localhost:8080/v1/buckets"
 ```
 
-8. Create a Blist
+⭐ 8. Create a Blist
 ```shell
 curl -H "Content-Type: application/json" -X POST -d '{"name": "list2", "ignoreExists":true}' "http://localhost:8080/v1/blists"
 ```
 
-9. Add elements to the tail of the Blist
+⭐ 9. Add elements to the tail of the Blist
 ```shell
 curl -H "Content-Type: application/json" -X POST -d '{"name": "list2","prepend":false, "elems":["elem1","elem2","elem3"]}' "http://localhost:8080/v1/blists/elements"
 ```
 
-10. Add elements to the Blist header
+⭐10. Add elements to the Blist header
 ```shell
 curl -H "Content-Type: application/json" -X POST -d '{"name": "list2","prepend":true, "elems":["elem4","elem5","elem6"]}' "http://localhost:8080/v1/blists/elements"
 ```
 
 
-11. Query the Blist element (currently only supports obtaining all elements), with the URL parameter name being the name of the Blist to be queried
+⭐ 11. Query the Blist element (currently only supports obtaining all elements), with the URL parameter name being the name of the Blist to be queried
 ```shell
 curl -H "Content-Type: application/json" -X GET "http://localhost:8080/v1/blists/elements?name=list2" | python -m json.tool
 ```
@@ -555,17 +556,17 @@ The returned data structure is as follows:
 ]
 ```
 
-12. Update an element in the Blist
+⭐ 12. Update an element in the Blist
 ```shell
 curl -H "Content-Type: application/json" -X PUT -d '{"name":"list2","index":5,"elem":"vvvvvvvv"}' "http://localhost:8080/v1/blists/elements"
 ```
 
-13. Delete Blist element
+⭐13. Delete Blist element
 ```shell
 curl -H "Content-Type: application/json" -X DELETE -d '{"name":"list2","index":2,"count":2}' "http://localhost:8080/v1/blists/elements"
 ```
 
-14. Delete Blist
+⭐14. Delete Blist
 ```shell
 curl -H "Content-Type: application/json" -X DELETE -d '{"name":"list2","ignoreNotExists":true}' "http://localhost:8080/v1/blists"
 ```
@@ -574,7 +575,7 @@ curl -H "Content-Type: application/json" -X DELETE -d '{"name":"list2","ignoreNo
 The following example shows executing a transaction containing multiple operations through an HTTP interface
 
 
-1. Read only transactions
+🌟 1. Read only transactions
 
 
 Assuming that the user wants to read certain elements from a bucket and Blis in a transaction, the following sequence of operations can be defined
@@ -612,7 +613,7 @@ If the transaction execution fails, the success field in the returned JSON struc
 ```
 
 
-2. Read and write transactions
+🌟 2. Read and write transactions
 
 
 The request structure for read/write transactions is similar to that of read-only transactions, except that the readonly parameter needs to be set to false
@@ -666,19 +667,23 @@ The structure of the execution result is as follows: Note that if executed succe
 ```
 
 
-
 Other APIs not listed can be found in the Swagger documentation (TODO)
 
 
+### 👇 Docker
 
-### Docker
+Edit a configuration file platdb. conf and place it in the example directory. 
 
+Build the project using `sbt assembly` and then execute `docker build` to build the image
 
+```shell
+docker run --name xxxxx -p 8080:8080 -v /data:/var/lib/platdb image-name
+```
 
-### TODO
+### 👇 TODO
 
-1. Supplement some test cases
+❎ Supplement some test cases
 
-2. Implement some memory data structures
+❎ Implement some memory data structures
 
-3. Implement a distributed version of platdb cluster
+❎ Implement a distributed version of platdb cluster

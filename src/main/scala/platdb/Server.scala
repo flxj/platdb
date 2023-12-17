@@ -48,13 +48,13 @@ import org.slf4j.LoggerFactory
 import ch.qos.logback.classic.Level
 
 private val logo = """
-|                 ___                                 ___ __
-|                /  /                   ___          /  /  /
-|               /  /                   /  /         /  /  /
-|      ______  /  /     _______    __ /  /__  _____/  /  /___  
-|     /  ___ \/  /     /  ___  |  /__   ___/ /  ___  /  ___  \
-|    /  /__/ /  /____ |  /__/  /___ /  /___ /  /__/ /  /__/  |
-|   /  _____/\ ______/ \__________/ \_____/ \ _____/ \______/  
+|                 ___                               ___ __
+|                /  /                 ___          /  /  /
+|               /  /                 /  /         /  /  /
+|      ______  /  /   _______    __ /  /__  _____/  /  /___  
+|     /  ___ \/  /   /  ___  |  /__   ___/ /  ___  /  ___  \
+|    /  /__/ /  /___|  /__/  /___ /  /___ /  /__/ /  /__/  |
+|   /  _____/\ ____/ \__________/ \_____/ \ _____/ \______/  
 |  /  /                                                             
 | /__/________________________________________________________/
 | paltdb is a simple key-value storage engine.
@@ -272,7 +272,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                 val t:Future[Try[Unit]] = Future {
                     try
                         log.debug("work start...")
-                        val path:String =s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}server.test"
+                        val path:String =s"C:${File.separator}platdb${File.separator}server.test"
                         // create a file
                         val f = new File(path)
                         if !f.exists() then

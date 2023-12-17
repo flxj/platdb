@@ -5,7 +5,7 @@ import platdb.defaultOptions
 import java.io.File
 
 class BucketSuit1 extends munit.FunSuite {
-    val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
     val bk1:String = "bk1"
 
     test("create bucket"){
@@ -40,7 +40,7 @@ class BucketSuit1 extends munit.FunSuite {
 }
 
 class BucketSuit2 extends munit.FunSuite {
-    val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
     val bk1:String = "bk1"
 
     test("create a bucket,but already exists"){
@@ -75,7 +75,7 @@ class BucketSuit2 extends munit.FunSuite {
 }
 
 class BucketSuit3 extends munit.FunSuite {
-    val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
     val bk1:String = "bk1"
 
     test("open a bucket"){
@@ -110,7 +110,7 @@ class BucketSuit3 extends munit.FunSuite {
 }
 
 class BucketSuit4 extends munit.FunSuite {
-    val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test"  
     val bk1:String = "bk1"
 
     test("delete a bucket"){
@@ -153,7 +153,7 @@ class BucketSuit4 extends munit.FunSuite {
 }
 
 class BucketSuit5 extends munit.FunSuite {
-    val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test"  
     val bk1:String = "bk1"
     val keys = List[String]("key1","svc","(kd7","009s","0dsa","fred","aaa","bbb")
     val elems = List[(String,String)](("key1","value1111111111"),("svc","qazxswedcvfrtgbn"),("(kd7","!@#$%^&*()_+"),("009s","[]';/.,"),("0dsa","1234567890"),("fred","d"),("aaa","bbb"),("bbb","gsdhggsdhgfsh"))
@@ -228,7 +228,7 @@ class BucketSuit5 extends munit.FunSuite {
 }
 
 class BucketSuit6 extends munit.FunSuite {
-    val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
     val bk1:String = "bk1"
 
     test("open a bucket and travel it"){
@@ -309,7 +309,7 @@ class BucketSuit6 extends munit.FunSuite {
 }
 
 class BucketSuit7 extends munit.FunSuite {
-    val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
     val bk1:String = "bk1"
     
     test("open a bucket and reverse travel it"){
@@ -347,7 +347,7 @@ class BucketSuit7 extends munit.FunSuite {
 }
 
 class BucketSuit8 extends munit.FunSuite {
-    val path:String= s"C:${File.separator}Users${File.separator}flxj_${File.separator}test${File.separator}platdb${File.separator}db.test" 
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
     val bk1:String = "bk1"
     val count:Int = 50
     

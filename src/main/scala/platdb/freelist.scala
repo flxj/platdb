@@ -201,8 +201,6 @@ private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
         for k <- i to j do
             idle++=unleashing(k).ids
             allocated.remove(unleashing(k).txid)
-            //for id <- unleashing(k).ids do
-            //   println(s"[debug] move txid ${unleashing(k).txid} pages [${id.start},${id.end}] to idle list")
         unleashing.remove(i,j-i+1)
         idle = reform(false)
 
@@ -235,7 +233,6 @@ private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
             var fc = FreeClaim(txid, new ArrayBuffer[FreeFragment]())
             fc.ids += FreeFragment(start,end,tail+1)
             unleashing += fc
-        //println(s"[debug] tx $txid try to free [$start,${start+tail}]")
 
     /**
       * Allocate contiguous space of size n*osPageSize and return the id of the first page, 
@@ -255,7 +252,6 @@ private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
                     break()
         )
         if idx < 0 then
-            //println(s"[debug] tx $txid try to allocate $n pages,but freelist not have")
             return idx
 
         var ff = idle(idx)
@@ -277,7 +273,6 @@ private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
                     throw new Exception(s"allocate repeatedly,tx $txid try to allocate [${fr.start},${fr.end}], but tx $txid already allocated [${f.start},${f.end}]")
         
         allocated(txid) += fr
-        //println(s"[debug] tx $txid allocated [${ff.start},${ff.start+n-1}] from freelist")
         ff.start 
 
     /**

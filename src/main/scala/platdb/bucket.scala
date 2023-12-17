@@ -668,7 +668,6 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         // split current node.
         for n <- splitNode(node,DB.pageSize) do 
             if n.id > 0 then 
-                //println(s"[debug] tx ${tx.id} free node ${n.id}")
                 tx.free(n.id)
                 n.header.pgid = 0
             
@@ -680,7 +679,6 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
             n.header.pgid = bk.id
             n.writeTo(bk)
             n.spilled = true
-            //println(s"[debug] tx ${tx.id} allocated node id $nid")
             // insert the new node info to its parent.
             n.parent match
                 case None => None
@@ -752,7 +750,6 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
      */
     private def freeNode(node:Node):Unit = 
         if node.id > DB.meta1Page then
-            //println(s"[debug] tx ${tx.id} freeNode ${node.id}")
             tx.free(node.id)
             node.header.pgid = 0
             nodes.remove(node.id)
