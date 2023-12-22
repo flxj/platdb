@@ -63,8 +63,11 @@ object PlatDB:
         if svcPort <= 0 then
             throw new Exception(s"Illegal service.port parameter ${svcPort}: the port cannot be negative")
 
+        var svcHost = config.getString("service.host")
+        if svcHost.length == 0 then
+            throw new Exception(s"Illegal service.host parameter ${svcHost}")
+        
         val svcLogLeval = config.getString("service.logLevel")
-        val svcHost = "localhost"
 
         val server = Server(ServerOptions(dbPath,Options(dbTimeout,dbBufSize,dbReadonly,dbFillPercent,dbTmpDir),svcHost,svcPort,svcLogLeval))
         server.run()

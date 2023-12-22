@@ -196,9 +196,8 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                     pathPrefix("bsets")(routeSet(db)),
                     pathPrefix("blists")(routeList(db)),
                     pathPrefix("txns")(routeTx(db)),
-
-                    pathPrefix("foo")(routeTest(db)),
-                    pathPrefix("bar")(routeTest2(db)),
+                    //pathPrefix("foo")(routeTest(db)),
+                    //pathPrefix("bar")(routeTest2(db)),
                 )
             }
         //
