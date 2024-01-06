@@ -1,6 +1,6 @@
 val scala3Version = "3.2.2"
 val projectName = "platdb"
-val projectVersion = "0.12.0-SNAPSHOT"
+val projectVersion = "0.12.0"
 
 lazy val root = project
   .in(file("."))
@@ -73,3 +73,6 @@ ThisBuild / publishTo := {
   else Some("releases" at nexus + "service/local/staging/deploy/maven2")
 }
 ThisBuild / publishMavenStyle := true
+ThisBuild / publishConfiguration := publishConfiguration.value.withOverwrite(true)
+ThisBuild / publishLocalConfiguration := publishLocalConfiguration.value.withOverwrite(true)
+//Compile / pushRemoteCacheConfiguration := pushRemoteCacheConfiguration.value.withOverwrite(true)

@@ -24,7 +24,7 @@ Import platdb into your project first
 
 sbt
 ```scala
-libraryDependencies += "io.github.flxj" %% "platdb" % "0.12.0-SNAPSHOT"
+libraryDependencies += "io.github.flxj" %% "platdb" % "0.12.0"
 ```
 
 maven
@@ -32,7 +32,7 @@ maven
 <dependency>
   <groupId>io.github.flxj</groupId>
   <artifactId>platdb_3</artifactId>
-  <version>0.12.0-SNAPSHOT</version>
+  <version>0.12.0</version>
 </dependency>
 ```
 
