@@ -239,6 +239,12 @@ class DB(val path:String)(using ops:Options):
 
             var bk = blockBuffer.get(DB.defaultPageSize)
             bk.setid(m.id)
+            //
+            m.writeHeader(bk)
+            val bkdata = bk.header.getBytes()
+            val metadata = m.getMetaBytes()
+            m.checkSum = getCheckSum32(Array.concat(bkdata,metadata))
+            //
             m.writeTo(bk)
             blockBuffer.write(bk) match
                 case Success(_) => None

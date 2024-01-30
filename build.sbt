@@ -1,6 +1,6 @@
 val scala3Version = "3.2.2"
 val projectName = "platdb"
-val projectVersion = "0.12.0"
+val projectVersion = "0.13.0"
 
 lazy val root = project
   .in(file("."))
@@ -54,7 +54,7 @@ ThisBuild / developers := List(
     id = "flxj",
     name = "flxj",
     email = "your@email",
-    url = url("http://your.url")
+    url = url("https://github.com/flxj")
   )
 )
 
