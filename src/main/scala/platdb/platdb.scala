@@ -391,7 +391,7 @@ class DB(val path:String)(using ops:Options):
                         case Failure(e) => throw e
                         case Success(bk) => value = bk(key)
                     tx.sysCommit = false
-                    tx.commit() match
+                    tx.rollback() match
                         case Success(_) => None
                         case Failure(e) => throw e
                     Success((key,value))
@@ -425,7 +425,7 @@ class DB(val path:String)(using ops:Options):
                                     case Failure(e) => throw e 
                                     case Success(value) => res :+= (key,value)
                     tx.sysCommit = false
-                    tx.commit() match
+                    tx.rollback() match
                         case Success(_) => None
                         case Failure(e) => throw e
                     Success(res)
