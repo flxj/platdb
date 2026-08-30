@@ -140,6 +140,8 @@ trait Bucket extends Iterable:
       */
     def update(key:String,value:String):Unit 
 
+    def clean():Unit = ??? //TODO delete all element
+
 
 // count is the number of keys in current bucket
 private[platdb] class BucketValue(var root:Long,var count:Long,var sequence:Long,val dataType:Byte):
