@@ -14,7 +14,7 @@ class ListSuit1 extends munit.FunSuite {
         var db = new DB(path)
         db.open() match
                 case Failure(exception) => throw exception
-                case Success(value) => println("open success")
+                case Success(value) => println("open db success")
         assertEquals(db.closed,false)
         assertEquals(db.readonly,false)
         
@@ -29,18 +29,10 @@ class ListSuit1 extends munit.FunSuite {
                     list:+= "value1"
                     list:+= "value2"
                     list:+= "value3"
-                    list.append("value4") match
-                        case Failure(exception) => throw exception
-                        case Success(_) => None
-                    list.append("value5") match
-                        case Failure(exception) => throw exception
-                        case Success(_) => None
-                    list.append(List[String]("value6","value7","value8","value9")) match
-                        case Failure(exception) => throw  exception
-                        case Success(_) => None
-                    list.append(List[String]("value10","value11","value12","value13")) match
-                        case Failure(exception) => throw  exception
-                        case Success(_) => None
+                    list.append("value4") 
+                    list.append("value5") 
+                    list.append(List[String]("value6","value7","value8","value9")) 
+                    list.append(List[String]("value10","value11","value12","value13")) 
             ) match
                 case Success(_) => println("append success")
                 case Failure(e) => throw e
@@ -54,8 +46,8 @@ class ListSuit1 extends munit.FunSuite {
                         throw new Exception(s"after append,we expect list length is ${len+13},but actual get ${list.length}")
                     else
                         list.last match
-                            case Failure(exception) => throw exception
-                            case Success(value) => 
+                            case None => None
+                            case Some(value) => 
                                 if value!="value13" then
                                     throw new Exception(s"after append,we expect last element is value13,but actual get ${value}")
             ) match
@@ -94,18 +86,10 @@ class ListSuit2 extends munit.FunSuite {
                     list+:= "value1"
                     list+:= "value2"
                     list+:= "value3"
-                    list.prepend("value4") match
-                        case Failure(exception) => throw exception
-                        case Success(_) => None
-                    list.prepend("value5") match
-                        case Failure(exception) => throw exception
-                        case Success(_) => None
-                    list.prepend(List[String]("value6","value7","value8","value9")) match
-                        case Failure(exception) => throw  exception
-                        case Success(_) => None
-                    list.prepend(List[String]("value10","value11","value12","value13")) match
-                        case Failure(exception) => throw  exception
-                        case Success(_) => None
+                    list.prepend("value4") 
+                    list.prepend("value5") 
+                    list.prepend(List[String]("value6","value7","value8","value9")) 
+                    list.prepend(List[String]("value10","value11","value12","value13")) 
             ) match
                 case Success(_) => println("prepend success")
                 case Failure(e) => throw e
@@ -119,8 +103,8 @@ class ListSuit2 extends munit.FunSuite {
                         throw new Exception(s"after prepend,we expect list length is ${len+13},but actual get ${list.length}")
                     else
                         list.head match
-                            case Failure(exception) => throw exception
-                            case Success(value) => 
+                            case None => None
+                            case Some(value) => 
                                 if value!="value10" then
                                     throw new Exception(s"after prepend,we expect first element is value10,but actual get ${value}")
             ) match
@@ -159,18 +143,10 @@ class ListSuit3 extends munit.FunSuite {
                     list:+= "value1"
                     list:+= "value2"
                     list:+= "value3"
-                    list.append("value4") match
-                        case Failure(exception) => throw exception
-                        case Success(_) => None
-                    list.append("value5") match
-                        case Failure(exception) => throw exception
-                        case Success(_) => None
-                    list.append(List[String]("value6","value7","value8")) match
-                        case Failure(exception) => throw exception
-                        case Success(_) => None
-                    list.append(List[String]("value10","value11")) match
-                        case Failure(exception) => throw  exception
-                        case Success(_) => None
+                    list.append("value4") 
+                    list.append("value5") 
+                    list.append(List[String]("value6","value7","value8")) 
+                    list.append(List[String]("value10","value11")) 
             ) match
                 case Success(_) => println("write success")
                 case Failure(e) => throw e
@@ -231,16 +207,14 @@ class ListSuit4 extends munit.FunSuite {
             db.update(
                 (tx:Transaction) =>
                     tx.openList(name) match
-                        case Failure(e) => throw e
-                        case Success(list) => 
+                        case None => throw new Exception("open list error")
+                        case Some(list) => 
                             len = list.length
                             println(s"init length is $len")
                             for i <- 0 until count do
                                 //val v = BigInt(500, scala.util.Random).toString(36)
                                 val v = (i*123).toString
-                                list.append(v) match
-                                    case Failure(e) => throw e
-                                    case Success(_) => None
+                                list.append(v)
                             lenA = list.length 
             ) match
                 case Success(_) => println(s"Append list $name success,after write list length is $lenA")
@@ -250,15 +224,13 @@ class ListSuit4 extends munit.FunSuite {
             db.update(
                 (tx:Transaction) =>
                     tx.openList(name) match
-                        case Failure(e) => throw e
-                        case Success(list) => 
+                        case None => throw new Exception("open list error")
+                        case Some(list) => 
                             if list.length != lenA then 
                                 throw new Exception(s"current length is ${list.length},but expect is $lenA")
                             for i <- 0 until count do
                                 val v = (i*1000).toString
-                                list.append(v) match
-                                    case Failure(e) => throw e
-                                    case Success(_) => None
+                                list.append(v)
                             lenB = list.length      
             ) match
                 case Success(_) => println(s"Append list $name success,after update list length is $lenB")
@@ -268,13 +240,11 @@ class ListSuit4 extends munit.FunSuite {
             db.update(
                 (tx:Transaction) =>
                     tx.openList(name) match
-                        case Failure(e) => throw e
-                        case Success(list) => 
+                        case None => throw new Exception("open list error")
+                        case Some(list) => 
                             if list.length != lenB then 
                                 throw new Exception(s"current length is ${list.length},but expect is $lenB")
-                            list.remove(len.toInt,count) match
-                                case Failure(e) => throw e
-                                case Success(_) => None    
+                            list.remove(len.toInt,count) 
                             lenC = list.length   
             ) match
                 case Success(_) => println(s"remove list $name success,after update list length is $lenC")
@@ -283,8 +253,8 @@ class ListSuit4 extends munit.FunSuite {
             db.view(
                 (tx:Transaction) =>
                     tx.openList(name) match
-                        case Failure(e) => throw e
-                        case Success(list) => 
+                        case None => throw new Exception("open list error")
+                        case Some(list) => 
                             if list.length != lenC then
                                 throw new Exception(s"current length is ${list.length},but expect is $lenC")
                             for i <- 0 until count do
@@ -319,18 +289,15 @@ class ListSuit5 extends munit.FunSuite {
         try
             db.view((tx:Transaction) => 
                 tx.openList(name) match
-                    case Failure(e) => throw e
-                    case Success(list) => 
+                    case None => throw new Exception("open list error")
+                    case Some(list) => 
                         println(s"open list ${list.name} success")
                         var count:Int = 0
                         var it = list.iterator
                         while it.hasNext() do
                             it.next() match
-                                case (None,_) => println(s"ITER None elements")
-                                case (Some(key),None) => 
-                                    count+=1
-                                    println(s"ITER key $key is a None")
-                                case (Some(key),Some(value)) => 
+                                case None => println(s"ITER None elements")
+                                case Some(key,value) => 
                                     count+=1
                                     println(s"ITER key: $key value:$value")
                         println(s"ITER count $count, list length is:${list.length}")
@@ -367,16 +334,14 @@ class ListSuit6 extends munit.FunSuite {
             db.update(
                 (tx:Transaction) =>
                     tx.openList(name) match
-                        case Failure(e) => throw e
-                        case Success(list) => 
+                        case None => throw new Exception("open list error")
+                        case Some(list) => 
                             len = list.length
                             println(s"init length is $len")
                             for i <- 0 until count do
                                 //val v = BigInt(500, scala.util.Random).toString(36)
                                 val v = (i*100).toString
-                                list.append(v) match
-                                    case Failure(e) => throw e
-                                    case Success(_) => None
+                                list.append(v) 
                             lenA = list.length 
             ) match
                 case Success(_) => println(s"Write list $name success,after write list length is $lenA")
@@ -386,8 +351,8 @@ class ListSuit6 extends munit.FunSuite {
             db.update(
                 (tx:Transaction) =>
                     tx.openList(name) match
-                        case Failure(e) => throw e
-                        case Success(list) => 
+                        case None => throw new Exception("open list error")
+                        case Some(list) => 
                             println(s"current length is ${list.length}")
                             for i <- 0 until count do
                                 val v = (i*1000).toString
@@ -400,8 +365,8 @@ class ListSuit6 extends munit.FunSuite {
             db.view(
                 (tx:Transaction) =>
                     tx.openList(name) match
-                        case Failure(e) => throw e
-                        case Success(list) => 
+                        case None => throw new Exception("open list error")
+                        case Some(list) => 
                             println(s"tx id is ${tx.id}")
                             println(s"current length is ${list.length}")
                             for i <- 0 until count do

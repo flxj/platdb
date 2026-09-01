@@ -57,110 +57,110 @@ trait Transaction:
       *
       * @return
       */
-    def commit():Try[Unit]
+    def commit():Unit
     /**
       * rollback transaction,if its already closed then return an exception message.
       *
       * @return
       */
-    def rollback():Try[Unit]
+    def rollback():Unit
     /**
       * return all collection objects in current db,format is (name,dataType).
       *
       * @return
       */
-    def allCollection():Try[Seq[(String,String)]]
+    def allCollection():Seq[(String,String)]
     /**
       * open a bucket,if not exists will return an exception message.
       *
       * @param name
       * @return
       */
-    def openBucket(name:String):Try[Bucket]
+    def openBucket(name:String):Option[Bucket]
     /**
       * create a new bucket,if already exists will return an exception message.
       *
       * @param name
       * @return
       */
-    def createBucket(name:String):Try[Bucket]
+    def createBucket(name:String):Option[Bucket]
     /**
       * create a bucket,if exists then return the bucket.
       *
       * @param name
       * @return
       */
-    def createBucketIfNotExists(name:String):Try[Bucket]
+    def createBucketIfNotExists(name:String):Option[Bucket]
     /**
       * delete a bucket,if bucket not exists will return an exception message.
       *
       * @param name
       * @return
       */
-    def deleteBucket(name:String):Try[Unit]
+    def deleteBucket(name:String):Unit
     /**
       * open a set,if not exists will return an exception message.
       *
       * @param name
       * @return
       */
-    def openBSet(name:String):Try[BSet]
+    def openBSet(name:String):Option[BSet]
     /**
       * create a new set,if already exists will return an exception message.
       *
       * @param name
       * @return
       */
-    def createBSet(name:String):Try[BSet]
+    def createBSet(name:String):Option[BSet]
     /**
       * create a set,if exists then return the set.
       *
       * @param name
       * @return
       */
-    def createBSetIfNotExists(name:String):Try[BSet]
+    def createBSetIfNotExists(name:String):Option[BSet]
     /**
       * delete a bucket,if bucket not exists will return an exception message.
       *
       * @param name
       * @return
       */
-    def deleteBSet(name:String):Try[Unit]
+    def deleteBSet(name:String):Unit
     /**
       * open a list,if not exists will return an exception message.
       *
       * @param name
       * @return
       */
-    def openList(name:String):Try[BList]
+    def openList(name:String):Option[BList]
     /**
       * create a new list,if already exists will return an exception message.
       *
       * @param name
       * @return
       */
-    def createList(name:String):Try[BList]
+    def createList(name:String):Option[BList]
     /**
       * create a list,if exists then return the list.
       *
       * @param name
       * @return
       */
-    def createListIfNotExists(name:String):Try[BList]
+    def createListIfNotExists(name:String):Option[BList]
     /**
       * delete a list,if bucket not exists will return an exception message.
       *
       * @param name
       * @return
       */
-    def deleteList(name:String):Try[Unit]
+    def deleteList(name:String):Unit
     /**
       * open a region,if not exists will return an exception message.
       *
       * @param name
       * @return
       */
-    def openRegion(name:String):Try[Region]
+    def openRegion(name:String):Option[Region]
     /**
       * create a region with a specified dimension, and return an exception message if the object already exists.
       *
@@ -168,7 +168,7 @@ trait Transaction:
       * @param dimension
       * @return
       */
-    def createRegion(name:String,dimension:Int):Try[Region]
+    def createRegion(name:String,dimension:Int):Option[Region]
     /**
       * create a region,if exists then return the region.
       *
@@ -176,21 +176,21 @@ trait Transaction:
       * @param dimension
       * @return
       */
-    def createRegionIfNotExists(name:String,dimension:Int):Try[Region]
+    def createRegionIfNotExists(name:String,dimension:Int):Option[Region]
     /**
       * delete a regison,if not exists will return an exception message.
       *
       * @param name
       * @return
       */
-    def deleteRegion(name:String):Try[Unit]
+    def deleteRegion(name:String):Unit
     /**
       * backup the database file in current transaction view to a file.
       *
       * @param path
       * @return
       */
-    def copyToFile(path:String):Try[Long] 
+    def copyToFile(path:String):Long
 
 
 private[platdb] object Tx:
@@ -247,23 +247,23 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
     //
     def rootBucket():Option[Bucket] = Some(root)
     // open and return a bucket
-    def openBucket(name:String):Try[Bucket] = root.getBucket(name)
+    def openBucket(name:String):Option[Bucket] = root.getBucket(name)
     // craete a bucket
-    def createBucket(name:String):Try[Bucket] = root.createBucket(name)
+    def createBucket(name:String):Option[Bucket] = root.createBucket(name)
     // 
-    def createBucketIfNotExists(name:String):Try[Bucket] = root.createBucketIfNotExists(name)
+    def createBucketIfNotExists(name:String):Option[Bucket] = root.createBucketIfNotExists(name)
     // delete bucket
-    def deleteBucket(name:String):Try[Unit] = root.deleteBucket(name)
+    def deleteBucket(name:String):Unit = root.deleteBucket(name)
     // commit current transaction
-    def commit():Try[Unit] = 
+    def commit():Unit = 
         if closed then
-            return Failure(DB.exceptionTxClosed)
+            throw DB.exTxClosed
         else if db.closed then
-            return Failure(DB.exceptionDBClosed)
+            throw DB.exDBClosed
         else if sysCommit then
-            return Failure(DB.exceptionNotAllowCommitSysTx)
+            throw DB.exNotAllowCommitSysTx
         else if !writable then
-            return Failure(DB.exceptionNotAllowCommitRTx)
+            throw DB.exNotAllowCommitRTx
         
         try 
             // merge bucket nodes first
@@ -271,10 +271,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
             // spill buckets to dirty blocks
             root.split()
         catch
-            case e:Exception =>
-                rollback() match
-                    case _ => None
-                return Failure(e)
+            case e:Exception => return rollback()
         
         // updata meta info
         meta.root = root.bkv
@@ -287,46 +284,40 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
             writeBlock()
             writeMeta() 
         catch
-            case e:Exception => 
-                rollbackTx() match
-                    case _ => None
-                return Failure(e)
+            case e:Exception => return rollbackTx()
         close()
-        Success(None)
     
     /**
       * rollback current tx during commit process.
       *
       * @return
       */
-    private[platdb] def rollbackTx():Try[Boolean] = 
+    private[platdb] def rollbackTx(): Boolean = 
         if closed then 
-            return Failure(DB.exceptionTxClosed)
+            return true 
         else if db.closed then
-            return Failure(DB.exceptionDBClosed)
+            throw DB.exDBClosed
         //
         if writable then
             db.freelist.rollback(id)
             // TODO: Rload free page list from freelist page.
         close()
-        Success(true)
-    
+        true
     /**
       * user call rollback directly，because not write any change to db file, so we do nothing except rollback freelist.
       *
       * @return
       */
-    def rollback():Try[Unit] =
+    def rollback():Unit =
         if closed then
-            return Failure(DB.exceptionTxClosed)
+            throw DB.exTxClosed
         else if db.closed then
-            return Failure(DB.exceptionDBClosed)
+            throw DB.exDBClosed
         else if sysCommit then
-            return Failure(DB.exceptionNotAllowRollbackSysTx)
+            throw DB.exNotAllowRollbackSysTx
         if writable then
             db.freelist.rollback(id)
         close()
-        Success(None)
 
     /**
       * close current tx: release all object references about the tx 
@@ -483,11 +474,11 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
       * @param path
       * @return
       */
-    def copyToFile(path:String):Try[Long] = 
+    def copyToFile(path:String):Long = 
         if closed then 
-            return Failure(DB.exceptionTxClosed)
+            throw DB.exTxClosed
         else if db.closed then
-            return Failure(DB.exceptionDBClosed)
+            throw DB.exDBClosed
         var writer:RandomAccessFile = null
         try
             var f = new File(path)
@@ -516,10 +507,10 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
             // 2. copy data page
             val off = 2*DB.pageSize
             db.fileManager.copyToFile(f,off,size-off,off) match
-                case Failure(e) => Failure(e)
-                case Success(n) => Success(n+off)
+                case Failure(e) => throw e
+                case Success(n) => n+off
         catch
-            case e:Exception => Failure(e)
+            case e:Exception => throw e
         finally
             if writer != null then 
                 writer.close()
@@ -528,24 +519,24 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
       *
       * @return
       */
-    def allCollection(): Try[Seq[(String, String)]] = root.allCollection()
+    def allCollection(): Seq[(String, String)] = root.allCollection()
     // BSet methods
-    def openBSet(name:String):Try[BSet] = root.getBSet(name)
-    def createBSet(name:String):Try[BSet] = root.createBSet(name)
-    def createBSetIfNotExists(name:String):Try[BSet] = root.createBSetIfNotExists(name)
-    def deleteBSet(name:String):Try[Unit] = root.deleteBSet(name)
+    def openBSet(name:String):Option[BSet] = root.getBSet(name)
+    def createBSet(name:String):Option[BSet] = root.createBSet(name)
+    def createBSetIfNotExists(name:String):Option[BSet] = root.createBSetIfNotExists(name)
+    def deleteBSet(name:String):Unit = root.deleteBSet(name)
 
     // BList methods.
-    def openList(name:String):Try[BList] = root.getList(name,!writable)
-    def createList(name:String):Try[BList] = root.createList(name)
-    def createListIfNotExists(name:String):Try[BList] = root.createListIfNotExists(name)
-    def deleteList(name:String):Try[Unit] = root.deleteList(name)
+    def openList(name:String):Option[BList] = root.getList(name,!writable)
+    def createList(name:String):Option[BList] = root.createList(name)
+    def createListIfNotExists(name:String):Option[BList] = root.createListIfNotExists(name)
+    def deleteList(name:String):Unit = root.deleteList(name)
     
     // Region
-    def openRegion(name:String):Try[Region] = root.getRegion(name)
+    def openRegion(name:String):Option[Region] = root.getRegion(name)
     //
-    def createRegion(name:String,dimension:Int):Try[Region] = root.createRegion(name,dimension)
+    def createRegion(name:String,dimension:Int):Option[Region] = root.createRegion(name,dimension)
     //
-    def createRegionIfNotExists(name:String,dimension:Int):Try[Region] = root.createRegionIfNotExists(name,dimension)
+    def createRegionIfNotExists(name:String,dimension:Int):Option[Region] = root.createRegionIfNotExists(name,dimension)
     //
-    def deleteRegion(name:String):Try[Unit] = root.deleteRegion(name)
+    def deleteRegion(name:String):Unit = root.deleteRegion(name)

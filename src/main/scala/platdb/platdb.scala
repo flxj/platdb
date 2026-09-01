@@ -27,6 +27,7 @@ import scala.util.{Try,Failure,Success}
 import java.util.concurrent.locks.ReentrantLock
 import java.util.concurrent.TimeUnit
 import scala.concurrent.Future
+import java.nio.charset.StandardCharsets
 
 /**
   * 
@@ -63,56 +64,54 @@ object DB:
     //
     val minEntries = 32
     //
-    val collectionTypeBucket = "Bucket"
-    val collectionTypeBSet = "BSet"
-    val collectionTypeBList = "BList"
-    val collectionTypeRegion = "Region"
+    val typeBucket = "Bucket"
+    val typeBSet = "BSet"
+    val typeBList = "BList"
+    val typeRegion = "Region"
     private[platdb] var pageSize = defaultPageSize
     private[platdb] var fillPercent = defaultFillPercent
     private[platdb] val meta0Page = 0
     private[platdb] val meta1Page = 1
+    private[platdb] val magicStr = "(2^32582657-1)=12457502601536..."
     //
-    val exceptionTxClosed = new Exception("transaction is closed")
-    val exceptionNotAllowOp = new Exception("readonly transaction not allow current operation")
-    val exceptionKeyIsNull = new Exception("param key is null")
-    val exceptionKeyTooLarge = new Exception(s"key is too large,limit $maxKeySize")
-    val exceptionValueTooLarge = new Exception(s"value is too large,limit $maxValueSize")
-    val exceptionValueNotFound = new Exception("value not found")
-    val exceptionDBClosed = new Exception("db is closed")
-    val exceptionNotAllowRWTx = new Exception("readonly mode,cannot create read write transaction")
-    val exceptionNotAllowCommitSysTx = new Exception("not allow to commit system transaction manually")
-    val exceptionNotAllowRollbackSysTx = new Exception("not allow to rollback system transaction manually")
-    val exceptionNotAllowCommitRTx = new Exception("cannot commit read-only tx")
-    val exceptionListIsEmpty = new Exception("the list is empty")
-    val exceptOpenTxTimeout = new Exception("open transaction timeout")
+    val exTxClosed = new Exception("transaction is closed")
+    val exNotAllowOp = new Exception("readonly transaction not allow current operation")
+    val exKeyIsNull = new Exception("param key is null")
+    val exKeyTooLarge = new Exception(s"key is too large,limit $maxKeySize")
+    val exValueTooLarge = new Exception(s"value is too large,limit $maxValueSize")
+    val exValueNotFound = new Exception("value not found")
+    val exDBClosed = new Exception("db is closed")
+    val exNotAllowRWTx = new Exception("readonly mode,cannot create read write transaction")
+    val exNotAllowCommitSysTx = new Exception("not allow to commit system transaction manually")
+    val exNotAllowRollbackSysTx = new Exception("not allow to rollback system transaction manually")
+    val exNotAllowCommitRTx = new Exception("cannot commit read-only tx")
+    val exListIsEmpty = new Exception("the list is empty")
+    val exOpenTxTimeout = new Exception("open transaction timeout")
+    //
+    def isCollection(v:String):Boolean = v == magicStr
     //
     def isNotExists(e:Throwable):Boolean = 
-        if e != null then
-            e match
-                case ex:Exception =>
-                    val msg = ex.getMessage()
-                    msg.startsWith("not found") || msg.startsWith("not exists")
-                case er:Error => 
-                    val msg = er.getMessage()
-                    msg.startsWith("not found") || msg.startsWith("not exists")
-                case _ => false
-        else
-            false
+        e match
+            case null => false
+            case ex:Exception =>
+                val msg = ex.getMessage()
+                msg.startsWith("not found") || msg.startsWith("not exists")
+            case er:Error => 
+                val msg = er.getMessage()
+                msg.startsWith("not found") || msg.startsWith("not exists")
+            case _ => false
     //
-    def isAlreadyExists(e:Throwable):Boolean = 
-        if e!=null then
-            e match
-                case ex:Exception =>
-                  val msg = e.getMessage()
-                  msg.startsWith("already exists")
-                case er:Error =>
-                    val msg = e.getMessage()
-                    msg.startsWith("already exists")
-                case _ => false
-        else 
-            false
-    //
-    def open(path:String)(using Options):DB =
+    def isAlreadyExists(e:Throwable):Boolean = e match
+        case null => false
+        case ex:Exception =>
+            val msg = e.getMessage()
+            msg.startsWith("already exists")
+        case er:Error =>
+            val msg = e.getMessage()
+            msg.startsWith("already exists")
+        case _ => false
+    
+    def apply(path:String)(using Options):DB =
         val db = new DB(path)
         db.open() match
             case Failure(e) => throw e
@@ -146,6 +145,8 @@ class DB(val path:String)(using ops:Options):
     // Used to protect meta information.
     private var metaLock:ReentrantLock = new ReentrantLock()
     private var openFlag:Boolean = false
+
+    def charset:String = StandardCharsets.UTF_8.toString()
 
     def name:String = path
     /**
@@ -348,7 +349,7 @@ class DB(val path:String)(using ops:Options):
             beginRTx()
         else
             if ops.readonly then
-                Failure(DB.exceptionNotAllowRWTx)
+                Failure(DB.exNotAllowRWTx)
             else
                 var locked = false
                 try 
@@ -356,15 +357,15 @@ class DB(val path:String)(using ops:Options):
                         if metaLock.tryLock() || metaLock.tryLock(timeout,TimeUnit.MILLISECONDS) then
                             locked = true
                             if closed then
-                                throw DB.exceptionDBClosed
+                                throw DB.exDBClosed
                             val tx = Tx(false,this)
                             rwTx = Some(tx)
                             free()
                             Success(tx)
                         else
-                            Failure(DB.exceptOpenTxTimeout)
+                            Failure(DB.exOpenTxTimeout)
                     else
-                        Failure(DB.exceptOpenTxTimeout)
+                        Failure(DB.exOpenTxTimeout)
                 catch
                     case e:Exception => Failure(e)
                 finally
@@ -388,17 +389,15 @@ class DB(val path:String)(using ops:Options):
                 try 
                     tx.sysCommit = true
                     tx.openBucket(bucket) match
-                        case Failure(e) => throw e
-                        case Success(bk) => value = bk(key)
+                        case None => throw new Exception(s"bucket ${bucket} not exists")
+                        case Some(bk) => value = bk(key)
                     tx.sysCommit = false
-                    tx.rollback() match
-                        case Success(_) => None
-                        case Failure(e) => throw e
+                    tx.rollback()
                     Success((key,value))
                 catch
                     case e:Exception =>
-                        tx.rollback() match
-                            case _ => None
+                        tx.sysCommit = false
+                        tx.rollback()
                         Failure(e)
                 finally
                     tx.rollbackTx()
@@ -418,21 +417,19 @@ class DB(val path:String)(using ops:Options):
                 try 
                     tx.sysCommit = true
                     tx.openBucket(bucket) match
-                        case Failure(e) => throw e
-                        case Success(bk) =>
+                        case None => throw new Exception(s"bucket ${bucket} not exists")
+                        case Some(bk) =>
                             for key <- keys do
                                 bk.get(key) match
-                                    case Failure(e) => throw e 
-                                    case Success(value) => res :+= (key,value)
+                                    case None => throw new Exception(s"key ${key} not exists")
+                                    case Some(value) => res :+= (key,value)
                     tx.sysCommit = false
-                    tx.rollback() match
-                        case Success(_) => None
-                        case Failure(e) => throw e
+                    tx.rollback()
                     Success(res)
                 catch
                     case e:Exception =>
-                        tx.rollback() match
-                            case _ => None
+                        tx.sysCommit = false
+                        tx.rollback()
                         Failure(e)
                 finally
                     tx.rollbackTx()
@@ -452,14 +449,15 @@ class DB(val path:String)(using ops:Options):
                 try 
                     tx.sysCommit = true
                     tx.openBucket(bucket) match
-                        case Failure(e) => throw e
-                        case Success(bk) => bk+=(key,value)
+                        case None => throw new Exception(s"bucket ${bucket} not exists")
+                        case Some(bk) => bk+=(key,value)
                     tx.sysCommit = false
                     tx.commit()
+                    Success(None)
                 catch
                     case e:Exception =>
-                        tx.rollback() match
-                            case _ => None
+                        tx.sysCommit = false
+                        tx.rollback()
                         Failure(e)
                 finally
                     tx.rollbackTx()
@@ -478,14 +476,15 @@ class DB(val path:String)(using ops:Options):
                 try 
                     tx.sysCommit = true
                     tx.openBucket(bucket) match
-                        case Failure(e) => throw e
-                        case Success(bk) => bk+=(elems)
+                        case None => throw new Exception(s"bucket ${bucket} not exists")
+                        case Some(bk) => bk+=(elems)
                     tx.sysCommit = false
                     tx.commit()
+                    Success(None)
                 catch
                     case e:Exception =>
-                        tx.rollback() match
-                            case _ => None
+                        tx.sysCommit = false
+                        tx.rollback() 
                         Failure(e)
                 finally
                     tx.rollbackTx()
@@ -504,21 +503,18 @@ class DB(val path:String)(using ops:Options):
                 try 
                     tx.sysCommit = true
                     tx.openBucket(bucket) match
-                        case Failure(e) => throw e
-                        case Success(bk) => 
-                            for k <- keys do
-                                bk.delete(k) match
-                                    case Success(_) => None
-                                    case Failure(e) => 
-                                        if !(ignoreNotExists && DB.isNotExists(e)) then
-                                            throw e 
+                        case None => throw new Exception(s"bucket ${bucket} not exists")
+                        case Some(bk) => for k <- keys do bk.delete(k) 
                     tx.sysCommit = false
                     tx.commit()
+                    Success(None)
                 catch
                     case e:Exception =>
-                        tx.rollback() match
-                            case _ => None
-                        Failure(e)
+                        tx.sysCommit = false
+                        tx.rollback()
+                        if !(ignoreNotExists && DB.isNotExists(e)) then
+                            return Failure(e)
+                        Success(None)
                 finally
                     tx.rollbackTx()
     /**
@@ -530,12 +526,9 @@ class DB(val path:String)(using ops:Options):
         var s = List[(String,String)]()
         view(
             (tx:Transaction) =>
-                tx.allCollection() match
-                    case Failure(exception) => throw exception
-                    case Success(cls) => 
-                        for (name,tp) <- cls do
-                            if tp == collectionType || collectionType == "" then
-                                s:+=(name,tp)
+                for (name,tp) <- tx.allCollection() do 
+                    if tp == collectionType || collectionType == "" then
+                        s:+=(name,tp)
         ) match
             case Failure(e) => Failure(e)
             case Success(_) => Success(s)
@@ -552,10 +545,10 @@ class DB(val path:String)(using ops:Options):
         update(
             (tx:Transaction) =>
                 val res = collectionType match
-                    case DB.collectionTypeBucket => if !ignoreExists then tx.createBucket(name) else tx.createBucketIfNotExists(name)
-                    case DB.collectionTypeBSet => if !ignoreExists then tx.createBSet(name) else tx.createBSetIfNotExists(name)
-                    case DB.collectionTypeBList => if !ignoreExists then tx.createList(name) else tx.createListIfNotExists(name)
-                    case DB.collectionTypeRegion => if !ignoreExists then tx.createRegion(name,dimension) else tx.createRegionIfNotExists(name,dimension)
+                    case DB.typeBucket => if !ignoreExists then tx.createBucket(name) else tx.createBucketIfNotExists(name)
+                    case DB.typeBSet => if !ignoreExists then tx.createBSet(name) else tx.createBSetIfNotExists(name)
+                    case DB.typeBList => if !ignoreExists then tx.createList(name) else tx.createListIfNotExists(name)
+                    case DB.typeRegion => if !ignoreExists then tx.createRegion(name,dimension) else tx.createRegionIfNotExists(name,dimension)
                     case _ => Failure(new Exception(s"unknown collection type $collectionType"))
                 res match
                     case Failure(exception) => throw exception
@@ -573,10 +566,10 @@ class DB(val path:String)(using ops:Options):
         update(
             (tx:Transaction) =>
                 val res = collectionType match
-                    case DB.collectionTypeBucket => tx.deleteBucket(name) 
-                    case DB.collectionTypeBSet => tx.deleteBSet(name) 
-                    case DB.collectionTypeBList => tx.deleteList(name) 
-                    case DB.collectionTypeRegion => tx.deleteRegion(name)
+                    case DB.typeBucket => tx.deleteBucket(name) 
+                    case DB.typeBSet => tx.deleteBSet(name) 
+                    case DB.typeBList => tx.deleteList(name) 
+                    case DB.typeRegion => tx.deleteRegion(name)
                     case _ => Failure(new Exception(s"unknown collection type $collectionType"))
                 res match
                     case Failure(exception) => 
@@ -601,10 +594,11 @@ class DB(val path:String)(using ops:Options):
                     op(tx)
                     tx.sysCommit = false
                     tx.commit()
+                    Success(None)
                 catch
                     case e:Exception =>
-                        tx.rollback() match
-                            case _ => None
+                        tx.sysCommit = false 
+                        tx.rollback()
                         Failure(e)
                 finally
                     tx.rollbackTx()
@@ -625,10 +619,11 @@ class DB(val path:String)(using ops:Options):
                     op(tx)
                     tx.sysCommit = false
                     tx.rollback()
+                    Success(None)
                 catch
                     case e:Exception =>
-                        tx.rollback() match
-                            case _ => None
+                        tx.sysCommit = false
+                        tx.rollback()
                         Failure(e)
                 finally
                     tx.rollbackTx()
@@ -643,18 +638,15 @@ class DB(val path:String)(using ops:Options):
             case Failure(e) => Failure(e)
             case Success(tx) =>
                 try
-                    var n:Long = 0
                     tx.sysCommit = true
-                    tx.copyToFile(path) match
-                        case Failure(e) => throw e
-                        case Success(m) => n = m 
+                    val n = tx.copyToFile(path) 
                     tx.sysCommit = false
                     tx.rollback()
                     Success(n)
                 catch
                     case e:Exception =>
-                        tx.rollback() match
-                            case _ => None
+                        tx.sysCommit = false
+                        tx.rollback()
                         Failure(e)
                 finally
                     tx.rollbackTx()
@@ -666,12 +658,12 @@ class DB(val path:String)(using ops:Options):
       */
     private def beginRWTx():Try[Tx] =
         if ops.readonly then
-            return Failure(DB.exceptionNotAllowRWTx)
+            return Failure(DB.exNotAllowRWTx)
         try 
             rwLock.writeLock().lock()
             metaLock.lock()
             if closed then
-                throw DB.exceptionDBClosed
+                throw DB.exDBClosed
             var tx = Tx(false,this)
             rwTx = Some(tx)
             free()
@@ -689,7 +681,7 @@ class DB(val path:String)(using ops:Options):
         try 
             metaLock.lock()
             if closed then
-                throw DB.exceptionDBClosed
+                throw DB.exDBClosed
             var tx = Tx(true,this)
             rTx.addOne(tx)
             Success(tx)

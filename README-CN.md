@@ -81,11 +81,11 @@ db.view(
     (tx:Transaction) =>
         // 做一些读取操作，比如此处代码打开并读取了bucket中的一些内容
         tx.openBucket("bucketName") match
-            case Failure(e) => throw e
-            case Success(bk) =>
+            case None => None
+            case Some(bk) =>
                 bk.get("key") match
-                    case Failure(e) => throw e
-                    case Success(value) => println(value)
+                    case None => None
+                    case Some(value) => println(value)
 ) match
     case Failure(e) => println(e.getMessage())
     case Success(_) => None    
@@ -122,15 +122,9 @@ db.update(
         tx.openList("listName") match
             case Failure(e) => throw e
             case Success(list) =>
-                list.append("value1") match
-                    case Failure(e) => throw e
-                    case Success(_) => None
-                list.prepend("value2") match
-                    case Failure(e) => throw e
-                    case Success(_) => None
-                list.update(3,"value3") match
-                    case Failure(e) => throw e
-                    case Success(_) => None
+                list.append("value1")
+                list.prepend("value2")
+                list.update(3,"value3")
 ) match
     case Failure(e) => println(e.getMessage())
     case Success(_) => None    
@@ -165,18 +159,15 @@ try
     db.begin(true) match
         case Failure(e) => throw e
         case Success(tx) =>
-            // use the transaction here
-            tx.commit() match
-                case Failure(e) => throw e
-                case Success(_) => None
+            /*
+                use the transaction here
+            */
+            tx.commit() 
 catch
-    case e:Exception => 
-        if tx!=null then
-            tx.rollback() match
-                case Failure(e) => // process the error if need
-                case Success(_) => None
-        // process the error if need
-   
+    case e:Exception => // process the error if need
+finally
+    if tx != null then tx.rollback()
+        
 ```
 手动管理事务时务必记住手动关闭该事务(显式的调用回滚/提交方法)。更多关于事务方法的文档，参考 [xxxxxx]
 
@@ -226,16 +217,15 @@ db.update(
         bk-=("key1")
 
         // 遍历bucket(按照key的字典升序)
-        for e <- bk.iterator do
-            e match 
-                case (None,None) => None
-                case (Some(k),None) => 
-                case (Some(k),Some(v)) =>
+        for kv <- bk.iterator do
+            kv match 
+                case Some(k,v) => println(s"key=${k},value=${v}")
+                case None => None
 
         // 打开一个嵌套子bucket
         bk.openBucket("subBucketName") match
-            case Failure(e) => throw e
-            case Success(sbk) => None
+            case None => None
+            case Some(sbk) => println(s"bucket name is ${sbk.name}")
 ) match
     case Failure(e) => println(e.getMessage())
     case Success(_) => None  
@@ -263,9 +253,8 @@ db.update(
         set+=(elems)
         
         // 判断元素是否存在
-        set.contains("elem4") match
-            case Failure(e) => throw e
-            case Success(flag) => println(flag)
+        if set.contains("elem4") then
+            println("exists")
 
         // 删除元素
         set-=("elem1")
@@ -273,8 +262,8 @@ db.update(
         // 遍历(按照元素的字典升序)
         for e <- set.iterator do
             e match 
-                case (None,_) => None
-                case (Some(k),_) =>
+                case None => None
+                case Some(k,_) => println(k)
         
         // 打开一个已经存在的集合
         val set2 = openSet("setName2")
@@ -322,19 +311,15 @@ db.update(
         list(1) = "newElem"
 
         // 删除一个元素
-        list.remove(100) match
-            case Failure(e) => throw e
-            case Success(_) => None 
+        list.remove(100)
 
         // 插入元素
-        list.insert(100, "value") match
-            case Failure(e) => throw e
-            case Success(_) => None 
+        list.insert(100, "value")
 
         // 切片操作
         list.slice(400,500) match
-            case Failure(e) => throw e
-            case Success(sublist) => 
+            case None => None
+            case Some(sublist) => println(sublist.length)
 ) match
     case Failure(e) => println(e.getMessage())
     case Success(_) => None 
@@ -401,7 +386,6 @@ db.backup(path) match
 用户可以导入platdb项目，通过构造一个Server实例的方式运行platdb http服务
 
 ```scala
-
 val ops = ServerOptions()
 val svc = Server(ops)
 svc.run()

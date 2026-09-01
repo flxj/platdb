@@ -19,6 +19,7 @@ package platdb
 import java.nio.ByteBuffer
 import scala.collection.mutable.{ArrayBuffer}
 import scala.util.control.Breaks._
+import java.nio.charset.StandardCharsets
 
 /* node storage construct on block:
 +------------------+-----------------------------------------+
@@ -50,13 +51,14 @@ private[platdb] case class NodeIndex(offset:Int,keySize:Int,valSize:Long,flag:By
   * @param value
   */
 private[platdb] class NodeElement(var flag:Byte,var child:Long,var key:String,var value:String): // TODO: use Array[Byte] as key,value type
-    def keySize:Int = key.getBytes.length
-    def valueSize:Int = if flag!=bucketType then value.getBytes.length else value.getBytes("ascii").length
-    def getValueBytes:Array[Byte] = if flag!=bucketType then value.getBytes() else value.getBytes("ascii")
+    def keySize:Int = key.getBytes(StandardCharsets.UTF_8).length
+    def keyBytes:Array[Byte] = key.getBytes(StandardCharsets.UTF_8)
+    def valueSize:Int = value.getBytes(StandardCharsets.UTF_8).length
+    def valueBytes:Array[Byte] = value.getBytes(StandardCharsets.UTF_8)
 
 // binary search
 extension (arr:ArrayBuffer[NodeElement])
-    def indexFunc(func:(NodeElement)=>Boolean):Int = 
+    def indexFunc(func:(NodeElement) => Boolean):Int = 
         var idx = -1
         var low = 0
         var high = arr.length
@@ -89,12 +91,12 @@ private[platdb] object Node:
                                 break() 
                             case Some(ni) =>
                                 val off = ni.offset - BlockHeader.size
-                                val key = new String(data.slice(off,off+ni.keySize))
+                                val key = new String(data.slice(off,off+ni.keySize),StandardCharsets.UTF_8)
                                 var child = ni.valSize 
                                 var value:String = ""
                                 if bk.header.flag == leafType then
                                     child = 0 
-                                    value = new String(data.slice(off+ni.keySize,(off+ni.keySize+ni.valSize).toInt))
+                                    value = new String(data.slice(off+ni.keySize,(off+ni.keySize+ni.valSize).toInt),StandardCharsets.UTF_8)
                                 elems+=new NodeElement(ni.flag,child,key,value)
                 )
                 if !err then Some(elems) else None
@@ -185,7 +187,7 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
             case None => this
         }
     /**
-      *  insert a element into node.
+      *  insert a element into node. if the return flag is true,means that oldkey already exists.
       *
       * @param oldKey: old key will be overwrited by newKey
       * @param newKey: new key
@@ -193,33 +195,37 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
       * @param flag: node element type 
       * @param child: child node id
       */ 
-    def put(oldKey:String,newKey:String, newVal:String,flag:Byte,child:Long):Unit=
-        if oldKey.length<=0 || newKey.length<=0 then return None 
+    def put(oldKey:String,newKey:String, newVal:String,flag:Byte,child:Long):Boolean =
         // 1. find insert location
+        var ok:Boolean = false 
         val elem:NodeElement = new NodeElement(flag,child,newKey,newVal)
         if elements.length == 0 then 
-            elements+=elem 
+            elements += elem 
         else 
-            val idx:Int = elements.indexFunc((e:NodeElement) => e.key>=oldKey)
+            val idx:Int = elements.indexFunc((e:NodeElement) => e.key >= oldKey)
             if idx >= 0 then
                 if elements(idx).key == oldKey then
                     elements(idx) = elem
+                    ok = true
                 else 
                     elements.insert(idx,elem)
             else 
-                elements+=elem
+                elements += elem
+        ok
     
     /**
-      * delete element from current node.
+      * delete element from current node. if return true flag,which means the key exists.
       *
       * @param key
       */
-    def del(key:String):Unit =
-        if key.length<=0 then return None
-        val idx = elements.indexFunc((e:NodeElement) => e.key>=key)
-        if idx>=0 && elements(idx).key == key then
+    def del(key:String):Boolean =
+        val idx = elements.indexFunc((e:NodeElement) => e.key >= key)
+        if idx >= 0 && elements(idx).key == key then
             elements.remove(idx)
             unbalanced = true
+            true 
+        else
+            false
 
     /**
       * delete child node from children array.
@@ -234,7 +240,7 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
                     idx = i 
                     break()
         )
-        if idx >=0 then 
+        if idx >= 0 then 
             children.remove(idx)
 
     /**
@@ -275,9 +281,9 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
                 case false => NodeIndex(offset,e.keySize,e.child,e.flag)
 
             bk.write(idx,Node.marshalIndex(ni))
-            bk.write(offset,e.key.getBytes)
-            bk.append(e.getValueBytes)
+            bk.write(offset,e.keyBytes)
+            bk.append(e.valueBytes)
            
-            idx+=Node.indexSize
+            idx += Node.indexSize
             offset = bk.size
         bk.size

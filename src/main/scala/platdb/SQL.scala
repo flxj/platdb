@@ -50,29 +50,29 @@ case class SQLRows(columns:Array[String],data:Array[Array[Any]])
 case class SQLResult(lastInsertId:Long,rowsAffected:Long)
 
 trait SQLTx:
-    def commit:Try[Unit]
-    def rollback:Try[Unit]
-    def query(stmt:String):Try[SQLRows]
-    def exec(stmt:String):Try[SQLResult]
+    def commit:Unit
+    def rollback:Unit
+    def query(stmt:String):SQLRows
+    def exec(stmt:String):SQLResult
 
 case class SQLEngineOptions(path:String)
 
 private[platdb] class sqlTx(val id:Long,val se:SQLEngine) extends SQLTx:
-    def commit: util.Try[Unit] = 
+    def commit: Unit = 
         se.dbTx.remove(id) match
-            case None => Success(None)
+            case None => None
             case Some(tx) => tx.rollback()   
-    def rollback: Try[Unit] = 
+    def rollback: Unit = 
         se.dbTx.remove(id) match
-            case None => Success(None)
+            case None => None
             case Some(tx) => tx.rollback() //TODO: need clean tableInfo in db.tbs
-    def query(stmt: String): util.Try[SQLRows] = 
+    def query(stmt: String): SQLRows = 
         se.dbTx.get(id) match
-            case None => Failure(new Exception("wrong tx"))
+            case None => throw new Exception("wrong tx")
             case Some(tx) => se.txQuery(stmt,tx)
-    def exec(stmt:String):Try[SQLResult] = 
+    def exec(stmt:String):SQLResult = 
         se.dbTx.get(id) match
-            case None => Failure(new Exception("wrong tx"))
+            case None => throw new Exception("wrong tx")
             case Some(tx) => se.txExec(stmt,tx)
 
 private[platdb] class columnInfo(val name:String,val ctype:String): //TODO: use Byte as ctype type.
@@ -300,7 +300,8 @@ private class SQLEvaluator(val table:tableInfo,var row:Array[Array[Byte]]) exten
 object SQLEngine:
     val errValueFmt = new Exception("The data format doesn't match the column field type")
     val errClosed = new Exception("db is closed state")
-    val errNoTable = new Exception("table not exists")
+    val errNoTable = new Exception("not found table")
+    val errTable = new Exception("internal table error")
 
 class SQLEngine(val path:String,val ops:Options):
     import tableProto._
@@ -343,15 +344,9 @@ class SQLEngine(val path:String,val ops:Options):
             //                   value: record_head + column_value
             db.update (
                 (tx:Transaction) =>
-                    tx.createBucketIfNotExists(metaTb) match
-                        case Failure(e) => throw e
-                        case Success(_) => None 
-                    tx.createBucketIfNotExists(tableTb) match
-                        case Failure(e) => throw e
-                        case Success(_) => None 
-                    tx.createBucketIfNotExists(indexTb) match
-                        case Failure(e) => throw e
-                        case Success(_) => None
+                    tx.createBucketIfNotExists(metaTb) 
+                    tx.createBucketIfNotExists(tableTb) 
+                    tx.createBucketIfNotExists(indexTb) 
             ) match
                 case Failure(e) => throw e
                 case Success(_) => None
@@ -362,158 +357,154 @@ class SQLEngine(val path:String,val ops:Options):
             case er:Error => Failure(er)
     // 
     def close:Try[Unit] = 
+        if !openFlag then return Success(None)
         try
-            if !openFlag then return Success(None)
             for (id,tx) <- dbTx do 
-                tx.rollback() match 
-                    case Failure(e) => throw e 
-                    case Success(_) => None 
+                tx.rollback() 
             db.close() match
                 case Failure(e) => throw e 
                 case Success(_) => 
                     dbTx.clear()
                     tbs.clear()
                     openFlag = false
-                    Success(None)
+            Success(None)
         catch
             case ex:Exception => Failure(ex)
             case er:Error => Failure(er)
     //
     def query(stmt:String):Try[SQLRows] =  
         if !openFlag then return Failure(SQLEngine.errClosed)
-        var res:SQLRows = null
-        val r = db.begin(false) match
-            case Failure(e) => Failure(e)
-            case Success(tx) => txQuery(stmt,tx) match
-                case Failure(e) => tx.rollback()
-                case Success(s) => 
-                    res = s 
-                    tx.commit() 
-        r match
-            case Failure(e) => Failure(e)
-            case Success(_) => Success(res)
+        var tx:Transaction = null 
+        try
+            db.begin(false) match
+                case Failure(e) => throw e
+                case Success(t) => tx = t 
+            val res = txQuery(stmt,tx) 
+            tx.commit() 
+            Success(res)
+        catch
+            case e:Exception => Failure(e)
+            case e:Error => Failure(e)
+        finally
+            if tx != null then tx.rollback()
     // 
-    private[platdb] def txQuery(stmt:String,tx:Transaction):Try[SQLRows] = 
-        try 
-            if !openFlag then return Failure(SQLEngine.errClosed)
-            val sql = preprocess(stmt)
-            val stat: Statement = CCJSqlParserUtil.parse(sql) // JSQLParserException
-            stat match
-                case sel:Select => sel.getSelectBody() match
-                    case ps:PlainSelect =>
-                        // 1.check table
-                        val tables = ArrayBuffer[String]()
-                        ps.getFromItem().accept( new FromItemVisitorAdapter{
-                            override def visit(table: Table): Unit = tables.append(table.getName())
-                        })
-                        if tables.length == 0 then 
-                            throw new Exception("no table")
-                        else if tables.length != 1 then 
-                            throw new Exception("not support muti-tables query now")
-                        val name = tables(0).toLowerCase()
-                        if !contains(name) then throw SQLEngine.errNoTable
-                        val tbi = tbs.get(name) match
-                            case Some(v) => v 
-                            case None => null
-                        
-                        // 2.check column
-                        var allFlag:Boolean = false 
-                        val columns = ArrayBuffer[String]()
-                        val items = ps.getSelectItems().asScala.toList
-                        items.foreach( item =>
-                            item match
-                                case exp:Expression => 
-                                    exp.accept(new ExpressionVisitorAdapter {
-                                        override def visit(column: Column): Unit = 
-                                            if item.getAliasName() != "" then
-                                                columns.append(item.getAliasName())
-                                            else
-                                                columns.append(column.getColumnName())
-                                        override def visit(all: AllColumns): Unit = allFlag = true 
-                                    })
-                                case _ => throw new Exception("not support other type column now") 
-                        )
-                        if columns.length == 0 && !allFlag then 
-                            throw new Exception("query column is empty")
-                        else if allFlag && columns.length != 0 then 
-                            throw new Exception("not support such columns")
-                        // get columns type info
-                        val ftypes = new ArrayBuffer[String](columns.length)
-                        if allFlag then 
-                            for col <- tbi.cols do 
-                                columns.append(col.name)
-                                ftypes.append(col.ctype)
-                        else
-                            for c <- columns do 
-                                var i:Int = -1
-                                breakable(
-                                    for j <- 0 until tbi.cols.length do 
-                                        if tbi.cols(j).name == c then 
-                                            i = j 
-                                            break()
-                                )
-                                if i < 0 then 
-                                    throw new Exception(s"not found column ${c}")
-                                ftypes.append(tbi.cols(i).ctype)
-                        // 3.filter row by where 
-                        val rd = new ArrayBuffer[Array[Any]]()
-                        ps.getWhere() match
-                            case null => tx.openBucket(name) match
-                                case Failure(e) => throw e 
-                                case Success(bk) => 
-                                    for (k,v) <- bk.iterator do 
-                                        v match
-                                            case Some(str) =>
-                                                val row = splitRow(str,tbi)
+    private[platdb] def txQuery(stmt:String,tx:Transaction):SQLRows = 
+        if !openFlag then throw SQLEngine.errClosed
+        val sql = preprocess(stmt)
+        val stat: Statement = CCJSqlParserUtil.parse(sql) // JSQLParserException
+        stat match
+            case sel:Select => sel.getSelectBody() match
+                case ps:PlainSelect =>
+                    // 1.check table
+                    val tables = ArrayBuffer[String]()
+                    ps.getFromItem().accept( new FromItemVisitorAdapter{
+                        override def visit(table: Table): Unit = tables.append(table.getName())
+                    })
+                    if tables.length == 0 then 
+                        throw new Exception("no table found in sql")
+                    else if tables.length != 1 then 
+                        throw new Exception("not support muti-tables query now")
+                    val name = tables(0).toLowerCase()
+                    if !contains(name) then throw SQLEngine.errNoTable
+                    val tbi = tbs.get(name) match
+                        case Some(v) => v 
+                        case None => throw SQLEngine.errNoTable
+                    
+                    // 2.check column
+                    var allFlag:Boolean = false 
+                    val columns = ArrayBuffer[String]()
+                    val items = ps.getSelectItems().asScala.toList
+                    items.foreach( item =>
+                        item match
+                            case exp:Expression => 
+                                exp.accept(new ExpressionVisitorAdapter {
+                                    override def visit(column: Column): Unit = 
+                                        if item.getAliasName() != "" then
+                                            columns.append(item.getAliasName())
+                                        else
+                                            columns.append(column.getColumnName())
+                                    override def visit(all: AllColumns): Unit = allFlag = true 
+                                })
+                            case _ => throw new Exception("not support other type column now") 
+                    )
+                    if columns.length == 0 && !allFlag then 
+                        throw new Exception("query column is empty")
+                    else if allFlag && columns.length != 0 then 
+                        throw new Exception("not support such columns")
+                    // get columns type info
+                    val ftypes = new ArrayBuffer[String](columns.length)
+                    if allFlag then 
+                        for col <- tbi.cols do 
+                            columns.append(col.name)
+                            ftypes.append(col.ctype)
+                    else
+                        for c <- columns do 
+                            var i:Int = -1
+                            breakable(
+                                for j <- 0 until tbi.cols.length do 
+                                    if tbi.cols(j).name == c then 
+                                        i = j 
+                                        break()
+                            )
+                            if i < 0 then 
+                                throw new Exception(s"not found column ${c}")
+                            ftypes.append(tbi.cols(i).ctype)
+                    // 3.filter row by where 
+                    val rd = new ArrayBuffer[Array[Any]]()
+                    ps.getWhere() match
+                        case null => tx.openBucket(name) match
+                            case None => None 
+                            case Some(bk) => 
+                                for kv <- bk.iterator do 
+                                    kv match
+                                        case Some(_,str) =>
+                                            val row = splitRow(str,tbi)
+                                            val r = project(columns,ftypes,row)
+                                            rd.append(r)
+                                        case None => None 
+                        case exp:Expression => 
+                            val eva = new SQLEvaluator(tbi,null)
+                            tx.openBucket(name) match
+                                case None => None 
+                                case Some(bk) =>
+                                    for kv <- bk.iterator do kv match 
+                                        case Some(_,str) => 
+                                            val row = splitRow(str,tbi)
+                                            eva.row = row 
+                                            val (ok,_) = exp.accept(eva,null)
+                                            if ok.length > 0 && (ok(0)&1) != 0 then 
                                                 val r = project(columns,ftypes,row)
                                                 rd.append(r)
-                                            case None => None 
-                            case exp:Expression => 
-                                val eva = new SQLEvaluator(tbi,null)
-                                tx.openBucket(name) match
-                                    case Failure(e) => throw e 
-                                    case Success(bk) =>
-                                        for (k,v) <- bk.iterator do v match 
-                                            case Some(str) => 
-                                                val row = splitRow(str,tbi)
-                                                eva.row = row 
-                                                val (ok,_) = exp.accept(eva,null)
-                                                if ok.length > 0 && (ok(0)&1) != 0 then 
-                                                    val r = project(columns,ftypes,row)
-                                                    rd.append(r)
-                                            case None => None
-                        Success(SQLRows(columns.toArray,rd.toArray))
-                    case _ => throw new Exception("not support the sql now")   
-                case st:ShowTablesStatement => 
-                    // list all tables name
-                    val ts = new ArrayBuffer[Array[Any]]
-                    tx.openBucket(tableTb) match
-                        case Failure(e) => Failure(e)
-                        case Success(bk) => 
-                            for (k,_) <- bk.iterator do 
-                                k match
-                                    case Some(v) => ts.append(Array[Any](v))
-                                    case None => None
-                    Success(SQLRows(Array[String]("tables"),ts.toArray))
-                case sc:ShowColumnsStatement => 
-                    val table = sc.getTableName().toLowerCase()
-                    tx.openBucket(tableTb) match
-                        case Failure(e) => Failure(e)
-                        case Success(bk) => 
-                            bk.get(table) match
-                                case Failure(e) => Failure(e)
-                                case Success(v) => 
-                                    val info = v.toJson.convertTo[tableInfo]
-                                    val rows = new Array[Array[Any]](info.cols.length)
-                                    for i <- 0 until info.cols.length do 
-                                        rows(i) = Array[Any](info.cols(i).name,info.cols(i).ctype,"")
-                                        if info.cols(i).name == info.pk then 
-                                            rows(i)(3) = "primary key"
-                                    Success(SQLRows(Array[String]("name","type","info"),rows))
-                case _ => throw new Exception("not support the query sql now")
-        catch 
-            case ex:Exception => Failure(ex)
-            case er:Error => Failure(er)
+                                        case None => None
+                    SQLRows(columns.toArray,rd.toArray)
+                case _ => throw new Exception("not support the sql now")   
+            case st:ShowTablesStatement => 
+                // list all tables name
+                val ts = new ArrayBuffer[Array[Any]]
+                tx.openBucket(tableTb) match
+                    case None => None
+                    case Some(bk) => 
+                        for kv <- bk.iterator do 
+                            kv match
+                                case Some(_,v) => ts.append(Array[Any](v))
+                                case None => None
+                SQLRows(Array[String]("tables"),ts.toArray)
+            case sc:ShowColumnsStatement => 
+                val table = sc.getTableName().toLowerCase()
+                tx.openBucket(tableTb) match
+                    case None => throw SQLEngine.errNoTable
+                    case Some(bk) => 
+                        bk.get(table) match
+                            case None => throw SQLEngine.errNoTable
+                            case Some(v) => 
+                                val info = v.toJson.convertTo[tableInfo]
+                                val rows = new Array[Array[Any]](info.cols.length)
+                                for i <- 0 until info.cols.length do 
+                                    rows(i) = Array[Any](info.cols(i).name,info.cols(i).ctype,"")
+                                    if info.cols(i).name == info.pk then 
+                                        rows(i)(3) = "primary key"
+                                SQLRows(Array[String]("name","type","info"),rows)
+            case _ => throw new Exception("not support the query sql now")
     //
     private def project(cols:ArrayBuffer[String],ftype:ArrayBuffer[String],row:Array[Array[Byte]]):Array[Any] = 
         val res = new Array[Any](cols.length)
@@ -721,21 +712,19 @@ class SQLEngine(val path:String,val ops:Options):
                     val eva = new SQLEvaluator(tbi,null)
                     val arr = ArrayBuffer[String]()
                     tx.openBucket(table) match
-                        case Failure(e) =>  throw e 
-                        case Success(bk) =>
-                            for (k,v) <- bk.iterator do 
-                                v match
+                        case None =>  None 
+                        case Some(bk) =>
+                            for kv <- bk.iterator do 
+                                kv match
                                     case None => None
-                                    case Some(value) => 
+                                    case Some(k,value) => 
                                         eva.row = splitRow(value,tbi)
                                         val (res,_) = exp.accept(eva,null)
                                         if res.length > 0 && (res(0).toInt & 1) != 0 then 
-                                            k match
-                                                case Some(key) => arr.append(key)
-                                                case None => None 
+                                            arr.append(k)
                     (table,arr,false)
     //
-    private def execUpdate(up:Update,tx:Transaction):Try[SQLResult] = 
+    private def execUpdate(up:Update,tx:Transaction):SQLResult = 
         val table = up.getTable().getName().toLowerCase()
         if !contains(table) then 
             throw SQLEngine.errNoTable
@@ -771,158 +760,134 @@ class SQLEngine(val path:String,val ops:Options):
                 val w = up.getWhere()
                 val keys = new ArrayBuffer[String]()
                 val rows = new ArrayBuffer[Array[Array[Byte]]]()
-                val bk = tx.openBucket(table) match
-                    case Failure(e) => throw e 
-                    case Success(bk) => bk 
-                for (k,v) <- bk.iterator do 
-                    v match
-                        case Some(str) =>
-                            eva.row = splitRow(str,tbi)
-                            val (ok,_) = w.accept(eva,null)
-                            if ok.length > 0 && (ok(0)&1) != 0 then 
-                                k match
-                                    case Some(key) => 
-                                        keys.append(key)
+                tx.openBucket(table) match
+                    case None => None
+                    case Some(bk) =>
+                        for kv <- bk.iterator do 
+                            kv match
+                                case Some(k,str) =>
+                                    eva.row = splitRow(str,tbi)
+                                    val (ok,_) = w.accept(eva,null)
+                                    if ok.length > 0 && (ok(0)&1) != 0 then 
+                                        keys.append(k)
                                         rows.append(eva.row)
-                                    case None => None
-                        case None => None 
-                // update table
-                val res = SQLResult(0,keys.length.toLong)
-                var buf:ByteBuffer = ByteBuffer.allocate(tbi.cols.length*4)
-                keys.zip(rows).foreach( (key,vs) => 
-                    for i <- cidx do 
-                        vs(i) = vals(i)
-                    buf.clear()
-                    var offset:Int = tbi.cols.length*4
-                    for d <- vs do 
-                        offset += d.length
-                        buf.putInt(offset)
-                    for d <- vs if d.length > 0 do buf.put(d)
-                    bk.put(key,new String(buf.array(),StandardCharsets.UTF_8)) match 
-                        case Failure(e) => throw e 
-                        case Success(_) => None 
-                )
-                Success(res)
+                                case None => None 
+                        // update table
+                        var buf:ByteBuffer = ByteBuffer.allocate(tbi.cols.length*4)
+                        keys.zip(rows).foreach( (key,vs) => 
+                            for i <- cidx do 
+                                vs(i) = vals(i)
+                            buf.clear()
+                            var offset:Int = tbi.cols.length*4
+                            for d <- vs do 
+                                offset += d.length
+                                buf.putInt(offset)
+                            for d <- vs if d.length > 0 do buf.put(d)
+                            bk.put(key,new String(buf.array(),StandardCharsets.UTF_8)) 
+                        )
+                SQLResult(0,keys.length.toLong)
             case None => throw SQLEngine.errNoTable
     //
-    private def execDelete(del:Delete,tx:Transaction):Try[SQLResult] = 
+    private def execDelete(del:Delete,tx:Transaction):SQLResult = 
         val table = del.getTable().getName()
         if !contains(table) then throw SQLEngine.errNoTable
         val (keys,all) = tbs.get(table) match
-            case None => throw new Exception("table not exists")
+            case None => throw SQLEngine.errNoTable
             case Some(tbi) => del.getWhere() match
                 case null => (null,true)
                 case exp:Expression => 
                     val eva = new SQLEvaluator(tbi,null)
                     val arr = ArrayBuffer[String]()
                     tx.openBucket(table) match
-                        case Failure(e) =>  throw e 
-                        case Success(bk) =>
-                            for (k,v) <- bk.iterator do 
-                                v match
+                        case None => throw SQLEngine.errNoTable
+                        case Some(bk) =>
+                            for kv <- bk.iterator do 
+                                kv match
                                     case None => None
-                                    case Some(value) => 
+                                    case Some(k,value) => 
                                         eva.row = splitRow(value,tbi)
                                         val (res,_) = exp.accept(eva,null)
                                         if res.length > 0 && (res(0).toInt & 1) != 0 then 
-                                            k match
-                                                case Some(key) => arr.append(key)
-                                                case None => None 
+                                            arr.append(k)
                             (arr,false)
         tx.openBucket(table) match
-            case Failure(e) => throw e 
-            case Success(bk) => 
+            case None => throw throw SQLEngine.errNoTable
+            case Some(bk) => 
                 if all then 
                     val r = bk.length
                     bk.clean()
-                    Success(SQLResult(0,r))
+                    SQLResult(0,r)
                 else 
-                    for key <- keys do 
-                        bk.delete(key) match
-                            case Failure(e) => throw e 
-                            case Success(_) => None
-                    Success(SQLResult(0,keys.length.toLong))
+                    for key <- keys do bk.delete(key)
+                    SQLResult(0,keys.length.toLong)
     //
     def exec(stmt:String):Try[SQLResult] = 
         if !openFlag then return Failure(SQLEngine.errClosed)
-        var res:SQLResult = SQLResult(0,0)
-        val r = db.begin(true) match
-            case Failure(e) => Failure(e)
-            case Success(tx) => txExec(stmt,tx) match
-                case Failure(e) => tx.rollback()
-                case Success(s) => 
-                    res = s 
-                    tx.commit() 
-        r match
-            case Failure(e) => Failure(e)
-            case Success(_) => Success(res)
+        var tx:Transaction = null
+        try
+            db.begin(true) match
+                case Failure(e) => throw e 
+                case Success(t) => tx 
+            val res = txExec(stmt,tx) 
+            tx.commit()     
+            Success(res)
+        catch 
+            case e:Exception => Failure(e)
+            case e:Error => Failure(e)
+        finally
+            if tx != null then tx.rollback()
+
     // create table,drop table
     // insert into...
     // update...
     // delete...
-    private[platdb] def txExec(stmt:String,tx:Transaction):Try[SQLResult] = 
-        try
-            if !openFlag then return Failure(SQLEngine.errClosed)
-            val sql = preprocess(stmt)
-            val stat: Statement = CCJSqlParserUtil.parse(sql) // JSQLParserException
-            stat match
-                case ct:CreateTable => 
-                    val tb = parseCreateTable(ct)
-                    // 4.create a tables bucket with table_name. reate a table_info record, save it to tableTb
-                    val tbInfo:String = tb.toJson.compactPrint
-                    tx.createBucket(tb.name) match
-                        case Failure(e) => throw e
-                        case Success(_) => None 
+    private[platdb] def txExec(stmt:String,tx:Transaction):SQLResult = 
+        if !openFlag then throw SQLEngine.errClosed
+        val sql = preprocess(stmt)
+        val stat: Statement = CCJSqlParserUtil.parse(sql) // JSQLParserException
+        stat match
+            case ct:CreateTable => 
+                val tb = parseCreateTable(ct)
+                // 4.create a tables bucket with table_name. reate a table_info record, save it to tableTb
+                val tbInfo:String = tb.toJson.compactPrint
+                tx.createBucket(tb.name) 
+                tx.openBucket(tableTb) match 
+                    case None => throw SQLEngine.errTable
+                    case Some(bk) => 
+                        bk.put(tb.name,tbInfo) 
+                        tbs.put(tb.name,tb)
+                        SQLResult(0,0)
+            case dp:Drop => 
+                val name = parseDrop(dp)
+                // 2. delete table bucket, delete table_info
+                    tx.deleteBucket(name)
                     tx.openBucket(tableTb) match 
-                        case Failure(e) => throw e
-                        case Success(bk) => bk.put(tb.name,tbInfo) match
-                            case Failure(e) => throw e
-                            case Success(_) => 
-                                tbs.put(tb.name,tb)
-                                Success(SQLResult(0,0))
-                case dp:Drop => 
-                    val name = parseDrop(dp)
-                    // 2. delete table bucket, delete table_info
-                        tx.deleteBucket(name) match
-                            case Failure(e) => throw e 
-                            case Success(_) => None 
-                        tx.openBucket(tableTb) match 
-                            case Failure(e) => throw e
-                            case Success(bk) => bk.delete(name) match 
-                                case Failure(e) => throw e 
-                                case Success(_) => 
-                                    tbs.remove(name)
-                                    Success(SQLResult(0,0)) // TODO get table length.
-                case ins:Insert => 
-                    val (table,data) = parseInsert(ins)
-                    // insert the data to db
-                    tx.openBucket(table) match
-                        case Failure(e) => throw e 
-                        case Success(bk) =>
-                            for (k,v) <- data do 
-                                bk.contains(k) match
-                                    case Failure(e) => throw e 
-                                    case Success(flag) => 
-                                        if flag then 
-                                            throw new Exception("duplicate primary key")
-                                        else
-                                            bk.put(k,v) match 
-                                                case Failure(e) => throw e 
-                                                case Success(_) => None 
-                    tx.openBucket(tableTb) match
-                        case Failure(e) => throw e 
-                        case Success(bk) => tbs.get(table) match
-                            case None => throw new Exception("table wrong")
-                            case Some(info) => bk.put(table,info.toJson.compactPrint) match
-                                case Failure(e) => throw e 
-                                case Success(_) => Success(SQLResult(0,data.length))
-                case up:Update => execUpdate(up,tx)
-                case del:Delete => execDelete(del,tx)
-                case _ => Failure(new Exception("not support the sql now"))
-        catch 
-            case ex:Exception => Failure(ex)
-            case er:Error => Failure(er)
-
+                        case None => throw SQLEngine.errTable
+                        case Some(bk) =>
+                            bk.delete(name) 
+                            tbs.remove(name)
+                            SQLResult(0,0) // TODO get table length.
+            case ins:Insert => 
+                val (table,data) = parseInsert(ins)
+                // insert the data to db
+                tx.openBucket(table) match
+                    case None => throw SQLEngine.errNoTable
+                    case Some(bk) =>
+                        for (k,v) <- data do 
+                            if bk.contains(k) then
+                                throw new Exception("duplicate primary key")
+                            else
+                                bk.put(k,v)       
+                tx.openBucket(tableTb) match
+                    case None => throw SQLEngine.errTable
+                    case Some(bk) => tbs.get(table) match
+                        case None => throw new Exception("table wrong")
+                        case Some(info) => 
+                            bk.put(table,info.toJson.compactPrint) 
+                            SQLResult(0,data.length)
+            case up:Update => execUpdate(up,tx)
+            case del:Delete => execDelete(del,tx)
+            case _ => throw new Exception("not support the sql now")
     // create a new transaction.
     def beginTx(readOnly:Boolean):Try[SQLTx] = 
         if !openFlag then 

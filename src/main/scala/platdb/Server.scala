@@ -179,7 +179,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
       */
     def run():Unit = 
         println(logo)
-        val db = DB.open(ops.path)(using ops.conf)
+        val db = DB(ops.path)(using ops.conf)
         log.info("open database at {} success",ops.path)
 
         val route =
@@ -369,15 +369,12 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                                     (tx:Transaction) =>
                                         given t:Transaction = tx
                                         // get all collections.
-                                        t.allCollection() match
-                                            case Failure(e) => throw e
-                                            case Success(cols) =>
-                                                val mp = Map[String,String]()
-                                                for (k,v) <- cols do mp(k) = v
-                                                for op <- ops.operations do
-                                                    execOperation(t,op,mp) match
-                                                        case Success(r) => opRes:+=r
-                                                        case Failure(e) => throw e
+                                        val mp = Map[String,String]()
+                                        for (k,v) <- t.allCollection() do mp(k) = v 
+                                        for op <- ops.operations do
+                                            execOperation(t,op,mp) match
+                                                case Success(r) => opRes:+=r
+                                                case Failure(e) => throw e               
                                 ) match
                                     case Failure(e) => Some(TxResult(false,e.getMessage(),opRes))
                                     case Success(_) => Some(TxResult(true,"",opRes))
@@ -412,21 +409,22 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                 case CollectionType.Bucket =>
                     op.collectionOp match
                         case "delete" =>
-                            tx.deleteBucket(op.collection) match
-                                case Success(_) => 
-                                    cols.remove(op.collection)
-                                    successResult
-                                case Failure(e) => Failure(e)
+                            try
+                                tx.deleteBucket(op.collection) 
+                                cols.remove(op.collection)
+                                successResult
+                            catch
+                                case e:Exception => Failure(e)
                         case "create" =>
                             tx.createBucketIfNotExists(op.collection) match
-                                case Success(_) => 
+                                case Some(_) => 
                                     cols(op.collection) = dataTypeName(bucketDataType)
                                     successResult
-                                case Failure(e) => Failure(e)
+                                case None => Failure(new Exception("craete bucket failed"))
                         case "get" => 
                             tx.openBucket(op.collection) match
-                                case Failure(e) => Failure(e)
-                                case Success(bk) => 
+                                case None => Failure(new Exception(""))
+                                case Some(bk) => 
                                     val info = List[KVPair](KVPair("name",op.collection),KVPair("length",bk.length.toString))
                                     Success(TxOperationResult(true,"",info))
                         case "" => 
@@ -441,8 +439,8 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                                         var kvs = List[KVPair]()
                                         for e <- op.elems yield 
                                             bk.get(e.key) match
-                                                case Failure(e) => throw e
-                                                case Success(v) => kvs:+=KVPair(e.key,v)
+                                                case None => throw new Exception(s"key ${e.key} not exists")
+                                                case Some(v) => kvs:+=KVPair(e.key,v)
                                         Success(TxOperationResult(true,"",kvs))
                                     case "delete" =>
                                         val keys = for e <- op.elems yield e.key
@@ -456,21 +454,22 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                 case CollectionType.BList => 
                     op.collectionOp match
                         case "delete" =>
-                            tx.deleteList(op.collection) match
-                                case Success(_) => 
-                                    cols.remove(op.collection)
-                                    successResult
-                                case Failure(e) => Failure(e)
+                            try
+                                tx.deleteList(op.collection)
+                                cols.remove(op.collection)
+                                successResult
+                            catch
+                                case e:Exception => Failure(e)
                         case "create" =>
                             tx.createListIfNotExists(op.collection) match
-                                case Success(_) => 
+                                case Some(_) => 
                                     cols(op.collection) = dataTypeName(blistDataType)
                                     successResult
-                                case Failure(e) => Failure(e)
+                                case None => Failure(new Exception(""))
                         case "get" => 
                             tx.openList(op.collection) match
-                                case Failure(e) => Failure(e)
-                                case Success(list) => 
+                                case None => Failure(new Exception(""))
+                                case Some(list) => 
                                     val info = List[KVPair](KVPair("name",op.collection),KVPair("length",list.length.toString))
                                     Success(TxOperationResult(true,"",info))
                         case "" => 
@@ -483,19 +482,16 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                                             list(i) = e.value
                                         successResult
                                     case "append" =>  
-                                        list.append(for e <- op.elems yield e.value) match
-                                            case Failure(e) => Failure(e)
-                                            case Success(_) => successResult
+                                        list.append(for e <- op.elems yield e.value) 
+                                        successResult
                                     case "prepend" =>
-                                        list.prepend(for e <- op.elems yield e.value) match
-                                            case Failure(e) => Failure(e)
-                                            case Success(_) => successResult
+                                        list.prepend(for e <- op.elems yield e.value) 
+                                        successResult
                                     case "insert" => 
                                         val i = op.index.toInt
                                         val elems = for e <- op.elems yield e.value
-                                        list.insert(i,elems) match
-                                            case Failure(e) => Failure(e)
-                                            case Success(_) => successResult
+                                        list.insert(i,elems) 
+                                        successResult
                                     case "get" => 
                                         val data = (for e <- op.elems yield KVPair(e.key,list(e.key.toInt)))
                                         Success(TxOperationResult(true,"",data.toList))
@@ -503,21 +499,19 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                                         val i = op.index.toInt
                                         val count = op.count.toInt
                                         list.slice(i,i+count) match
-                                            case Failure(e) => Failure(e)
-                                            case Success(s) => 
+                                            case None => Failure(new Exception(""))
+                                            case Some(s) => 
                                                 var data = List[KVPair]()
-                                                for (k,v) <- s.iterator do
-                                                    (k,v) match
-                                                        case (_,None) => None
-                                                        case (None,_) => None
-                                                        case (Some(kk),Some(vv)) => data:+=KVPair(kk,vv)
+                                                for kv <- s.iterator do
+                                                    kv match
+                                                        case None => None
+                                                        case Some((kk,vv)) => data:+=KVPair(kk,vv)
                                                 Success(TxOperationResult(true,"",data))
                                     case "delete" =>
                                         val i = op.index.toInt
                                         val count = op.count.toInt
-                                        list.remove(i,count) match
-                                            case Failure(e) =>  Failure(e)
-                                            case Success(_) => successResult
+                                        list.remove(i,count)
+                                        successResult
                                     case "" => Failure(new Exception(s"list operation is null"))
                                     case _ => Failure(new Exception(s"not support list operation: ${op.elementOp}"))
                             catch
@@ -526,21 +520,22 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                 case CollectionType.BSet =>
                     op.collectionOp match
                         case "delete" =>
-                            tx.deleteBSet(op.collection) match
-                                case Success(_) => 
-                                    cols.remove(op.collection)
-                                    successResult
-                                case Failure(e) => Failure(e)
+                            try
+                                tx.deleteBSet(op.collection) 
+                                cols.remove(op.collection)
+                                successResult
+                            catch
+                                case e:Exception => Failure(e)
                         case "create" =>
                             tx.createBSetIfNotExists(op.collection) match
-                                case Success(_) => 
+                                case Some(_) => 
                                     cols(op.collection) = dataTypeName(bsetDataType)
                                     successResult
-                                case Failure(e) => Failure(e)
+                                case None => Failure(new Exception(""))
                         case "get" =>
                             tx.openBSet(op.collection) match
-                                case Failure(e) => Failure(e)
-                                case Success(set) => 
+                                case None => Failure(new Exception(""))
+                                case Some(set) => 
                                     val info = List[KVPair](KVPair("name",op.collection),KVPair("length",set.length.toString))
                                     Success(TxOperationResult(true,"",info))
                         case "" => 
@@ -549,24 +544,19 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                                 op.elementOp match
                                     case "put" =>
                                         val elems = for e <- op.elems yield e.key
-                                        set.add(elems) match
-                                            case Failure(e) => throw e
-                                            case Success(_) => successResult 
+                                        set.add(elems) 
+                                        successResult 
                                     case "get" =>
                                         val elems = for e <- op.elems yield 
-                                            set.contains(e.key) match
-                                                case Failure(e) => throw e
-                                                case Success(ok) => 
-                                                    if ok then
-                                                        KVPair(e.key,"true")
-                                                    else
-                                                        KVPair(e.key,"false")
+                                            if set.contains(e.key) then 
+                                                KVPair(e.key,"true")
+                                            else
+                                                KVPair(e.key,"false")        
                                         Success(TxOperationResult(true,"",elems.toList))
                                     case "delete" =>
                                         val keys = for e <- op.elems yield e.key
-                                        set.remove(keys) match
-                                            case Failure(e) => throw e
-                                            case Success(_) => successResult
+                                        set.remove(keys) 
+                                        Success(TxOperationResult(true,"",null))
                                     case "" => Failure(new Exception(s"bset operation is null"))
                                     case _ => Failure(new Exception(s"not support bset operation: ${op.elementOp}"))
                             catch
@@ -632,9 +622,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                                     tmpFile.createNewFile()
                                 backupFile = Some((path,tx.size))
                                 //
-                                tx.copyToFile(path) match
-                                    case Failure(e) => throw e
-                                    case Success(_) => log.info("backup db to temp file {} completed",path)
+                                tx.copyToFile(path)
                             catch
                                 case e:Exception => throw e
                             finally
@@ -738,9 +726,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                     get {
                         log.debug("start to get Buckets info")
                         val res:Future[Try[Seq[(String,String)]]] = Future{
-                            db.listCollection(DB.collectionTypeBucket) match
-                                case Failure(e) => Failure(e)
-                                case Success(s) => Success(s)
+                            db.listCollection(DB.typeBucket)
                         }
                         onSuccess(res) {
                             case Success(value) =>
@@ -756,7 +742,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                         entity(as[BucketCreateOptions]) { ops =>
                             log.debug("start to create Bucket {}",ops.name)
                             val created: Future[Try[Unit]] = Future {
-                                db.createCollection(ops.name,DB.collectionTypeBucket,0,ops.ignoreExists)
+                                db.createCollection(ops.name,DB.typeBucket,0,ops.ignoreExists)
                             }
                             onSuccess(created) { 
                                 case Success(_) => complete(StatusCodes.OK,s"create Bucket ${ops.name} success\n")
@@ -771,7 +757,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                         entity(as[BucketDeleteOptions]) { ops =>
                             log.debug("start to delete Bucket {}",ops.name)
                             val deleted: Future[Try[Unit]] = Future {
-                                db.deleteCollection(ops.name,DB.collectionTypeBucket,ops.ignoreNotExists)
+                                db.deleteCollection(ops.name,DB.typeBucket,ops.ignoreNotExists)
                             }
                             onSuccess(deleted) { 
                                 case Success(_) => complete(StatusCodes.OK,s"delete Bucket ${ops.name} success\n")
@@ -794,11 +780,10 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                                 (tx:Transaction) =>
                                     given t:Transaction = tx
                                     val bk = openBucket(name)
-                                    for (k,v) <- bk.iterator do
-                                        (k,v) match
-                                            case (Some(key),Some(value)) => list:+=KVPair(key,value)
-                                            case (Some(key),None) => None
-                                            case (None,_) => throw new Exception(s"found null elements in bucket $name\n")
+                                    for kv <- bk.iterator do
+                                        kv match
+                                            case Some(key,value) if value != DB.magicStr => list:+=KVPair(key,value)
+                                            case None => None
                             ) match
                                 case Failure(e) => Failure(e)
                                 case Success(_) => Success(list)
@@ -860,9 +845,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                     get {
                         log.debug("start to get BList info")
                         val res:Future[Try[Seq[(String,String)]]] = Future{
-                        db.listCollection(DB.collectionTypeBList) match
-                            case Failure(e) => Failure(e)
-                            case Success(s) => Success(s)
+                            db.listCollection(DB.typeBList)
                         }
                         onSuccess(res) {
                             case Success(value) =>
@@ -878,7 +861,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                         entity(as[BListCreateOptions]) { ops =>
                             log.debug("start to create BList {}",ops.name)
                             val created: Future[Try[Unit]] = Future {
-                                db.createCollection(ops.name,DB.collectionTypeBList,0,ops.ignoreExists)
+                                db.createCollection(ops.name,DB.typeBList,0,ops.ignoreExists)
                             }
                             onSuccess(created) { 
                                 case Success(_) => complete(StatusCodes.OK,s"create BList ${ops.name} success\n")
@@ -893,7 +876,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                         entity(as[BListDeleteOptions]) { ops =>
                             log.debug("start to delete BSet {}",ops.name)
                             val deleted: Future[Try[Unit]] = Future {
-                                db.deleteCollection(ops.name,DB.collectionTypeBList,ops.ignoreNotExists)
+                                db.deleteCollection(ops.name,DB.typeBList,ops.ignoreNotExists)
                             }
                             onSuccess(deleted) { 
                                 case Success(_) => complete(StatusCodes.OK,s"delete BList ${ops.name} success\n")
@@ -916,11 +899,10 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                                 (tx:Transaction) =>
                                     given t:Transaction = tx
                                     val blist = openList(name)
-                                    for (k,v) <- blist.iterator do
-                                        (k,v) match
-                                            case (Some(key),Some(value)) => list:+=BListElement(key,value)
-                                            case (Some(key),None) => None
-                                            case (None,_) => throw new Exception(s"found null elements in blist $name\n")          
+                                    for kv <- blist.iterator do
+                                        kv match
+                                            case Some(key,value) => list:+=BListElement(key,value)
+                                            case None => None    
                             ) match
                                 case Failure(e) => Failure(e)
                                 case Success(_) => Success(list)
@@ -944,13 +926,9 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                                         given t:Transaction = tx
                                         val list = openList(ops.name)
                                         if ops.prepend then
-                                            list.prepend(ops.elems) match
-                                                case Success(_) => None
-                                                case Failure(e) => throw e
+                                            list.prepend(ops.elems)
                                         else 
-                                            list.append(ops.elems) match
-                                                case Success(_) => None
-                                                case Failure(e) => throw e
+                                            list.append(ops.elems)
                                 )
                             }
                             onSuccess(pended) { 
@@ -990,9 +968,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                                     (tx:Transaction) =>
                                         given t:Transaction = tx
                                         val list = openList(ops.name)
-                                        list.remove(ops.index,ops.count) match
-                                            case Success(_) => None
-                                            case Failure(e) => throw e
+                                        list.remove(ops.index,ops.count)
                                 )
                             }
                             onSuccess(deleted) { 
@@ -1020,9 +996,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                     get {
                         log.debug("start to get BSet info")
                         val res:Future[Try[Seq[(String,String)]]] = Future{
-                            db.listCollection(DB.collectionTypeBSet) match
-                                case Failure(e) => Failure(e)
-                                case Success(s) => Success(s)
+                            db.listCollection(DB.typeBSet)
                         }
                         onSuccess(res) {
                             case Success(value) =>
@@ -1038,7 +1012,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                         entity(as[BSetCreateOptions]) { ops =>
                             log.debug("start to create BSet {}",ops.name)
                             val created: Future[Try[Unit]] = Future {
-                                db.createCollection(ops.name,DB.collectionTypeBSet,0,ops.ignoreExists)
+                                db.createCollection(ops.name,DB.typeBSet,0,ops.ignoreExists)
                             }
                             onSuccess(created) { 
                                 case Success(_) => complete(StatusCodes.OK,s"create BSet ${ops.name} success")
@@ -1053,7 +1027,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                         entity(as[BSetDeleteOptions]) { ops =>
                             log.debug("start to delete BSet {}",ops.name)
                             val deleted: Future[Try[Unit]] = Future {
-                                db.deleteCollection(ops.name,DB.collectionTypeBSet,ops.ignoreNotExists)
+                                db.deleteCollection(ops.name,DB.typeBSet,ops.ignoreNotExists)
                             }
                             onSuccess(deleted) { 
                                 case Success(_) => complete(StatusCodes.OK,s"delete BSet ${ops.name} success")
@@ -1076,11 +1050,10 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                                 (tx:Transaction) =>
                                     given t:Transaction = tx
                                     val set = openSet(name)
-                                    for (k,v) <- set.iterator do
-                                        (k,v) match
-                                            case (Some(key),Some(value)) => list:+=BSetElement(key,value)
-                                            case (Some(key),None) => None
-                                            case (None,_) => throw new Exception(s"found null elements in BSet $name")
+                                    for kv <- set.iterator do
+                                        kv match
+                                            case Some(key,value) => list:+=BSetElement(key,value)
+                                            case None => None
                             ) match
                                 case Failure(e) => Failure(e)
                                 case Success(_) => Success(list)
@@ -1103,9 +1076,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                                     (tx:Transaction) =>
                                         given t:Transaction = tx
                                         val set = openSet(ops.name)
-                                        set.add(ops.elems) match
-                                            case Failure(e) => throw e
-                                            case Success(_) => None
+                                        set.add(ops.elems)
                                 )
                             }
                             onSuccess(add) { 
@@ -1125,9 +1096,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                                     (tx:Transaction) =>
                                         given t:Transaction = tx
                                         val set = openSet(ops.name)
-                                        set.remove(ops.elems) match
-                                            case Failure(e) => throw e
-                                            case Success(_) => None
+                                        set.remove(ops.elems)
                                 )  
                             }
                             onSuccess(deleted) { 

@@ -22,7 +22,7 @@ import scala.collection.mutable.TreeMap
 /**
   * BSet represents a set of string elements on disk, where the elements are unique and can be traversed in dictionary order.
   */
-trait BSet extends Iterable:
+trait BSet extends PlatDBIterable:
     /**
       * name
       *
@@ -35,7 +35,7 @@ trait BSet extends Iterable:
       * @param key
       * @return
       */
-    def contains(key:String):Try[Boolean]
+    def contains(key:String):Boolean
     /**
       * Add one element to the current collection.
       *
@@ -54,66 +54,63 @@ trait BSet extends Iterable:
       * @param keys
       * @return
       */
-    def add(keys:Seq[String]):Try[Unit]
+    def add(keys:Seq[String]):Unit
     /**
       * Remove one or more elements from the current collection.
       *
       * @param keys
       * @return
       */
-    def remove(keys:Seq[String]):Try[Unit]
+    def remove(keys:Seq[String]):Unit
     /**
       * Calculate the intersection of the current set and the target set, and the result is still a BSet (the object is stored in memory).
       *
       * @param set
       * @return
       */
-    def and(set:BSet):Try[BSet]
+    def and(set:BSet):BSet
     /**
       * Calculate the intersection of the current set and the target set，and the result is still a BSet (the object is stored in memory).
       *
       * @param set
       * @return
       */
-    def and(set:Set[String]):Try[BSet]
+    def and(set:Set[String]):BSet
     /**
       * Calculate the union of the current set and the target set，and the result is still a BSet (the object is stored in memory).
       *
       * @param set
       * @return
       */
-    def union(set:BSet):Try[BSet]
+    def union(set:BSet):BSet
     /**
       * Calculate the union of the current set and the target set，and the result is still a BSet (the object is stored in memory).
       *
       * @param set
       * @return
       */
-    def union(set:Set[String]):Try[BSet]
+    def union(set:Set[String]):BSet
     /**
       * Calculate the difference between the current set and the target set，and the result is still a BSet (the object is stored in memory).
       *
       * @param set
       * @return
       */
-    def diff(set:BSet):Try[BSet]
+    def diff(set:BSet):BSet
     /**
       * Calculate the difference between the current set and the target set，and the result is still a BSet (the object is stored in memory).
       *
       * @param set
       * @return
       */
-    def diff(set:Set[String]):Try[BSet]
+    def diff(set:Set[String]):BSet
     /**
       * A convenient method for calculating intersections, equivalent to the add method.
       *
       * @param set
       * @return
       */
-    def &(set:BSet):BSet =
-        and(set) match
-            case Failure(exception) => throw exception
-            case Success(bset) => bset
+    def &(set:BSet):BSet = and(set)
     /**
       * A convenient method for calculating intersections, equivalent to the add method.
       *
@@ -121,10 +118,7 @@ trait BSet extends Iterable:
       * @return
       * @throws
       */
-    def &(set:Set[String]):BSet =
-        and(set) match
-            case Failure(exception) => throw exception
-            case Success(bset) => bset
+    def &(set:Set[String]):BSet = and(set) 
     /**
       * A convenient method for calculating unions, equivalent to the union method.
       *
@@ -132,10 +126,7 @@ trait BSet extends Iterable:
       * @return
       * @throws
       */
-    def |(set:BSet):BSet =
-        union(set) match
-            case Failure(exception) => throw exception
-            case Success(bset) => bset
+    def |(set:BSet):BSet = union(set) 
     /**
       * A convenient method for calculating unions, equivalent to the union method.
       *
@@ -143,10 +134,7 @@ trait BSet extends Iterable:
       * @return
       * @throws
       */
-    def |(set:Set[String]):BSet =
-        union(set) match
-            case Failure(exception) => throw exception
-            case Success(bset) => bset
+    def |(set:Set[String]):BSet = union(set) 
     /**
       * A convenient method for calculating difference sets, equivalent to the diff method.
       *
@@ -154,10 +142,7 @@ trait BSet extends Iterable:
       * @return
       * @throws
       */
-    def -(set:BSet):BSet =
-        diff(set) match
-            case Failure(exception) => throw exception
-            case Success(bset) => bset
+    def -(set:BSet):BSet = diff(set) 
     /**
       * A convenient method for calculating difference sets, equivalent to the diff method.
       *
@@ -165,10 +150,7 @@ trait BSet extends Iterable:
       * @return
       * @throws
       */
-    def -(set:Set[String]):BSet =
-        diff(set) match
-            case Failure(exception) => throw exception
-            case Success(bset) => bset
+    def -(set:Set[String]):BSet = diff(set) 
 
 /**
   * BSet implementation based on B+tree.
@@ -179,7 +161,7 @@ private[platdb] class BTreeSet(var bk:BTreeBucket) extends BSet:
     def name:String = bk.name
     def length:Long = bk.length
     def closed:Boolean = bk.closed
-    def contains(key:String):Try[Boolean] = bk.contains(key)
+    def contains(key:String):Boolean = bk.contains(key)
     def iterator:CollectionIterator = new BTreeSetIter(new BTreeBucketIter(bk)) 
     def -=(key:String):Unit = bk-=(key)
     def +=(key:String):Unit = bk+=(key,"")
@@ -189,31 +171,21 @@ private[platdb] class BTreeSet(var bk:BTreeBucket) extends BSet:
       * @param keys
       * @return
       */
-    def add(keys:Seq[String]):Try[Unit] = 
-        try 
-            bk+=(for k<- keys yield (k,""))
-            Success(None)
-        catch
-            case e:Exception => Failure(e)
+    def add(keys:Seq[String]):Unit = bk+=(for k<- keys yield (k,""))
     /**
       * 
       *
       * @param keys
       * @return
       */
-    def remove(keys:Seq[String]):Try[Unit] = 
-        try 
-            bk-=(keys)
-            Success(None)
-        catch
-            case e:Exception => Failure(e)
+    def remove(keys:Seq[String]):Unit = bk-=(keys)
     /**
       * 
       *
       * @param set
       * @return
       */
-    def and(set:BSet):Try[BSet] = 
+    def and(set:BSet):BSet = 
         /*
         var tempSet = new TempBSet("intersect")
         try
@@ -230,118 +202,96 @@ private[platdb] class BTreeSet(var bk:BTreeBucket) extends BSet:
             case e:Exception => Failure(e)
         */
         var tempSet = new TempBSet("intersect")
-        try
-            val it1 = iterator
-            val it2 = set.iterator
-            while it1.hasNext() && it2.hasNext() do
-                val (k1,_) = it1.next()
-                val (k2,_) = it2.next()
-                (k1,k2) match
-                    case (Some(key1),Some(key2)) =>
-                        if key1 < key2 then
-                            var continue = true
-                            while continue && it1.hasNext() do
-                                val (k,_) = it1.next()
-                                k match 
-                                    case Some(key) => 
-                                        if key == key2 then
-                                            tempSet+=(key)
-                                        if key >= key2 then
-                                            continue = false
-                                    case None => None
-                        else if key1 == key2 then
-                            tempSet+=(key1)
-                        else
-                            var continue = true
-                            while continue && it2.hasNext() do
-                                val (k,_) = it2.next()
-                                k match 
-                                    case Some(key) => 
-                                        if key == key1 then
-                                            tempSet+=(key)
-                                        if key >= key1 then
-                                            continue = false
-                                    case None => None
-                    case _ => None
-            
-            Success(tempSet)
-        catch
-            case e:Exception => Failure(e)
+        val it1 = iterator
+        val it2 = set.iterator
+        while it1.hasNext() && it2.hasNext() do
+            val k1 = it1.next()
+            val k2 = it2.next()
+            (k1,k2) match
+                case (Some(key1,_),Some(key2,_)) =>
+                    if key1 < key2 then
+                        var continue = true
+                        while continue && it1.hasNext() do
+                            val k = it1.next()
+                            k match 
+                                case Some(key,_) => 
+                                    if key == key2 then
+                                        tempSet+=(key)
+                                    if key >= key2 then
+                                        continue = false
+                                case None => None
+                    else if key1 == key2 then
+                        tempSet+=(key1)
+                    else
+                        var continue = true
+                        while continue && it2.hasNext() do
+                            val kv = it2.next()
+                            kv match 
+                                case Some(key,_) => 
+                                    if key == key1 then
+                                        tempSet+=(key)
+                                    if key >= key1 then
+                                        continue = false
+                                case None => None
+                case _ => None
+        tempSet
         
-    def and(set:Set[String]):Try[BSet] = 
+    def and(set:Set[String]):BSet = 
         var tempSet = new TempBSet("intersect")
-        try
-            for (k,_) <- iterator do
-                k match
-                    case Some(key) if set.contains(key)  => tempSet+=(key)
-                    case _ => None
-            Success(tempSet)
-        catch
-            case e:Exception => Failure(e)
-    /**
-      * 
-      *
-      * @param set
-      * @return
-      */
-    def union(set:BSet):Try[BSet] = 
-        var tempSet = new TempBSet("union")
-        try
-            for (k,_) <- iterator do
-                k match
-                    case Some(key) => tempSet+=(key)
-                    case None => None
-            for (k,_) <- set.iterator do
-                k match
-                    case Some(key) => tempSet+=(key)
-                    case None => None
-            Success(tempSet)
-        catch
-            case e:Exception => Failure(e)
+        for kv <- iterator do
+            kv match
+                case Some(key,_) if set.contains(key)  => tempSet+=(key)
+                case _ => None
+        tempSet
         
-    def union(set:Set[String]):Try[BSet] = 
-        var tempSet = new TempBSet("union")
-        try
-            for (k,_) <- iterator do
-                k match
-                    case Some(key) => tempSet+=(key)
-                    case None => None
-            for k <- set.iterator do
-                tempSet+=(k)
-            Success(tempSet)
-        catch
-            case e:Exception => Failure(e)
     /**
       * 
       *
       * @param set
       * @return
       */
-    def diff(set:BSet):Try[BSet] = 
+    def union(set:BSet):BSet = 
+        var tempSet = new TempBSet("union")
+        for kv <- iterator do
+            kv match
+                case Some(key,_) => tempSet+=(key)
+                case None => None
+        for kv <- set.iterator do
+            kv match
+                case Some(key,_) => tempSet+=(key)
+                case None => None
+        tempSet
+        
+    def union(set:Set[String]):BSet = 
+        var tempSet = new TempBSet("union")
+        for kv <- iterator do
+            kv match
+                case Some(key,_) => tempSet+=(key)
+                case None => None
+        for k <- set.iterator do
+            tempSet+=(k)
+        tempSet
+    /**
+      * 
+      *
+      * @param set
+      * @return
+      */
+    def diff(set:BSet):BSet = 
         var tempSet = new TempBSet("difference")
-        try
-            for (k,_) <- iterator do
-                k match
-                    case None => None
-                    case Some(key) =>
-                        set.contains(key) match
-                            case Failure(e) => throw e
-                            case Success(in) if !in => tempSet+=(key)
-                            case _ => None
-            Success(tempSet)
-        catch
-            case e:Exception => Failure(e)
+        for kv <- iterator do
+            kv match
+                case None => None
+                case Some(key,_) => if !set.contains(key) then tempSet+=(key)
+        tempSet
 
-    def diff(set:Set[String]):Try[BSet] = 
+    def diff(set:Set[String]):BSet = 
         var tempSet = new TempBSet("difference")
-        try
-            for (k,_) <- iterator do
-                k match 
-                    case Some(key) if !set.contains(key) => tempSet+=(key)
-                    case _ => None
-            Success(tempSet)
-        catch
-            case e:Exception => Failure(e)
+        for kv <- iterator do
+            kv match 
+                case Some(key,_) if !set.contains(key) => tempSet+=(key)
+                case _ => None
+        tempSet
     /*
     def &(set:BSet):BSet =
         this.and(set) match
@@ -380,24 +330,13 @@ private[platdb] class BTreeSet(var bk:BTreeBucket) extends BSet:
   * @param iter
   */
 private[platdb] class BTreeSetIter(val iter:BTreeBucketIter) extends CollectionIterator:
-    def find(key:String):(Option[String],Option[String]) = 
-        val (k,_) = iter.find(key) 
-        (k,None)
-    def first():(Option[String],Option[String])  = 
-        val (k,_) = iter.first()
-        (k,None)
-    def last():(Option[String],Option[String]) = 
-        val (k,_) = iter.last()
-        (k,None)
+    def find(key:String):Option[(String,String)] = iter.find(key)
+    def first():Option[(String,String)]  = iter.first()
+    def last():Option[(String,String)] = iter.last()
     def hasNext():Boolean= iter.hasNext()
-    def next():(Option[String],Option[String])= 
-        val (k,_) = iter.next()
-        (k,None)
+    def next():Option[(String,String)]= iter.next()
     def hasPrev():Boolean = iter.hasNext()
-    def prev():(Option[String],Option[String]) = 
-        val (k,_) = iter.prev()
-        (k,None)
-
+    def prev():Option[(String,String)] = iter.prev()
 /**
   * 
   *
@@ -406,72 +345,53 @@ private[platdb] class BTreeSetIter(val iter:BTreeBucketIter) extends CollectionI
 private[platdb] class TempBSet(val name:String) extends BSet:
     var map = new TreeMap[String,Boolean]()
     def length:Long = map.size
-    def contains(key:String):Try[Boolean] = Success(map.contains(key))
-    def add(keys:Seq[String]):Try[Unit] = Success(map.addAll(for k <- keys yield (k,true)))
-    def remove(keys:Seq[String]):Try[Unit] = Success(map--=(keys))
+    def contains(key:String):Boolean = map.contains(key)
+    def add(keys:Seq[String]):Unit = map.addAll(for k <- keys yield (k,true))
+    def remove(keys:Seq[String]):Unit =map--=(keys)
     def +=(key:String):Unit = map+=(key,true)
     def -=(key:String):Unit = map-=key
     def iterator: CollectionIterator = new TempBSetIter(this)
-    def and(set:BSet):Try[BSet] = 
+    def and(set:BSet):BSet = 
         var tempSet = new TempBSet("intersect") // TODO generate a random name
-        try
-            for (k,_) <- set.iterator do
-                k match
-                    case Some(key) if map.contains(key) => tempSet+=(key)
-                    case _ => None
-            Success(tempSet)
-        catch
-            case e:Exception => Failure(e)
-    def and(set:Set[String]):Try[BSet] = 
+        for kv <- set.iterator do
+            kv match
+                case Some(key,_) if map.contains(key) => tempSet+=(key)
+                case _ => None
+        tempSet
+    def and(set:Set[String]):BSet = 
         var tempSet = new TempBSet("intersect")
-        try
-            for k <- set.iterator do
-                if map.contains(k) then tempSet+=(k)
-            Success(tempSet)
-        catch
-            case e:Exception => Failure(e)
-    def union(set:BSet):Try[BSet] = 
+        for k <- set.iterator do
+            if map.contains(k) then tempSet+=(k)
+        tempSet
+
+    def union(set:BSet):BSet = 
         var tempSet = new TempBSet("union")
-        try
-            for (k,_) <- set.iterator do
-                k match
-                    case Some(key) => tempSet+=(key)
-                    case None => None
-            for (k,_) <- map.iterator do
-                tempSet+=(k)
-            Success(tempSet)
-        catch
-            case e:Exception => Failure(e)
-    def union(set:Set[String]):Try[BSet] = 
+        for kv <- set.iterator do
+            kv match
+                case Some(key,_) => tempSet+=(key)
+                case None => None
+        for (k,_) <- map.iterator do
+            tempSet+=(k)
+        tempSet
+    def union(set:Set[String]):BSet = 
         var tempSet = new TempBSet("union")
-        try
-            for k <- set.iterator do
-                tempSet+=(k)  
-            for (k,_) <- map.iterator do
+        for k <- set.iterator do
+            tempSet+=(k)  
+        for (k,_) <- map.iterator do
+            tempSet+=(k)
+        tempSet
+    def diff(set:BSet):BSet = 
+        var tempSet = new TempBSet("difference")
+        for (k,_) <- map.iterator do
+            if !set.contains(k) then tempSet+=(k)     
+        tempSet
+    def diff(set:Set[String]):BSet = 
+        var tempSet = new TempBSet("difference")
+        for (k,_) <- map.iterator do
+            if !set.contains(k) then
                 tempSet+=(k)
-            Success(tempSet)
-        catch
-            case e:Exception => Failure(e)
-    def diff(set:BSet):Try[BSet] = 
-        var tempSet = new TempBSet("difference")
-        try
-            for (k,_) <- map.iterator do
-                set.contains(k) match
-                    case Failure(e) => throw e
-                    case Success(in) if !in => tempSet+=(k)
-                    case _ => None       
-            Success(tempSet)
-        catch
-            case e:Exception => Failure(e)
-    def diff(set:Set[String]):Try[BSet] = 
-        var tempSet = new TempBSet("difference")
-        try
-            for (k,_) <- map.iterator do
-                if !set.contains(k) then
-                    tempSet+=(k)
-            Success(tempSet)
-        catch
-            case e:Exception => Failure(e)
+        tempSet
+
     /*
     def &(set:BSet):BSet =
         this.and(set) match
@@ -510,11 +430,11 @@ private[platdb] class TempBSet(val name:String) extends BSet:
   */
 private[platdb] class TempBSetIter(val tempSet:TempBSet) extends CollectionIterator:
     private var iter = tempSet.map.keysIterator
-    def find(key:String):(Option[String],Option[String]) = 
-        if tempSet.map.contains(key) then (Some(key),None) else (None,None)
-    def first():(Option[String],Option[String])  = (Some(tempSet.map.firstKey),None)
-    def last():(Option[String],Option[String]) = (Some(tempSet.map.lastKey),None)
+    def find(key:String):Option[(String,String)] = 
+        if tempSet.map.contains(key) then Some((key,"")) else None
+    def first():Option[(String,String)]  = Some((tempSet.map.firstKey,""))
+    def last():Option[(String,String)] = Some((tempSet.map.lastKey,""))
     def hasNext():Boolean= iter.hasNext
-    def next():(Option[String],Option[String])= (Some(iter.next()),None)
+    def next():Option[(String,String)]= Some((iter.next(),""))
     def hasPrev():Boolean = false
-    def prev():(Option[String],Option[String]) = (None,None)
+    def prev():Option[(String,String)] = None

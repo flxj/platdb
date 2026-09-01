@@ -58,19 +58,21 @@ private[platdb] class MemBucket(val path:String) extends Bucket:
     def -=(keys: Seq[String]): Unit = ???
     def apply(key: String): String = ???
     def closed: Boolean = ???
-    def get(key: String): Try[String] = ???
-    def put(key: String, value: String): Try[Unit] = ???
-    def contains(key: String): Try[Boolean] = ???
-    def createBucket(name: String): Try[Bucket] = ???
-    def createBucketIfNotExists(name: String): Try[Bucket] = ???
-    def delete(key: String): Try[Unit] = ???
-    def deleteBucket(name: String): Try[Unit] = ???
-    def getBucket(name: String): Try[Bucket] = ???
+    def get(key: String): Option[String] = ???
+    def put(key: String, value: String): Unit = ???
+    def contains(key: String): Boolean = ???
+    def createBucket(name: String): Option[Bucket] = ???
+    def createBucketIfNotExists(name: String): Option[Bucket] = ???
+    def delete(key: String): Unit = ???
+    def deleteBucket(name: String): Unit = ???
+    def getBucket(name: String): Option[Bucket] = ???
     def iterator: CollectionIterator = ???
     def length: Long = ???
     def name: String = ???
     def getOrElse(key:String,defalutValue:String):String = ???
     def update(key: String, value: String): Unit = ???
+
+    def clean():Unit = ???
 
 
     def writeTo(path:String):Unit = None 

@@ -59,21 +59,21 @@ trait Region:
       * @param Value
       * @return
       */
-    def mark(coordinate:Array[Double],key:String,Value:String):Try[Unit]
+    def mark(coordinate:Array[Double],key:String,Value:String):Unit
     /**
       * Insert a spatial object into the current region
       *
       * @param obj
       * @return
       */
-    def put(obj:SpatialObject):Try[Unit]
+    def put(obj:SpatialObject):Unit
     /**
       * Query spatial object information
       *
       * @param key
       * @return
       */
-    def get(key:String):Try[SpatialObject]
+    def get(key:String):Option[SpatialObject]
     /**
       * Query and filter all objects that intersect with the given query window
       *
@@ -81,21 +81,21 @@ trait Region:
       * @param filter
       * @return
       */
-    def search(range:Rectangle,filter:(SpatialObject)=>Boolean):Try[Seq[SpatialObject]]
+    def search(range:Rectangle,filter:(SpatialObject)=>Boolean):Option[Seq[SpatialObject]]
     /**
       * Filter all objects in the entire area
       *
       * @param filter
       * @return
       */
-    def scan(filter:(SpatialObject)=>Boolean):Try[Seq[SpatialObject]]
+    def scan(filter:(SpatialObject)=>Boolean):Option[Seq[SpatialObject]]
     /**
       * Delete a spatial object
       *
       * @param key
       * @return
       */
-    def delete(key:String):Try[Unit]
+    def delete(key:String):Unit
     /**
       * Filter and delete objects within the specified range (intersecting with the query window)
       *
@@ -103,20 +103,20 @@ trait Region:
       * @param filter
       * @return
       */
-    def delete(range:Rectangle,filter:(SpatialObject)=>Boolean):Try[Unit]
+    def delete(range:Rectangle,filter:(SpatialObject)=>Boolean):Unit
     /**
       * Delete all objects containing range (completely covering the query window)
       *
       * @param range
       * @return
       */
-    def delete(range:Rectangle):Try[Unit] 
+    def delete(range:Rectangle):Unit
     /**
       * Returns the range of the entire region
       *
       * @return
       */
-    def boundary():Try[Rectangle]
+    def boundary():Option[Rectangle]
     /**
       * 
       *
@@ -125,7 +125,7 @@ trait Region:
       * @param distFunc
       * @return
       */
-    def nearby(obj:SpatialObject,filter:(SpatialObject)=>Boolean)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]]
+    def nearby(obj:SpatialObject,filter:(SpatialObject)=>Boolean)(using distFunc:(SpatialObject,SpatialObject)=>Double):Seq[(SpatialObject,Double)]
     /**
       * Query k objects closest to obj object.
       *
@@ -134,7 +134,7 @@ trait Region:
       * @param distFunc
       * @return
       */
-    def nearby(obj:SpatialObject,k:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]]
+    def nearby(obj:SpatialObject,k:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Seq[(SpatialObject,Double)]
     /**
       * Query the k objects closest to the key object
       *
@@ -143,7 +143,7 @@ trait Region:
       * @param distFunc
       * @return
       */
-    def nearby(key:String,k:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]]
+    def nearby(key:String,k:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Seq[(SpatialObject,Double)]
     /**
       * Query all other objects with a distance less than or equal to d from the obj object
       *
@@ -153,7 +153,7 @@ trait Region:
       * @param distFunc
       * @return
       */
-    def nearby(obj:SpatialObject,d:Double,limit:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]]
+    def nearby(obj:SpatialObject,d:Double,limit:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Seq[(SpatialObject,Double)]
     /**
       * A convenient method for adding spatial objects, equivalent to putting
       *
@@ -291,7 +291,7 @@ case class Rectangle(min:Array[Double],max:Array[Double]):
       */
     def beCoverd(r:Rectangle):Boolean = r.cover(this)
     /**
-      * 要覆盖r所需要的最小面积扩张
+      *
       *
       * @param r
       * @return
@@ -714,24 +714,24 @@ private[platdb] object RTreeBucket:
         val c = Base64.getEncoder().encodeToString(buf.array())
         c+"|"+obj.data
     //
-    def apply(bk:Bucket,tx:Tx):Try[RTreeBucket] = 
+    def apply(bk:Bucket,tx:Tx):Option[RTreeBucket] = 
         bk.get(metaKey) match
-            case Failure(e) => Failure(e)
-            case Success(v) =>
+            case None => None
+            case Some(v) =>
                 unmashalValue(v) match
-                    case None => Failure(new Exception("parse region meta info failed"))
+                    case None => throw new Exception("parse region meta info failed")
                     case Some(value) => 
                         var rbk = new RTreeBucket(bk,tx)
                         rbk.value = value
-                        Success(rbk)
+                        Some(rbk)
     //
-    def apply(bk:Bucket,dimension:Int,tx:Tx):Try[RTreeBucket] = 
-        if dimension<=0 then
-            return Failure(new Exception(s"dimension should larger than 0"))
+    def apply(bk:Bucket,dimension:Int,tx:Tx):Option[RTreeBucket] = 
+        if dimension <= 0 then
+            throw new Exception(s"dimension should larger than 0")
         // TODO if is to large?
         var rbk = new RTreeBucket(bk,tx)
         rbk.value = new RegionValue(-1L,dimension,DB.minEntries,DB.maxEntries)
-        Success(rbk)
+        Some(rbk)
 
 /**
   * 
@@ -753,178 +753,135 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
     //
     def iterator:Iterator[SpatialObject] = new RTreeBucketIter(this)
     //
-    def +=(obj: SpatialObject): Unit = 
-        put(obj) match
-            case Failure(e) => throw e
-            case Success(_) => None
+    def +=(obj: SpatialObject): Unit = put(obj) 
     //
-    def -=(key: String): Unit = 
-        delete(key) match
-            case Failure(e) => throw e
-            case Success(_) => None 
+    def -=(key: String): Unit = delete(key) 
     //
     def update(key: String, obj: SpatialObject): Unit = 
-        delete(key) match
-            case Failure(e) => 
-                if !DB.isNotExists(e) then
-                    throw e
-            case Success(_) => None
-        put(obj) match
-            case Failure(e) => throw e
-            case Success(_) => None
+        delete(key) 
+        put(obj) 
     //
-    def mark(coordinate:Array[Double],key:String,data:String):Try[Unit] =
+    def mark(coordinate:Array[Double],key:String,data:String):Unit =
         val rect = Rectangle(coordinate,coordinate)
         put(SpatialObject(rect,key,data,rect.isPoint))
     //
-    def put(obj:SpatialObject):Try[Unit] = 
+    def put(obj:SpatialObject):Unit = 
         if obj.dimension != dimension then
-            return Failure(new Exception(s"the dimension(${obj.dimension}) of object is not match region"))
+            throw new Exception(s"the dimension(${obj.dimension}) of object is not match region")
         bk.get(obj.key) match
-            case Failure(e) => 
-                if !DB.isNotExists(e) then
-                    return Failure(e)
-            case Success(v) => 
-                delete(obj.key) match
-                    case Failure(e) => return Failure(e)
-                    case Success(_) => None
+            case None => None
+            case Some(v) => delete(obj.key)  
         var itr = new RTreeBucketIter(this)
         itr.searchInsertNode(obj.coord) match
-            case Failure(e) => return Failure(e)
+            case Failure(e) => throw e
             case Success(_) => None
         itr.node() match
-            case Failure(e) => return Failure(e)
+            case Failure(e) => throw e
             case Success(node) =>
-                bk.put(obj.key,RTreeBucket.wrapData(obj)) match
-                    case Failure(e) => return Failure(e)
-                    case Success(_) =>
-                        node.put(obj)
-                        // update search path.
-                        var rect = obj.coord
-                        try
-                            for r <- itr.stack.reverse.tail do
-                                (r.node,r.block,r.index) match
-                                    case (Some(n),_,idx) => 
-                                        val (_,rec) = n.entries(idx).mbr.enlargeAreaToCover(rect)
-                                        n.entries(idx).mbr = rec
-                                        rect = rec
-                                    case (None,Some(b),idx) => 
-                                        getNodeByBlock(b) match
-                                            case Failure(e) => throw e
-                                            case Success(n) =>
-                                                val (_,rec) = n.entries(idx).mbr.enlargeAreaToCover(rect)
-                                                n.entries(idx).mbr = rec
-                                                rect = rec
-                                    case (None,None,_) => throw new Exception("search path element is null")
-                            Success(None)
-                        catch
-                            case e:Exception => Failure(e)
+                bk.put(obj.key,RTreeBucket.wrapData(obj)) 
+                node.put(obj)
+                // update search path.
+                var rect = obj.coord
+                for r <- itr.stack.reverse.tail do
+                    (r.node,r.block,r.index) match
+                        case (Some(n),_,idx) => 
+                            val (_,rec) = n.entries(idx).mbr.enlargeAreaToCover(rect)
+                            n.entries(idx).mbr = rec
+                            rect = rec
+                        case (None,Some(b),idx) => 
+                            getNodeByBlock(b) match
+                                case Failure(e) => throw e
+                                case Success(n) =>
+                                    val (_,rec) = n.entries(idx).mbr.enlargeAreaToCover(rect)
+                                    n.entries(idx).mbr = rec
+                                    rect = rec
+                        case (None,None,_) => throw new Exception("search path element is null")
     //
-    def get(key:String):Try[SpatialObject] = 
+    def get(key:String):Option[SpatialObject] = 
         bk.get(key) match
-            case Failure(e) => Failure(e)
-            case Success(v) =>
+            case None => None
+            case Some(v) =>
                 RTreeBucket.unwarpData(v,dimension) match
-                    case Failure(e) => Failure(e)
+                    case Failure(e) => throw e
                     case Success(d) =>
                         val (r,data) = d
-                        Success(SpatialObject(r,key,data,r.isPoint))
+                        Some(SpatialObject(r,key,data,r.isPoint))
     // 
-    def search(range:Rectangle,filter:(SpatialObject)=>Boolean):Try[Seq[SpatialObject]] = 
-        if range.dimension!=dimension then
-            return Failure(new Exception(s"the dimension(${range.dimension}) of query window is not match region"))
+    def search(range:Rectangle,filter:(SpatialObject)=>Boolean):Option[Seq[SpatialObject]] = 
+        if range.dimension != dimension then
+            throw new Exception(s"the dimension(${range.dimension}) of query window is not match region")
         var itr = new RTreeBucketIter(this)
         itr.searchIntersectNode(range) match
-            case Failure(e) => Failure(e)
+            case Failure(e) => throw e
             case Success(ns) =>
-                try
-                    var res = List[SpatialObject]()
-                    for n <- ns do
-                        for e <- n.entries do
-                            val v = bk(e.key)
-                            RTreeBucket.unwarpData(v,dimension) match
-                                case Failure(exception) => throw exception
-                                case Success((_,data)) =>
-                                    val so = SpatialObject(e.mbr,e.key,data,e.mbr.isPoint)
-                                    if filter(so) then
-                                        res:+=so
-                    Success(res)
-                catch
-                    case e:Exception => Failure(e)
+                var res = List[SpatialObject]()
+                for n <- ns do
+                    for e <- n.entries do
+                        val v = bk(e.key)
+                        RTreeBucket.unwarpData(v,dimension) match
+                            case Failure(e) => throw e
+                            case Success((_,data)) =>
+                                val so = SpatialObject(e.mbr,e.key,data,e.mbr.isPoint)
+                                if filter(so) then
+                                    res:+=so
+                Some(res)
     //
-    def scan(filter:(SpatialObject)=>Boolean):Try[Seq[SpatialObject]] = 
-        try
-            Success((for so <- iterator if filter(so) yield so).toList)
-        catch
-            case e:Exception => Failure(e)
+    def scan(filter:(SpatialObject)=>Boolean):Option[Seq[SpatialObject]] = 
+        Some((for so <- iterator if filter(so) yield so).toList)
     //
-    def delete(key:String):Try[Unit] = 
+    def delete(key:String):Unit = 
         bk.get(key) match
-            case Failure(e) => Failure(e)
-            case Success(v) =>
+            case None => None
+            case Some(v) =>
                 RTreeBucket.unwarpData(v,dimension) match
-                    case Failure(exception) => throw exception
+                    case Failure(e) => throw e
                     case Success((r,_)) => delete(r,(s:SpatialObject) => s.key == key)
     //
-    def delete(range:Rectangle,filter:(SpatialObject)=>Boolean):Try[Unit] = 
+    def delete(range:Rectangle,filter:(SpatialObject)=>Boolean):Unit = 
         var itr = new RTreeBucketIter(this)
         itr.searchIntersectNode(range) match
-            case Failure(e) => return Failure(e)
+            case Failure(e) => throw e
             case Success(ns) =>
-                try
-                    for n <- ns do
-                        var keys = List[String]()
-                        for e <- n.entries do
-                            val v = bk(e.key) // TODO ignore not exists err
-                            RTreeBucket.unwarpData(v,dimension) match
-                                case Failure(exception) => throw exception
-                                case Success((_,data)) =>
-                                    val so = SpatialObject(e.mbr,e.key,data,e.mbr.isPoint)
-                                    if filter(so) then
-                                        keys:+=e.key
-                        for k <- keys do
-                            bk.delete(k) match
-                                case Failure(e) => throw e // TODO ignore not exists err
-                                case Success(_) => None
-                            n.del(keys)
-                    Success(None)
-                catch
-                    case e:Exception => Failure(e)
+                for n <- ns do
+                    var keys = List[String]()
+                    for e <- n.entries do
+                        val v = bk(e.key) // TODO ignore not exists err
+                        RTreeBucket.unwarpData(v,dimension) match
+                            case Failure(e) => throw e
+                            case Success((_,data)) =>
+                                val so = SpatialObject(e.mbr,e.key,data,e.mbr.isPoint)
+                                if filter(so) then
+                                    keys:+=e.key
+                    for k <- keys do bk.delete(k) 
     //
-    def delete(range:Rectangle):Try[Unit] =
+    def delete(range:Rectangle):Unit =
         var itr = new RTreeBucketIter(this)
         itr.searchCoverNode(range) match
-            case Failure(e) => return Failure(e)
+            case Failure(e) => throw e
             case Success(ns) =>
-                try
-                    for n <- ns do
-                        var keys = List[String]()
-                        for e <- n.entries do
-                            if e.mbr.cover(range) then
-                                keys :+= e.key 
-                        for k <- keys do
-                            bk.delete(k) match
-                                case Failure(e) => throw e // TODO ignore not exists err
-                                case Success(_) => None
-                            n.del(keys)
-                    Success(None)
-                catch
-                    case e:Exception => Failure(e)
+                for n <- ns do
+                    var keys = List[String]()
+                    for e <- n.entries do
+                        if e.mbr.cover(range) then
+                            keys :+= e.key 
+                    for k <- keys do
+                        bk.delete(k)
+                        n.del(keys)
     //
-    def boundary():Try[Rectangle] = 
+    def boundary():Option[Rectangle] = 
         root match
-            case Some(node) => Success(node.mbr)
+            case Some(node) => Some(node.mbr)
             case None => 
                 getNode(value.root) match
-                    case Failure(e) => Failure(e)
-                    case Success(node) => Success(node.mbr)
+                    case Failure(e) => throw e
+                    case Success(node) => Some(node.mbr)
     //
-    def nearby(obj:SpatialObject,filter:(SpatialObject)=>Boolean)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]] =
+    def nearby(obj:SpatialObject,filter:(SpatialObject)=>Boolean)(using distFunc:(SpatialObject,SpatialObject)=>Double):Seq[(SpatialObject,Double)] =
         var list = List[(SpatialObject,Double)]()
         var que = new queue()
         root match
             case None => getNode(value.root) match
-                case Failure(e) => return Failure(e)
+                case Failure(e) => throw e
                 case Success(node) =>
                     root = Some(node)
                     que.push(element(0.0,node.mbr,Some(node),None))
@@ -958,17 +915,17 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                                     que.push(elt)       
         )
         err match
-            case Some(msg) => Failure(new Exception(msg))
-            case None => Success(list)
+            case Some(msg) => throw new Exception(msg)
+            case None => list
     //
-    def nearby(obj:SpatialObject,k:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]] = 
-        if k<=0 then
-            return Failure(new Exception("parameter k should larger than zero"))
+    def nearby(obj:SpatialObject,k:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Seq[(SpatialObject,Double)] = 
+        if k <= 0 then
+            throw new Exception("parameter k should larger than zero")
         var list = List[(SpatialObject,Double)]()
         var que = new queue()
         root match
             case None => getNode(value.root) match
-                case Failure(e) => return Failure(e)
+                case Failure(e) => throw e
                 case Success(node) =>
                     root = Some(node)
                     que.push(element(0.0,node.mbr,Some(node),None))
@@ -1004,24 +961,24 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                                     que.push(elt)       
         )
         err match
-            case Some(msg) => Failure(new Exception(msg))
-            case None => Success(list)
+            case Some(msg) => throw new Exception(msg)
+            case None => list
     //
-    def nearby(key:String,k:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]] = 
+    def nearby(key:String,k:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Seq[(SpatialObject,Double)] = 
         get(key) match
-            case Failure(e) => Failure(e)
-            case Success(obj) => nearby(obj,k)(using distFunc)
+            case None => List[(SpatialObject,Double)]()
+            case Some(obj) => nearby(obj,k)(using distFunc)
     //
-    def nearby(obj:SpatialObject,d:Double,limit:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Try[Seq[(SpatialObject,Double)]] = 
+    def nearby(obj:SpatialObject,d:Double,limit:Int)(using distFunc:(SpatialObject,SpatialObject)=>Double):Seq[(SpatialObject,Double)] = 
         if limit <= 0 then
-            return Failure(new Exception("parameter limit should larger than zero"))
+            throw new Exception("parameter limit should larger than zero")
         if d < 0.0 then
-            return Failure(new Exception("parameter d should larger than zero"))
+            throw new Exception("parameter d should larger than zero")
         var list = List[(SpatialObject,Double)]()
         var que = new queue()
         root match
             case None => getNode(value.root) match
-                case Failure(e) => return Failure(e)
+                case Failure(e) => throw e
                 case Success(node) =>
                     root = Some(node)
                     que.push(element(0.0,node.mbr,Some(node),None))
@@ -1057,17 +1014,15 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                                                 que.push(element(distFunc(obj,sobj),e.mbr,Some(n),None))                   
         )
         err match
-            case Some(msg) => Failure(new Exception(msg))
-            case None => Success(list)
+            case Some(msg) => throw new Exception(msg)
+            case None => list
     //
-    def getData(key:String):Try[String] = 
-        try 
-            val v = bk(key)
-            RTreeBucket.unwarpData(v,dimension) match
-                case Failure(exception) => throw exception
-                case Success((_,data)) => Success(data)
-        catch
-            case e:Exception => Failure(e)
+    def getData(key:String):Option[String] = 
+        val v = bk(key)
+        RTreeBucket.unwarpData(v,dimension) match
+            case Failure(exception) => throw exception
+            case Success((_,data)) => Some(data)
+        
     //
     def nodeOrBlock(id:Long):Try[(Option[RNode],Option[Block])] = 
         if nodes.contains(id) then 
@@ -1258,17 +1213,13 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                     reInsertNodes :+= node
                 condense(p,threshold)
     //
-    def clear():Try[Unit] = 
-        try
-            root match
-                case None => 
-                    getNode(value.root) match
-                        case Failure(e) => throw e
-                        case Success(node) => freeNode(node) 
-                case Some(node) => freeNode(node)
-            Success(None)
-        catch
-            case e:Exception => Failure(e)
+    def clear():Unit = 
+        root match
+            case None => 
+                getNode(value.root) match
+                    case Failure(e) => throw e
+                    case Success(node) => freeNode(node) 
+            case Some(node) => freeNode(node)
         
     // release subtree or node.
     private def freeNode(node:RNode):Unit = 
@@ -1362,7 +1313,6 @@ private[platdb] class RTreeBucketIter(val rbk:RTreeBucket) extends Iterator[Spat
      def hasNext():Boolean = ???
      def next():SpatialObject = ???
 
-    // 查询所有可能完全覆盖rect的节点
     def searchCoverNode(rect:Rectangle):Try[Seq[RNode]] = 
         rbk.getNode(rbk.value.root) match
             case Failure(e) => Failure(e)
@@ -1386,7 +1336,6 @@ private[platdb] class RTreeBucketIter(val rbk:RTreeBucket) extends Iterator[Spat
                         case Failure(e) => throw e
                         case Success(cn) => res:++= seekCoverNode(rect,cn)
             res
-    // 搜索所有和给定rect相交的对象
     def searchIntersectNode(rect:Rectangle):Try[Seq[RNode]]  =
         rbk.getNode(rbk.value.root) match
             case Failure(e) => Failure(e)
@@ -1410,8 +1359,6 @@ private[platdb] class RTreeBucketIter(val rbk:RTreeBucket) extends Iterator[Spat
                         case Failure(e) => throw e
                         case Success(cn) => res:++= seekIntersectNode(rect,cn)
             res
-
-    // 搜索插入节点
     def searchInsertNode(rect:Rectangle):Try[Unit] =
         try
             seek(rect,rbk.value.root)

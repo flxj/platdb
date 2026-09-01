@@ -66,8 +66,8 @@ object Collection:
       */
     def openBucket(name:String)(using tx:Transaction):Bucket =
         tx.openBucket(name) match
-            case Success(bk) => bk
-            case Failure(e) => throw e 
+            case Some(bk) => bk
+            case None => throw new Exception(s"bucket ${name} not exists")
     /**
       * This method has the same meaning as the createBucket method of the Transaction trait, 
       * but it may throw an exception.
@@ -79,8 +79,8 @@ object Collection:
       */
     def createBucket(name:String)(using tx:Transaction):Bucket =
         tx.createBucket(name) match
-            case Success(bk) => bk
-            case Failure(e) => throw e
+            case Some(bk) => bk
+            case None => throw new Exception(s"create bucket ${name} failed")
     /**
       * This method has the same meaning as the createBucketIfNotExists method of the Transaction trait, 
       * but it may throw an exception
@@ -92,8 +92,8 @@ object Collection:
       */
     def createBucketIfNotExists(name:String)(using tx:Transaction):Bucket =
         tx.createBucketIfNotExists(name) match
-            case Success(bk) => bk
-            case Failure(e) => throw e
+            case Some(bk) => bk
+            case None => throw new Exception(s"create bucket ${name} failed")
     /**
       * This method has the same meaning as the deleteBucket method of the Transaction trait, 
       * but it may throw an exception
@@ -102,10 +102,7 @@ object Collection:
       * @param tx
       * @throws
       */
-    def deleteBucket(name:String)(using tx:Transaction):Unit = 
-        tx.deleteBucket(name) match
-            case Success(_) => None
-            case Failure(e) => throw e
+    def deleteBucket(name:String)(using tx:Transaction):Unit = tx.deleteBucket(name) 
     /**
       * This method has the same meaning as the openSet method of the Transaction trait,
       *  but it may throw an exception
@@ -117,8 +114,8 @@ object Collection:
       */
     def openSet(name:String)(using tx:Transaction):BSet =
         tx.openBSet(name) match
-            case Success(set) => set
-            case Failure(e) => throw e 
+            case Some(set) => set
+            case None => throw new Exception(s"set ${name} not exists")
     /**
       * This method has the same meaning as the createSet method of the Transaction trait, 
       * but it may throw an exception
@@ -130,8 +127,8 @@ object Collection:
       */
     def createSet(name:String)(using tx:Transaction):BSet =
         tx.createBSet(name) match
-            case Success(set) => set
-            case Failure(e) => throw e
+            case Some(set) => set
+            case None => throw new Exception(s"create set ${name} failed")
     /**
       * This method has the same meaning as the createSetIfNotExists method of the Transaction trait, 
       * but it may throw an exception
@@ -143,8 +140,8 @@ object Collection:
       */
     def createSetIfNotExists(name:String)(using tx:Transaction):BSet =
         tx.createBSetIfNotExists(name) match
-            case Success(set) => set
-            case Failure(e) => throw e
+            case Some(set) => set
+            case None => throw new Exception(s"create set ${name} failed")
     /**
       * This method has the same meaning as the deleteSet method of the Transaction trait, 
       * but it may throw an exception
@@ -153,10 +150,7 @@ object Collection:
       * @param tx
       * @throws
       */
-    def deleteSet(name:String)(using tx:Transaction):Unit = 
-        tx.deleteBSet(name) match
-            case Success(_) => None
-            case Failure(e) => throw e
+    def deleteSet(name:String)(using tx:Transaction):Unit = tx.deleteBSet(name) 
     /**
       * This method has the same meaning as the openList method of the Transaction trait, 
       * but it may throw an exception.
@@ -168,8 +162,8 @@ object Collection:
       */
     def openList(name:String)(using tx:Transaction):BList =
         tx.openList(name) match
-            case Success(bk) => bk
-            case Failure(e) => throw e 
+            case Some(list) => list
+            case None => throw new Exception(s"list ${name} not exists")
     /**
       * This method has the same meaning as the createList method of the Transaction trait, 
       * but it may throw an exception.
@@ -181,8 +175,8 @@ object Collection:
       */
     def createList(name:String)(using tx:Transaction):BList =
         tx.createList(name) match
-            case Success(bk) => bk
-            case Failure(e) => throw e
+            case Some(list) => list
+            case None => throw new Exception(s"create list ${name} failed")
     /**
       * This method has the same meaning as the createListIfNotExists method of the Transaction trait, 
       * but it may throw an exception.
@@ -194,8 +188,8 @@ object Collection:
       */
     def createListIfNotExists(name:String)(using tx:Transaction):BList =
         tx.createListIfNotExists(name) match
-            case Success(bk) => bk
-            case Failure(e) => throw e
+            case Some(list) => list
+            case None => throw new Exception(s"create list ${name} failed")
     /**
       * This method has the same meaning as the deleteList method of the Transaction trait, 
       * but it may throw an exception.
@@ -204,10 +198,7 @@ object Collection:
       * @param tx
       * @throws
       */
-    def deleteList(name:String)(using tx:Transaction):Unit = 
-        tx.deleteList(name) match
-            case Success(_) => None
-            case Failure(e) => throw e
+    def deleteList(name:String)(using tx:Transaction):Unit = tx.deleteList(name)
     /**
       * This method has the same meaning as the openRegion method of the Transaction trait, 
       * but it may throw an exception.
@@ -219,8 +210,8 @@ object Collection:
       */
     def openRegion(name:String)(using tx:Transaction):Region =
         tx.openRegion(name) match
-            case Success(r) => r
-            case Failure(e) => throw e 
+            case Some(r) => r
+            case None => throw new Exception(s"region ${name} not exists")
     /**
       * This method has the same meaning as the createRegion method of the Transaction trait, 
       * but it may throw an exception.
@@ -232,8 +223,8 @@ object Collection:
       */
     def createRegion(name:String,dimension:Int)(using tx:Transaction):Region =
         tx.createRegion(name,dimension) match
-            case Success(r) => r
-            case Failure(e) => throw e
+            case Some(r) => r
+            case None => throw new Exception(s"create region ${name} failed")
     /**
       * This method has the same meaning as the createRegionIfNotExists method of the Transaction trait, 
       * but it may throw an exception.
@@ -245,8 +236,8 @@ object Collection:
       */
     def createRegionIfNotExists(name:String,dimension:Int)(using tx:Transaction):Region =
         tx.createRegionIfNotExists(name,dimension) match
-            case Success(r) => r
-            case Failure(e) => throw e
+            case Some(r) => r
+            case None => throw new Exception(s"create region ${name} failed")
     /**
       * This method has the same meaning as the deleteRegion method of the Transaction trait, 
       * but it may throw an exception.
@@ -255,7 +246,4 @@ object Collection:
       * @param tx
       * @throws
       */
-    def deleteRegion(name:String)(using tx:Transaction):Unit = 
-        tx.deleteRegion(name) match
-            case Success(_) => None
-            case Failure(e) => throw e
+    def deleteRegion(name:String)(using tx:Transaction):Unit = tx.deleteRegion(name) 

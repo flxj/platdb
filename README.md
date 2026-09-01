@@ -45,7 +45,7 @@ import platdb._
 import platdb.defaultOptions // Default db configuration
 
 val path = "/tmp/my.db" // If the file does not exist, platdb will attempt to create and initialize it
-var db = new DB(path)
+var db = DB(path)
 db.open() match
     case Failure(e) => println(e.getMessage()) 
     case Success(_) => None
@@ -97,11 +97,11 @@ db.view(
     (tx:Transaction) =>
         // Perform some reading operations, such as opening and reading some content from the bucket
         tx.openBucket("bucketName") match
-            case Failure(e) => throw e
-            case Success(bk) =>
+            case None => None
+            case Some(bk) =>
                 bk.get("key") match
-                    case Failure(e) => throw e
-                    case Success(value) => println(value)
+                    case None => None
+                    case Some(value) => println(value)
 ) match
     case Failure(e) => println(e.getMessage())
     case Success(_) => None 
@@ -137,17 +137,11 @@ db.update(
     (tx:Transaction) =>
         // Perform some read and write operations, such as opening and modifying some content in the list at this point
         tx.openList("listName") match
-            case Failure(e) => throw e
-            case Success(list) =>
-                list.append("value1") match
-                    case Failure(e) => throw e
-                    case Success(_) => None
-                list.prepend("value2") match
-                    case Failure(e) => throw e
-                    case Success(_) => None
-                list.update(3,"value3") match
-                    case Failure(e) => throw e
-                    case Success(_) => None
+            case None => None
+            case Some(list) =>
+                list.append("value1") 
+                list.prepend("value2") 
+                list.update(3,"value3")
 ) match
     case Failure(e) => println(e.getMessage())
     case Success(_) => None    
@@ -184,18 +178,14 @@ try
     db.begin(true) match
         case Failure(e) => throw e
         case Success(tx) =>
-            // use the transaction here
-            tx.commit() match
-                case Failure(e) => throw e
-                case Success(_) => None
+            /*
+                use the transaction here
+            */
+            tx.commit()
 catch
-    case e:Exception => 
-        if tx!=null then
-            tx.rollback() match
-                case Failure(e) => // process the error if need
-                case Success(_) => None
-        // process the error if need
-   
+    case e:Exception =>  // process the error if need
+finally
+    if tx != null then tx.rollback()     
 ```
 When manually managing a transaction, it is important to remember to manually close the transaction (explicitly calling the rollback/commit method). 
 
@@ -250,16 +240,15 @@ db.update(
         bk-=("key1")
 
         // Traverse buckets (in ascending dictionary order of keys)
-        for e <- bk.iterator do
-            e match 
-                case (None,None) => None
-                case (Some(k),None) => 
-                case (Some(k),Some(v)) =>
+        for kv <- bk.iterator do
+            kv match 
+                case Some(k,v) => println(s"key=${k},value=${v}")
+                case None => None
 
         // Open a nested sub bucket
         bk.openBucket("subBucketName") match
-            case Failure(e) => throw e
-            case Success(sbk) => None
+            case None => None
+            case Some(sbk) => println(s"bucket name is ${sbk.name}")
 ) match
     case Failure(e) => println(e.getMessage())
     case Success(_) => None  
@@ -286,9 +275,8 @@ db.update(
         set+=(elems)
         
         // Determine whether an element exists
-        set.contains("elem4") match
-            case Failure(e) => throw e
-            case Success(flag) => println(flag)
+        if set.contains("elem4") then
+            println("exists")
 
         // Delete Element
         set-=("elem1")
@@ -296,8 +284,8 @@ db.update(
         // Traverse (in ascending dictionary order of elements)
         for e <- set.iterator do
             e match 
-                case (None,_) => None
-                case (Some(k),_) =>
+                case None => None
+                case Some(k,_) => println(k)
         
         // Open an existing set
         val set2 = openSet("setName2")
@@ -344,19 +332,15 @@ db.update(
         list(1) = "newElem"
 
         // Delete an element
-        list.remove(100) match
-            case Failure(e) => throw e
-            case Success(_) => None 
+        list.remove(100)
 
         // Insert Element
-        list.insert(100, "value") match
-            case Failure(e) => throw e
-            case Success(_) => None 
+        list.insert(100, "value")
 
         // Slice operation
         list.slice(400,500) match
-            case Failure(e) => throw e
-            case Success(sublist) => 
+            case None => None
+            case Some(sublist) => println(sublist.length)
 ) match
     case Failure(e) => println(e.getMessage())
     case Success(_) => None 
@@ -691,7 +675,7 @@ docker run --name xxxxx -p 8080:8080 -v /data:/var/lib/platdb image-name
 
 ### 👇 TODO
 
-❎ Supplement some test cases
+❎ Add some test cases
 
 ❎ Implement some memory data structures
 

@@ -18,30 +18,32 @@ package platdb
 
 import scala.util.Try
 import scala.util.control.Breaks._
+import scala.collection.mutable.{ArrayBuffer}
+import scala.collection.mutable
 
 /**
   * CollectionIterator is used to traverse platdb data structs.
   */
-trait CollectionIterator extends Iterator[(Option[String],Option[String])]:
+trait CollectionIterator extends Iterator[Option[(String,String)]]:
     /**
       * Retrieves the specified element.
       *
       * @param key
       * @return
       */
-    def find(key:String):(Option[String],Option[String])
+    def find(key:String):Option[(String,String)]
     /**
       * moves the iterator to the first item in the bucket and returns its key and value.
       *
       * @return
       */
-    def first():(Option[String],Option[String]) 
+    def first():Option[(String,String)]
     /**
       * moves the iterator to the last item in the bucket and returns its key and value.
       *
       * @return
       */
-    def last():(Option[String],Option[String]) 
+    def last():Option[(String,String)]
     /**
       * Determine if there is the next element of the current iterator.
       *
@@ -53,7 +55,7 @@ trait CollectionIterator extends Iterator[(Option[String],Option[String])]:
       *
       * @return
       */
-    def next():(Option[String],Option[String])
+    def next():Option[(String,String)]
     /**
       * Determine whether the current iterator has the previous element.
       *
@@ -65,12 +67,12 @@ trait CollectionIterator extends Iterator[(Option[String],Option[String])]:
       *
       * @return
       */
-    def prev():(Option[String],Option[String]) 
+    def prev():Option[(String,String)]
 
 /**
   * Platdb iterable object.
   */
-trait Iterable:
+trait PlatDBIterable:
     /**
       * the elements number of current collection.
       *
@@ -117,17 +119,17 @@ private[platdb] class BTreeBucketIter(private var bucket:BTreeBucket) extends Co
       * @param key
       * @return
       */
-    def find(key:String):(Option[String],Option[String]) = 
-        if bucket.closed then return (None,None)
+    def find(key:String):Option[(String,String)] = 
+        if bucket.closed then return None
         stack = List[Record]()
         seek(key,bucket.bkv.root)
         current() match 
-            case None => (None,None)
+            case None => None 
             case Some(e) =>
                 if e.flag == bucketType then 
-                    (Some(e.key),None)
+                    Some((e.key,DB.magicStr))
                 else
-                    (Some(e.key),Some(e.value))
+                    Some((e.key,e.value))
     /**
       * moves the iterator to the first item in the bucket and returns its key and value.
       * If the bucket is empty then a None key and None value are returned.
@@ -135,8 +137,8 @@ private[platdb] class BTreeBucketIter(private var bucket:BTreeBucket) extends Co
       *
       * @return
       */
-    def first():(Option[String],Option[String]) = 
-        if bucket.closed then return (None,None)
+    def first():Option[(String,String)] = 
+        if bucket.closed then return None
         stack = List[Record]()
         
         val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
@@ -148,28 +150,28 @@ private[platdb] class BTreeBucketIter(private var bucket:BTreeBucket) extends Co
             moveToNext()
         
         current() match
-            case None => (None,None)
+            case None => None 
             case Some(e) =>
                 if e.flag == bucketType then 
-                    (Some(e.key),None)
+                    Some((e.key,DB.magicStr))
                 else
-                    (Some(e.key),Some(e.value))
+                    Some((e.key,e.value))
     /**
       * iterator move to next leaf node element, return the key and value.
       * if the element is a subbucket,then the value is None.
       *
       * @return
       */
-    def next():(Option[String],Option[String]) = 
-        if bucket.closed then return (None,None)
+    def next():Option[(String,String)] = 
+        if bucket.closed then return None
         moveToNext()
         current() match
-            case None => (None,None)
+            case None => None
             case Some(e) =>
                 if e.flag == bucketType then 
-                    (Some(e.key),None)
+                    Some((e.key,""))
                 else
-                    (Some(e.key),Some(e.value))
+                    Some((e.key,e.value))
     /**
       * check if has successor elements in current buckets.
       *
@@ -199,8 +201,8 @@ private[platdb] class BTreeBucketIter(private var bucket:BTreeBucket) extends Co
       *
       * @return
       */
-    def last():(Option[String],Option[String])  = 
-        if bucket.closed then return (None,None)
+    def last():Option[(String,String)]  = 
+        if bucket.closed then return None
         stack = List[Record]()
         val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
         var r = new Record(n,b,0)
@@ -212,28 +214,28 @@ private[platdb] class BTreeBucketIter(private var bucket:BTreeBucket) extends Co
             moveToPrev()
         
         current() match
-            case None => (None,None)
+            case None => None
             case Some(e) =>
                 if e.flag == bucketType then 
-                    (Some(e.key),None)
+                    Some((e.key,DB.magicStr))
                 else
-                    (Some(e.key),Some(e.value))
+                    Some((e.key,e.value))
     /**
       * iterator move to prev element, return the key and value.
       * if the element is a subbucket,then the value is None.
       *
       * @return
       */
-    def prev():(Option[String],Option[String]) = 
-        if bucket.closed then return (None,None) 
+    def prev():Option[(String,String)] = 
+        if bucket.closed then return None
         moveToPrev()
         current() match
-            case None => (None,None)
+            case None => None
             case Some(e) =>
                 if e.flag == bucketType then 
-                    (Some(e.key),None)
+                    Some((e.key,DB.magicStr))
                 else
-                    (Some(e.key),Some(e.value))
+                    Some((e.key,e.value))
     /**
       * 
       *
@@ -263,13 +265,13 @@ private[platdb] class BTreeBucketIter(private var bucket:BTreeBucket) extends Co
       * @param key
       * @return
       */
-    private[platdb] def search(key:String):(Option[String],Option[String],Byte) =
-        if bucket.closed then return (None,None,0)
+    private[platdb] def search(key:String):(Option[(String,String)],Byte) =
+        if bucket.closed then return (None,0)
         stack = List[Record]()
         seek(key,bucket.bkv.root)
         current() match
-            case None => (None,None,0)
-            case Some(e) => (Some(e.key),Some(e.value),e.flag)
+            case None => (None,0)
+            case Some(e) => (Some(e.key,e.value),e.flag)
     /**
       * return current stack top node.
       *
@@ -408,7 +410,7 @@ private[platdb] class BTreeBucketIter(private var bucket:BTreeBucket) extends Co
             case (None,None) => throw new Exception(s"not found node or block for id:$id")
             case (Some(n),_) => r = new Record(Some(n),None,0)
             case (_,Some(b)) =>
-                if b.btype!= branchType && b.btype!=leafType then 
+                if b.btype != branchType && b.btype != leafType then 
                     throw new Exception(s"page ${id} invalid page type:${b.btype}")
                 r = new Record(None,Some(b),0)
         stack:+=r
@@ -478,3 +480,385 @@ private[platdb] class BTreeBucketIter(private var bucket:BTreeBucket) extends Co
                 stack = stack.init
                 stack :+= r
                 seek(key,elems(idx).child)
+/////////////////////////////////////////////////////////////////////////////////////////////////
+private[platdb] class BTreeBucketIter2(private var bucket:BTreeBucket) extends CollectionIterator:
+    // use a stack to record serach path.
+    private var stack:ArrayBuffer[Record] = new ArrayBuffer[Record]()
+    private var idx:Int = 0
+    private def top:Option[Record] = if idx > 0 then Some(stack(idx-1)) else None
+    private def empty:Boolean = idx == 0
+    private def pop:Record = 
+        if idx > 0 then 
+            val r = stack(idx-1)
+            idx -= 1
+            r 
+        else 
+            null 
+    private def push(r:Record):Unit = 
+        if idx == stack.length then 
+            stack.append(r)
+        else 
+            stack(idx) = r 
+        idx += 1
+    private def clear():Unit = idx = 0
+    override def size: Int = bucket.length.toInt
+    override def knownSize: Int = bucket.length.toInt
+    /**
+      * moves the iterator to a given key and returns it.
+      * If the key does not exist then the next key is used. If no keys follow, a None key is returned.
+      * The returned key and value are only valid for the life of the transaction.
+      *
+      * @param key
+      * @return
+      */
+    def find(key:String):Option[(String,String)] = 
+        if bucket.closed then 
+            None 
+        else
+            clear()
+            seek(key,bucket.bkv.root)
+            current() match 
+                case Some(e) =>
+                    if e.flag == bucketType then 
+                        Some((e.key,DB.magicStr))
+                    else
+                        Some((e.key,e.value))
+                case None => None
+    /**
+      * moves the iterator to the first item in the bucket and returns its key and value.
+      * If the bucket is empty then a None key and None value are returned.
+      * The returned key and value are only valid for the life of the transaction.
+      *
+      * @return
+      */
+    def first():Option[(String,String)] = 
+        if bucket.closed || bucket.length == 0 then 
+            return None
+        clear()
+        val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
+        push(new Record(n,b,0))
+        moveToFirst()
+        top match
+            case Some(r) => 
+                if r.count == 0 then 
+                    moveToNext()
+                current() match
+                    case Some(e) => 
+                        if e.flag == bucketType then 
+                            Some((e.key,DB.magicStr))
+                        else
+                            Some((e.key,e.value))
+                    case None => None
+            case None => None
+    /**
+      * iterator move to next leaf node element, return the key and value.
+      * if the element is a subbucket,then the value is None.
+      *
+      * @return
+      */
+    def next():Option[(String,String)] = 
+        if bucket.closed || bucket.length == 0 then 
+            None
+        else
+            moveToNext()
+            current() match
+                case None => None
+                case Some(e) =>
+                    if e.flag == bucketType then 
+                        Some((e.key,DB.magicStr))
+                    else
+                        Some((e.key,e.value))
+    /**
+      * check if has successor elements in current buckets.
+      *
+      * @return
+      */
+    def hasNext(): Boolean =
+        if bucket.closed || bucket.length == 0 then
+            false 
+        else
+            if empty then 
+                val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
+                push(new Record(n,b,-1))
+            var i = idx-1
+            while i >= 0 do 
+                val r = stack(i)
+                // whenever leaf node and branch node, 
+                // as long as the index not traverse all element,then there must be successor elements.
+                if r.index < r.count-1 then 
+                    return true 
+                i-=1
+            false 
+    /**
+      * moves the iterator to the latest item in the bucket and returns its key and value.
+      * If the bucket is empty then a None key and None value are returned.
+      * The returned key and value are only valid for the life of the transaction.
+      *
+      * @return
+      */
+    def last():Option[(String,String)]  = 
+        if bucket.closed || bucket.length == 0 then 
+            return None
+        clear()
+        val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
+        var r = new Record(n,b,0)
+        r.index = r.count-1
+        push(r)
+        moveToLast()
+
+        top match
+            case Some(r) => 
+                if r.count == 0 then 
+                    moveToPrev()
+                current() match
+                    case None => None
+                    case Some(e) =>
+                        if e.flag == bucketType then 
+                            Some((e.key,DB.magicStr))
+                        else
+                            Some((e.key,e.value))
+            case None => None
+    /**
+      * iterator move to prev element, return the key and value.
+      * if the element is a subbucket,then the value is None.
+      *
+      * @return
+      */
+    def prev():Option[(String,String)] = 
+        if bucket.closed || bucket.length == 0 then 
+            return None
+        moveToPrev()
+        current() match
+            case None => None
+            case Some(e) =>
+                if e.flag == bucketType then 
+                    Some((e.key,DB.magicStr))
+                else
+                    Some((e.key,e.value))
+    /**
+      * 
+      *
+      * @return
+      */
+    def hasPrev():Boolean = 
+        if bucket.closed || bucket.length == 0 then 
+            false 
+        else
+            if empty then
+                val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
+                var r = new Record(n,b,0)
+                r.index = r.count
+                push(r)
+            var i = idx-1
+            while i >= 0 do 
+                val r = stack(i)
+                if r.index > 0 then
+                    return true 
+                i -= 1 
+            false
+    /**
+      * search elements by key in current bucekt, return key, value and value type info.
+      *
+      * @param key
+      * @return
+      */
+    private[platdb] def search(key:String):(Option[(String,String)],Byte) =
+        if bucket.closed then
+            (None,0)
+        else
+            clear()
+            seek(key,bucket.bkv.root)
+            current() match
+                case None => (None,0)
+                case Some(e) => (Some(e.key,e.value),e.flag)
+    /**
+      * return current stack top node.
+      *
+      * @return
+      */
+    private[platdb] def node():Option[Node] = 
+        if empty then
+            None 
+        else
+            top match
+                case None => None 
+                case Some(r) => r.node match
+                    case None => None 
+                    case Some(node) => if r.isLeaf then return r.node
+            //
+            val r = stack(0)
+            var n:Option[Node] = (r.node,r.block) match
+                case (None,None) => None
+                case (Some(nd),_) => Some(nd)
+                case (_,Some(bk)) =>
+                    r.node = bucket.getNodeByBlock(Try(bk))
+                    bucket.root match
+                        case None => bucket.root = r.node
+                        case Some(_) => None
+                    r.node
+            // top-down: convert blocks on search path to nodes.
+            breakable(
+                for i <- 0 until idx-1 do
+                    val r = stack(i) 
+                    bucket.getNodeChild(n,r.index) match
+                        case Some(nd) => n = Some(nd) 
+                        case None => break()
+            )
+            n match
+                case None => None
+                case Some(node) => if node.isLeaf then Some(node) else None
+    /**
+      * from stack top element, top-down move to the rightest leaf node of the subtree. 
+      */
+    private def moveToFirst():Unit = 
+        if !empty then
+            var r = stack(idx-1)
+            while r.isBranch do
+                var child:Long = 0 
+                r.node match
+                    case Some(node) => 
+                        if node.elements.length == 0 then 
+                            return
+                        child = node.elements(r.index).child
+                    case None =>
+                        bucket.getNodeElement(r.block,r.index) match
+                            case Some(e) => child = e.child 
+                            case None => return 
+                if child > DB.meta1Page then 
+                    val (n,b) = bucket.nodeOrBlock(child) 
+                    push(new Record(n,b,0))
+                    r = stack(idx-1)
+                else
+                    throw new Exception(s"moveToFirst visit reversed page $child")
+    /**
+      * move to current subtree rightest element.
+      */
+    private def moveToLast():Unit =
+        if !empty then
+            var r = stack(idx-1)
+            while r.isBranch do
+                var child:Long = 0  
+                r.node match
+                    case Some(node) => 
+                        if node.elements.length == 0 then 
+                            return
+                        child = node.elements(r.index).child
+                    case None =>
+                        bucket.getNodeElement(r.block,r.index) match
+                            case Some(e) => child = e.child 
+                            case None => return 
+                if child > DB.meta1Page then 
+                    val (n,b) = bucket.nodeOrBlock(child)  // page id 0 or 1 reserved for meta.
+                    val p = new Record(n,b,0)
+                    p.index = p.count-1 
+                    push(p)
+                    r = stack(idx-1)
+                else
+                    throw new Exception(s"moveToLast visit reversed page $child")
+    /**
+      * move iterator to next leaf node element location.
+      */
+    private def moveToNext():Unit = 
+        if !empty then 
+            var r = stack(idx-1)
+            while r.count == 0 || r.index >= r.count-1 do  // back to upper level.
+                pop
+                if empty then
+                    return
+                else
+                    r = stack(idx-1)
+            r.index += 1 // index move to next location,point to next subtree.
+            stack(idx-1) = r 
+            moveToFirst()
+    //      
+    private def moveToPrev():Unit =
+        if !empty then
+            var r = stack(idx-1)
+            while r.count == 0 || r.index <= 0 do  // back to upper level.
+                pop
+                if empty then
+                    return
+                else
+                    r = stack(idx-1)
+            r.index -= 1 // index move to next location,point to next subtree.
+            stack(idx-1) = r 
+            moveToLast()
+    /**
+      * 
+      *
+      * @return
+      */
+    private def current():Option[NodeElement] = 
+        if !empty then
+            val r = stack(idx-1)
+            if r.count == 0 || r.index >= r.count || r.index < 0 then 
+                None
+            else
+                r.node match 
+                    case Some(node) => Some(node.elements(r.index))
+                    case None => bucket.getNodeElement(r.block,r.index) 
+        else
+            None
+    /**
+      * serach element from node id.
+      *
+      * @param key
+      * @param id
+      */
+    private def seek(key:String,id:Long):Unit =
+        val r = bucket.nodeOrBlock(id) match
+            case (None,None) => throw new Exception(s"not found node or block for id:$id")
+            case (Some(n),_) => new Record(Some(n),None,0)
+            case (_,Some(b)) =>
+                if b.btype != branchType && b.btype != leafType then 
+                    throw new Exception(s"page ${id} invalid page type:${b.btype}")
+                new Record(None,Some(b),0)
+        push(r)
+        if r.isLeaf then 
+            seekOnLeaf(key)
+        else
+            r.node match
+                case Some(node) => seekOnNode(key,node)
+                case None => seekOnBlock(key,r.block)
+    /**
+      * search in leaf node.
+      *
+      * @param key
+      */
+    private def seekOnLeaf(key:String):Unit =
+        var r = stack(idx-1)
+        r.node match 
+            case Some(node) =>
+                val i = node.elements.indexFunc((e:NodeElement) => e.key >= key) 
+                r.index = if i < 0 then node.length-1 else i
+                stack(idx-1) = r
+            case None =>
+                bucket.nodeElements(r.block) match
+                    case Some(elems) => 
+                        val i = elems.indexFunc((e:NodeElement) => e.key >= key)
+                        r.index = if i < 0 then elems.length-1 else i
+                        stack(idx-1) = r 
+                    case None => None
+    
+    // search in branch node.
+    private def seekOnNode(key:String,node:Node):Unit =
+        var i = node.elements.indexFunc((e:NodeElement)=> e.key >= key)
+        if i < 0 then
+            i = node.elements.length - 1
+        else
+            if i > 0 && node.elements(i).key != key then i -= 1
+        stack(idx-1).index = i
+        seek(key,node.elements(i).child)
+    
+    // search in branch block.
+    private def seekOnBlock(key:String,block:Option[Block]):Unit =
+        bucket.nodeElements(block) match
+            case None => None
+            case Some(elems) =>
+                var i:Int = elems.indexFunc((e:NodeElement) => e.key >= key)
+                if i < 0 then
+                    i = elems.length - 1
+                else
+                    if i > 0 && elems(i).key != key then i -= 1
+                stack(idx-1).index = i
+                seek(key,elems(i).child)
