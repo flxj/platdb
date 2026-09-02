@@ -552,7 +552,7 @@ class DB(val path:String)(using ops:Options):
                     case _ => Failure(new Exception(s"unknown collection type $collectionType"))
                 res match
                     case Failure(exception) => throw exception
-                    case Success(_) => None 
+                    case _ => None 
         )
     /**
       * 
