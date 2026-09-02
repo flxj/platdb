@@ -1,4 +1,4 @@
-val scala3Version = "3.2.2"
+val scala3Version = "3.3.8"
 val projectName = "platdb"
 val projectVersion = "0.14.0"
 
