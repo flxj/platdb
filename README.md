@@ -660,6 +660,11 @@ The structure of the execution result is as follows: Note that if executed succe
 ```
 
 
+### SQL
+
+Platdb can be used as an embedded relational database, where users only need to create an SQLEngine object.
+
+
 Other APIs not listed can be found in the Swagger documentation (TODO)
 
 

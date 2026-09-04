@@ -55,12 +55,10 @@ private[platdb] object Util:
         (bs(7) & 0xFFL)
     //def floatToBytes(f: Float): Array[Byte] = ByteBuffer.allocate(4).putFloat(f).array()
     //def bytesToFloat(bytes: Array[Byte]): Float = ByteBuffer.wrap(bytes).getFloat()
-    def doubleToBytes(v:Double): Array[Byte] = ByteBuffer.allocate(8).putDouble(v).array()
-    def bytesToDouble(bs: Array[Byte]): Double = ByteBuffer.wrap(bs).getDouble()
+    //def doubleToBytes(v:Double): Array[Byte] = ByteBuffer.allocate(8).putDouble(v).array()
+    //def bytesToDouble(bs: Array[Byte]): Double = ByteBuffer.wrap(bs).getDouble()
     def compareLong(a:Array[Byte],b:Array[Byte]):Int = ???
     def min(a:Int,b:Int):Int = if a < b then a else b 
-    // Float -> Bytes (大端序)
-    // Float -> Bytes (大端序)
     def floatToBytes(f: Float): Array[Byte] = 
         val bits = java.lang.Float.floatToIntBits(f)
         Array[Byte](
@@ -75,7 +73,7 @@ private[platdb] object Util:
                 ((bytes(2) & 0xff) << 8)  |
                 (bytes(3) & 0xff)
         java.lang.Float.intBitsToFloat(bits)
-    def doubleToBytesBit(d: Double): Array[Byte] = 
+    def doubleToBytes(d: Double): Array[Byte] = 
         val bits = java.lang.Double.doubleToLongBits(d)
         Array[Byte](
             (bits >> 56).toByte,
@@ -87,7 +85,7 @@ private[platdb] object Util:
             (bits >> 8).toByte,
             bits.toByte
         )
-    def bytesToDoubleBit(bytes: Array[Byte]): Double = 
+    def bytesToDouble(bytes: Array[Byte]): Double = 
         val bits = ((bytes(0) & 0xffL) << 56) |
                 ((bytes(1) & 0xffL) << 48) |
                 ((bytes(2) & 0xffL) << 40) |

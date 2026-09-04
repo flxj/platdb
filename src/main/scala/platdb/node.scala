@@ -20,6 +20,42 @@ import java.nio.ByteBuffer
 import scala.collection.mutable.{ArrayBuffer}
 import scala.util.control.Breaks._
 import java.nio.charset.StandardCharsets
+import java.nio.charset.Charset
+
+private[platdb] class NodeEntry(var flag:Byte,var child:Long,var key:String,var value:String):
+    private var kb:Array[Byte] = null 
+    private var vb:Array[Byte] = null
+    private var v1:Boolean = false  // if v1 == true then the kb is newest
+    private var v2:Boolean = false  // if v2 == true then the vb is newest
+    def keySize(cs:Charset):Int = 
+        if !v1 then 
+            kb = key.getBytes(cs)
+            v1 = true
+        kb.length
+    def keyBytes(cs:Charset):Array[Byte] = 
+        if !v1 then
+            kb = key.getBytes(cs)
+            v1 = true
+        kb
+    def valueSize(cs:Charset):Int = 
+        if !v2 then
+            vb = value.getBytes(cs)
+            v2 = true 
+        vb.length
+    def valueBytes(cs:Charset):Array[Byte] = 
+        if !v2 then
+            vb = value.getBytes(cs)
+            v2 = true 
+        vb
+    def updateValue(v:String):Unit = 
+        value = v 
+        v2 = false
+        vb = null
+    def updateKey(k:String):Unit = 
+        key = k 
+        v1 = false 
+        kb = null 
+
 
 /* node storage construct on block:
 +------------------+-----------------------------------------+
@@ -51,10 +87,10 @@ private[platdb] case class NodeIndex(offset:Int,keySize:Int,valSize:Long,flag:By
   * @param value
   */
 private[platdb] class NodeElement(var flag:Byte,var child:Long,var key:String,var value:String): // TODO: use Array[Byte] as key,value type
-    def keySize:Int = key.getBytes(StandardCharsets.UTF_8).length
-    def keyBytes:Array[Byte] = key.getBytes(StandardCharsets.UTF_8)
-    def valueSize:Int = value.getBytes(StandardCharsets.UTF_8).length
-    def valueBytes:Array[Byte] = value.getBytes(StandardCharsets.UTF_8)
+    def keySize(cs:Charset):Int = key.getBytes(cs).length
+    def keyBytes(cs:Charset):Array[Byte] = key.getBytes(cs)
+    def valueSize(cs:Charset):Int = value.getBytes(cs).length
+    def valueBytes(cs:Charset):Array[Byte] = value.getBytes(cs)
 
 // binary search
 extension (arr:ArrayBuffer[NodeElement])
@@ -73,6 +109,7 @@ extension (arr:ArrayBuffer[NodeElement])
 
 private[platdb] object Node:
     val indexSize = 17
+    val charSet = StandardCharsets.UTF_8
     // parse node elements form block.
     def elements(bk:Block):Option[ArrayBuffer[NodeElement]] = 
         bk.getBytes() match
@@ -91,13 +128,13 @@ private[platdb] object Node:
                                 break() 
                             case Some(ni) =>
                                 val off = ni.offset - BlockHeader.size
-                                val key = new String(data.slice(off,off+ni.keySize),StandardCharsets.UTF_8)
+                                val key = new String(data.slice(off,off+ni.keySize),charSet)
                                 var child = ni.valSize 
                                 var value:String = ""
                                 if bk.header.flag == leafType then
                                     child = 0 
-                                    value = new String(data.slice(off+ni.keySize,(off+ni.keySize+ni.valSize).toInt),StandardCharsets.UTF_8)
-                                elems+=new NodeElement(ni.flag,child,key,value)
+                                    value = new String(data.slice(off+ni.keySize,(off+ni.keySize+ni.valSize).toInt),charSet)
+                                elems += new NodeElement(ni.flag,child,key,value)
                 )
                 if !err then Some(elems) else None
 
@@ -261,7 +298,7 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
     def size():Int = 
         var dataSize:Int = BlockHeader.size+(elements.length*Node.indexSize)
         for e <- elements do
-            dataSize += e.keySize +e.valueSize
+            dataSize += e.keySize(Node.charSet) + e.valueSize(Node.charSet)
         dataSize
     def writeTo(bk:Block):Int =
         if isLeaf then
@@ -277,12 +314,12 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
         var offset = BlockHeader.size+(elements.length*Node.indexSize)
         for e <- elements do 
             val ni = isLeaf match
-                case true => NodeIndex(offset,e.keySize,e.valueSize,e.flag)
-                case false => NodeIndex(offset,e.keySize,e.child,e.flag)
+                case true => NodeIndex(offset,e.keySize(Node.charSet),e.valueSize(Node.charSet),e.flag)
+                case false => NodeIndex(offset,e.keySize(Node.charSet),e.child,e.flag)
 
             bk.write(idx,Node.marshalIndex(ni))
-            bk.write(offset,e.keyBytes)
-            bk.append(e.valueBytes)
+            bk.write(offset,e.keyBytes(Node.charSet))
+            bk.append(e.valueBytes(Node.charSet))
            
             idx += Node.indexSize
             offset = bk.size

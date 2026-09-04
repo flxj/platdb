@@ -24,6 +24,7 @@ import scala.util.Success
 import scala.util.Failure
 import java.util.Base64
 import java.nio.charset.StandardCharsets
+import java.nio.charset.Charset
 
 /**
   * Bucket represents an ordered (lexicographic) set of key-value pairs.
@@ -167,8 +168,8 @@ private[platdb] class BucketValue(var root:Long,var count:Long,var sequence:Long
             s = s >> 8
         arr(BTreeBucket.valueSize-1) = dataType
         arr
-    //override def toString(): String = Base64.getEncoder().encodeToString(getBytes)
-    override def toString(): String = new String(getBytes,StandardCharsets.UTF_8)
+    override def toString(): String = Base64.getEncoder().encodeToString(getBytes)
+    //override def toString(charSet:Charset):String = new String(getBytes,charSet)
     override def clone:BucketValue = new BucketValue(root,count,sequence,dataType)
 
 //
@@ -176,8 +177,8 @@ private[platdb] object BTreeBucket:
     // bucket value size when convert byte array.
     val valueSize:Int = 25
     def getValue(value:String):Option[BucketValue] = 
-        //val data = Base64.getDecoder().decode(value)
-        val data = value.getBytes(StandardCharsets.UTF_8)
+        val data = Base64.getDecoder().decode(value)
+        //val data = value.getBytes(StandardCharsets.UTF_8)
         if data.length != valueSize then
             None 
         else
@@ -186,7 +187,6 @@ private[platdb] object BTreeBucket:
                 val b = (data(8*i+4) & 0xff) << 24 | (data(8*i+5) & 0xff) << 16 | (data(8*i+6) & 0xff) << 8 | (data(8*i+7) & 0xff)
                 (a & 0x00000000ffffffffL) << 32 | (b & 0x00000000ffffffffL)
             Some(new BucketValue(arr(0),arr(1),arr(2),data(valueSize-1)))
-
 
 /**
   * bucket trait implement by b+ tree.
@@ -269,12 +269,8 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         
         val c = iterator
         c.find(key) match 
-            case None => throw new Exception(s"not found key:$key")
-            case Some(k,v) => 
-                if k == key then 
-                    true
-                else
-                    throw DB.exValueNotFound
+            case None => false
+            case Some(k,_) => k == key 
     /**
       * try to retrieve the value for a key in the bucket.
       * Returns is Failure if the key does not exist or the key is a subbucket name.
@@ -767,7 +763,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         var idx = -1
         breakable(
             for i <- 0 until node.length do
-                n += Node.indexSize+node.elements(i).keySize+node.elements(i).valueSize
+                n += Node.indexSize + node.elements(i).keySize(Node.charSet) + node.elements(i).valueSize(Node.charSet)
                 if n >= threshold then 
                     idx = i 
                     break()
@@ -923,8 +919,8 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         c.node() match 
             case None => throw new Exception(s"$dt create failed: not found create node")
             case Some(n) =>
-                n.put(name,name,bk.value.toString(),bucketType,0) 
-                bkv.count+=1
+                if !n.put(name,name,bk.value.toString(),bucketType,0) then
+                    bkv.count += 1
                 Some(bk)
     /**
       * 
@@ -998,8 +994,8 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                 c.node() match 
                     case None => throw new Exception(s"not found $dt $name node")
                     case Some(node) => 
-                        node.del(name) 
-                        bkv.count-=1
+                        if node.del(name) then
+                            bkv.count -= 1
                         None
             case None => None
         /*
@@ -1041,17 +1037,18 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
             throw DB.exTxClosed
         else if !tx.writable then 
             throw DB.exNotAllowOp
-        // 
+        //
         val c = new BTreeBucketIter2(this)
-        for kv <- c do 
-            kv match
-                case Some(k,v) => 
-                    if v == DB.magicStr then  
-                        getBucket(name) match 
-                            case None => None 
-                            case Some(sub) => sub.clean()
-                case None => None
-        //    
+        for kv <- c do kv match
+            case Some(k,v) => if v == DB.magicStr then deleteBucket(k,bucketDataType)
+            case None => None 
+        // clean cache nodes
+        nodes.clear() 
+        freeAll() // release all pages about the bucket
+        bkv = new BucketValue(-1,0,0,bucketDataType) // empty bkv
+        root = Some(new Node(new BlockHeader(-1L,leafType,0,0,0))) // empty root node
+        None
+        // TODO:update the buckets record
     /**
       * 
       *

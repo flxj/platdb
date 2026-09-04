@@ -76,10 +76,10 @@ object DB:
     //
     val exTxClosed = new Exception("transaction is closed")
     val exNotAllowOp = new Exception("readonly transaction not allow current operation")
-    val exKeyIsNull = new Exception("param key is null")
+    val exKeyIsNull = new Exception("parameter key is null")
     val exKeyTooLarge = new Exception(s"key is too large,limit $maxKeySize")
     val exValueTooLarge = new Exception(s"value is too large,limit $maxValueSize")
-    val exValueNotFound = new Exception("value not found")
+    val exValueNotFound = new Exception("not found value")
     val exDBClosed = new Exception("db is closed")
     val exNotAllowRWTx = new Exception("readonly mode,cannot create read write transaction")
     val exNotAllowCommitSysTx = new Exception("not allow to commit system transaction manually")
@@ -390,7 +390,9 @@ class DB(val path:String)(using ops:Options):
                     tx.sysCommit = true
                     tx.openBucket(bucket) match
                         case None => throw new Exception(s"bucket ${bucket} not exists")
-                        case Some(bk) => value = bk(key)
+                        case Some(bk) => bk.get(key) match
+                            case Some(v) => value = v 
+                            case None => throw new Exception(s"not found key ${key}")
                     tx.sysCommit = false
                     tx.rollback()
                     Success((key,value))

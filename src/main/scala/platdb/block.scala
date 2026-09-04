@@ -351,8 +351,8 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
     def open(timeout:Int):Unit =
         if opend then return None 
         val i = path.lastIndexOf(File.separator)
-        if i>=0 then
-            lockpath = path.substring(0,i) +File.separator+"db.lock"
+        if i >= 0 then
+            lockpath = path.substring(0,i) + File.separator + "db.lock"
         else
             throw new Exception(s"illegal db file path ${path}")
         
@@ -446,7 +446,7 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
             reader = new RandomAccessFile(file,"r")
             reader.seek(id*DB.pageSize)
             var data = new Array[Byte](size)
-            if reader.read(data,0,size)!= size then
+            if reader.read(data,0,size) != size then
                 throw new Exception(s"read size is unexpected,except $size bytes")
             data
         catch

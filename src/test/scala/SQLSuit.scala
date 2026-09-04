@@ -1,138 +1,320 @@
 import platdb._
-import spray.json._
-import spray.json.{DefaultJsonProtocol,RootJsonFormat}
-import net.sf.jsqlparser.parser.CCJSqlParserUtil
-import net.sf.jsqlparser.statement.Statement
-import net.sf.jsqlparser.statement.select.{PlainSelect, Select}
-import net.sf.jsqlparser.statement.drop.Drop
-import net.sf.jsqlparser.statement.create.table.{CreateTable, ColumnDefinition,Index}
-import net.sf.jsqlparser.schema.Table
-import net.sf.jsqlparser.expression.{Expression, LongValue, StringValue, DoubleValue, NullValue, Function, JdbcParameter}
-import net.sf.jsqlparser.statement.insert.Insert
+import platdb.defaultOptions
 import scala.jdk.CollectionConverters._
-import net.sf.jsqlparser.expression.operators.relational.ParenthesedExpressionList
-import scala.collection.mutable.{Map}
+import scala.collection.mutable.{Map,ArrayBuffer}
+import java.io.File
+import java.lang.Exception
+import scala.util.Failure
+import scala.util.Success
 
-class B(val b1:Int):
-    var b2:String = ""
+val dbPath:String= s"C:${File.separator}platdb${File.separator}db.test" 
 
-class A(val a1:String):
-    var a2:Int = 0 
-    var a3:String = ""
-    var a4:Array[B] = new Array[B](2)
 
-/*
-object clsBProto extends DefaultJsonProtocol {
-    implicit object clsBJsonFormat extends JsonFormat[clsB] {
-        override def write(obj: clsB): JsValue = JsObject(
-            "b1" -> JsNumber(obj.b1),
-            "b2" -> JsString(obj.b2),
-        )
-        override def read(json: JsValue): clsB = {
-            val fields = json.asJsObject.fields // 将 JSON 解析为字段 Map
-            val b1 = fields("b1").convertTo[Int]
-            val b2 = fields("b2").convertTo[String]
-            var b:clsB = new clsB(b1)
-            b.b2 = b2 
-            b
-        }
+object Tabulator {
+    def format(head:Array[String],data: Array[Array[Any]]):String = 
+        if head.length == 0 then ""
+        else
+            val maxSize = for h <- head yield h.length()
+            for row <- data do 
+                for i <- 0 until row.length do 
+                    maxSize(i) = if row(i) != null then Math.max(maxSize(i),row(i).toString.length) else Math.max(maxSize(i),"null".length)
+            val hd = formatRow(head, maxSize)
+            val rows = for (row <- data) yield formatRow(row, maxSize)
+            formatRows(rowSeparator(maxSize),hd,rows)
+
+    def formatRows(rowSeparator: String, head:String,rows: Seq[String]): String = (
+        rowSeparator :: 
+        head :: 
+        rowSeparator :: 
+        rows.toList ::: 
+        rowSeparator :: 
+        List()).mkString("\n")
+
+    def formatRow(row: Seq[Any], colSizes: Seq[Int]) = {
+        val cells = (for ((item, size) <- row.zip(colSizes)) yield if (size == 0) "" else ("%" + size + "s").format(item))
+        cells.mkString("|", "|", "|")
     }
+
+    def rowSeparator(colSizes: Seq[Int]) = colSizes map { "-" * _ } mkString("+", "+", "+")
 }
-*/
-
-/*
-object clsAProto extends DefaultJsonProtocol {
-    implicit object clsBJsonFormat extends JsonFormat[clsB] {
-        override def write(obj: clsB): JsValue = JsObject(
-            "b1" -> JsNumber(obj.b1),
-            "b2" -> JsString(obj.b2),
-        )
-        override def read(json: JsValue): clsB = {
-            val fields = json.asJsObject.fields // 将 JSON 解析为字段 Map
-            val b1 = fields("b1").convertTo[Int]
-            val b2 = fields("b2").convertTo[String]
-            var b:clsB = new clsB(b1)
-            b.b2 = b2 
-            b
-        }
-    }
-    implicit object clsAJsonFormat extends JsonFormat[clsA] {
-        override def write(obj: clsA): JsValue = JsObject(
-            "a1" -> JsString(obj.a1),
-            "a2" -> JsNumber(obj.a2),
-            "a3" -> JsString(obj.a3),
-            "a4" -> JsArray((for b <- obj.a4 yield clsBJsonFormat.write(b)).toList)
-        )
-
-        override def read(json: JsValue): clsA = {
-            val fields = json.asJsObject.fields // 将 JSON 解析为字段 Map
-            val a1 = fields("a1").convertTo[String]
-            val a2 = fields("a2").convertTo[Int]
-            val a3 = fields("a3").convertTo[String]
-            val a4 = fields("a4").convertTo[Array[clsB]]
-            var a:clsA = new clsA(a1)
-            a.a2 = a2 
-            a.a3 = a3
-            a.a4 = a4
-            a
-        }
-    }
-}
-*/
 
 class SQLSuit1 extends munit.FunSuite {
-    //import clsBProto._
-    //import clsAProto._
-    /*
-    test("insert"){
-        //val statement:String = "INSERT INTO mytable (col1, col2) VALUES (a, b), (d, e)"
-        val statement:String = "INSERT INTO mytable (col1, col2) VALUES (a, b)"
-        val stmt = CCJSqlParserUtil.parse(statement)
-        stmt match
-            case ins:Insert => 
-                val cols = ins.getColumns().asScala.toArray
-                cols.zipWithIndex.foreach( (col,idx) => 
-                    println(s"col ${idx} name is ${col.getColumnName()}")
-                )
-                val vals = ins.getValues()
-                val exps = vals.getExpressions().asScala.toList
-                exps.zipWithIndex.foreach( (exp,idx) => 
-                    exp match
-                        case row:ParenthesedExpressionList[Expression] => 
-                            val r = row.getExpressions().asScala.toList
-                            r.foreach( v => 
-                                println(s"value is ${v.toString()}")
-                            )
-                        case v:Expression => println(s"${v.toString()}")
-                        case _ => fail("not row or value")
-                )
-            case _ => fail("not insert sql")
-    }
-    */
-    test("test") {
-        val ca = new A("a")
-        ca.a2 = 111
-        ca.a4 = new Array[B](2)
-        ca.a4(0) = new B(1)
-        ca.a4(1) = new B(2)
+    val sql1:String = """CREATE TABLE IF NOT EXISTS T1 (
+                        PersonID INT PRIMARY KEY,
+                        Name CHAR(255),
+                        Number BigInt,
+                        Grade1 Float,
+                        Grade2 Double,
+                        Content VARCHAR(1024));"""
+    val sql2:String = """create table IF NOT EXISTS t2 (
+    c1 int NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    c2 varchar(100),
+    c3 varchar(100));"""
+    test("create table") {
+        var db = SQLEngine(dbPath)
+        try 
+            db.open() match
+                case Failure(e) => throw e 
+                case Success(_) => println("open db success")
 
-        for i <- 0 until ca.a4.length do 
-            val c = ca.a4(i)
-            c.b2 = "xxx"
-            //ca.a4(i).b2 = "yyy"
-        for b <- ca.a4 do 
-            println(b.b2) // xxx
-        
-        val mp = Map[String,A]()
-        mp.put("a",ca)
+            db.exec(sql1) match
+                case Failure(e) => throw e 
+                case Success(_) => println("create t1 success")
+            db.exec(sql2) match
+                case Failure(e) => throw e 
+                case Success(_) => println("create t2 success")
 
-        mp.get("a") match
-            case None => println("none")
-            case Some(a) => a.a2 = 222 
-        //
-        mp.get("a") match
-            case None => println("none")
-            case Some(a) => println(s"a.a2=${a.a2}") // 222
+            db.query("show tables") match
+                case Failure(e) => throw e 
+                case Success(res) => 
+                    val p = Tabulator.format(res.columns,res.data)
+                    println(p)
+                    if res.data.length != 2 then 
+                        throw new Exception(s"show tables error, count=${res.data.length}")
+        catch
+            case e:Exception => throw e 
+        finally
+            if db != null then 
+                db.close() match
+                    case Failure(e) => println(e.getMessage())
+                    case Success(_) => println("close db success")
     }
-    
 }
+
+class SQLSuit2 extends munit.FunSuite {
+    test("show table") {
+        var db = SQLEngine(dbPath)
+        try 
+            db.open() match
+                case Failure(e) => throw e 
+                case Success(_) => println("open db success")
+
+            db.query("show tables") match
+                case Failure(e) => throw e 
+                case Success(res) => 
+                    val p = Tabulator.format(res.columns,res.data)
+                    println(p)   
+        catch
+            case e:Exception => throw e 
+        finally
+            if db != null then 
+                db.close() match
+                    case Failure(e) => println(e.getMessage())
+                    case Success(_) => println("close db success")
+    }
+    test("show table info") {
+        var db = SQLEngine(dbPath)
+        try 
+            db.open() match
+                case Failure(e) => throw e 
+                case Success(_) => println("open db success")
+
+            db.query("SHOW COLUMNS FROM t1") match
+                case Failure(e) => throw e 
+                case Success(res) => 
+                    val p = Tabulator.format(res.columns,res.data)
+                    println(p)   
+        catch
+            case e:Exception => throw e 
+        finally
+            if db != null then 
+                db.close() match
+                    case Failure(e) => println(e.getMessage())
+                    case Success(_) => println("close db success")
+    }
+}
+
+class SQLSuit3 extends munit.FunSuite {
+    val sql1 = "drop table t1"
+    val sql2 = "drop table t2"
+    test("drop") {
+        var db = SQLEngine(dbPath)
+        try 
+            db.open() match
+                case Failure(e) => throw e 
+                case Success(_) => println("open db success")
+            
+            db.exec(sql1) match
+                case Failure(e) => throw e 
+                case Success(_) => println("drop t1 success")
+            db.exec(sql2) match
+                case Failure(e) => throw e 
+                case Success(_) => println("drop t2 success")
+            db.query("show tables") match
+                case Failure(e) => throw e 
+                case Success(res) => 
+                    val p = Tabulator.format(res.columns,res.data)
+                    println(p) 
+                    if res.data.length != 0 then 
+                        throw new Exception("canot drop table")
+        catch
+            case e:Exception => throw e 
+        finally
+            if db != null then 
+                db.close() match
+                    case Failure(e) => println(e.getMessage())
+                    case Success(_) => println("close db success")
+    }
+}
+
+class SQLSuit4 extends munit.FunSuite {
+    val sql1 = """insert into t1 values (1,'aaa',100,12.3,123.456,'1qazxsw2')"""
+    val sql2 = """insert into t1 values (2,'bbb',200,23.45,765.234,'3edcvfr4'),(3,'ccc',300,345.5,3456.789,'5tgbnhy6')"""
+    val sql3 = """insert into t2 (c2,c3) values ('aaaa','abcdedfr'),('ccccc','好好'),('eeeee','{})(+_)'),('ggggg','hh*7&^ll')"""
+    test("insert") {
+        var db = SQLEngine(dbPath)
+        try 
+            db.open() match
+                case Failure(e) => throw e 
+                case Success(_) => println("open db success")
+            
+            for sql <- List[String](sql1,sql2,sql3) do
+                db.exec(sql) match
+                    case Failure(e) => throw e 
+                    case Success(_) => None 
+
+            println("insert success")
+            db.query("select count(*) from t1") match
+                case Failure(e) => throw e 
+                case Success(res) => 
+                    val p = Tabulator.format(res.columns,res.data)
+                    println(p) 
+        catch
+            case e:Exception => throw e 
+        finally
+            if db != null then 
+                db.close() match
+                    case Failure(e) => println(e.getMessage())
+                    case Success(_) => println("close db success")
+    }
+}
+
+class SQLSuit5 extends munit.FunSuite {
+    test("select") {
+        var db = SQLEngine(dbPath)
+        try 
+            db.open() match
+                case Failure(e) => throw e 
+                case Success(_) => println("open db success")
+            
+            db.query("select * from t1") match
+                case Failure(e) => throw e 
+                case Success(res) => 
+                    val p = Tabulator.format(res.columns,res.data)
+                    println(p) 
+            db.query("select c1 as COL1,c2 as COL2,c3 as COL3 from t2") match
+                case Failure(e) => throw e 
+                case Success(res) => 
+                    val p = Tabulator.format(res.columns,res.data)
+                    println(p) 
+        catch
+            case e:Exception => throw e 
+        finally
+            if db != null then 
+                db.close() match
+                    case Failure(e) => println(e.getMessage())
+                    case Success(_) => println("close db success")
+    }
+}
+
+class SQLSuit6 extends munit.FunSuite {
+    val sql1 = """update t1 set number=111 where content='1qazxsw2'"""
+    val sql2 = """update t2 set c2='vvvvvv' where c1>=2"""
+    test("update") {
+        var db = SQLEngine(dbPath)
+        try 
+            db.open() match
+                case Failure(e) => throw e 
+                case Success(_) => println("open db success")
+            
+            db.exec(sql2) match
+                case Failure(e) => throw e 
+                case Success(res) => println("update success")
+                    
+            db.query("select * from t2") match
+                case Failure(e) => throw e 
+                case Success(res) => 
+                    val p = Tabulator.format(res.columns,res.data)
+                    println(p) 
+        catch
+            case e:Exception => throw e 
+        finally
+            if db != null then 
+                db.close() match
+                    case Failure(e) => println(e.getMessage())
+                    case Success(_) => println("close db success")
+    }
+}
+
+class SQLSuit7 extends munit.FunSuite {
+    val sql = """delete from t2 where c1=3"""
+    test("delete") {
+        var db = SQLEngine(dbPath)
+        try 
+            db.open() match
+                case Failure(e) => throw e 
+                case Success(_) => println("open db success")
+            
+            db.exec(sql) match
+                case Failure(e) => throw e 
+                case Success(res) => println("delete success")
+                    
+            db.query("select * from t2") match
+                case Failure(e) => throw e 
+                case Success(res) => 
+                    val p = Tabulator.format(res.columns,res.data)
+                    println(p) 
+        catch
+            case e:Exception => throw e 
+        finally
+            if db != null then 
+                db.close() match
+                    case Failure(e) => println(e.getMessage())
+                    case Success(_) => println("close db success")
+    }
+}
+
+class SQLSuit8 extends munit.FunSuite {
+    val sql1 = """insert into t1 values (4,'abc',12345,45.666,777.888,'hhhhhhhh'),(5,'jjjj',876543,888.666,9999.888,'lllllll')"""
+    val sql2 = """update t2 set c2='uuuuuuu' where c1>=2"""
+    test("tx") {
+        var db = SQLEngine(dbPath)
+        try 
+            db.open() match
+                case Failure(e) => throw e 
+                case Success(_) => println("open db success")
+
+            db.beginTx(false) match
+                case Failure(e) => throw e 
+                case Success(tx) =>
+                    try
+                        tx.exec(sql1)
+                        tx.exec(sql2)
+                        tx.commit()
+                    catch
+                        case e:Exception => throw e 
+                    finally
+                        tx.rollback()
+            println("tx success")
+            db.query("select * from t1") match
+                case Failure(e) => throw e 
+                case Success(res) => 
+                    val p = Tabulator.format(res.columns,res.data)
+                    println(p) 
+
+            db.query("select * from t2") match
+                case Failure(e) => throw e 
+                case Success(res) => 
+                    val p = Tabulator.format(res.columns,res.data)
+                    println(p) 
+        catch
+            case e:Exception => throw e 
+        finally
+            if db != null then 
+                db.close() match
+                    case Failure(e) => println(e.getMessage())
+                    case Success(_) => println("close db success")
+    }
+}
+
+

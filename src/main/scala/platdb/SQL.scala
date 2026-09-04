@@ -22,50 +22,79 @@ import scala.util.control.Breaks._
 import scala.util.Failure
 import scala.util.Success
 import scala.util.Try
+import scala.util.matching.Regex
+import java.nio.charset.Charset
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
+import java.util.Base64
+
 import spray.json._
 import spray.json.{DefaultJsonProtocol,RootJsonFormat}
 
 import net.sf.jsqlparser.parser.CCJSqlParserUtil
+import net.sf.jsqlparser.schema.{Table,Column}
 import net.sf.jsqlparser.statement.{Statement,ShowStatement,ShowColumnsStatement}
 import net.sf.jsqlparser.statement.select.{PlainSelect, Select,SelectVisitorAdapter,SelectItemVisitorAdapter,SelectItem}
-import net.sf.jsqlparser.statement.select.{FromItemVisitorAdapter,AllColumns}
-import net.sf.jsqlparser.statement.drop.Drop
+import net.sf.jsqlparser.statement.select.{FromItemVisitorAdapter,AllColumns,Values}
 import net.sf.jsqlparser.statement.create.table.{CreateTable, ColumnDefinition,Index}
-import net.sf.jsqlparser.schema.{Table,Column}
-import net.sf.jsqlparser.expression.{Expression,BooleanValue, LongValue, StringValue, DoubleValue, NullValue, Function, JdbcParameter}
-import net.sf.jsqlparser.statement.update.Update
+import net.sf.jsqlparser.statement.drop.Drop
+import net.sf.jsqlparser.statement.update.{Update,UpdateSet}
 import net.sf.jsqlparser.statement.delete.Delete
 import net.sf.jsqlparser.statement.insert.Insert
-import net.sf.jsqlparser.statement.select.Values
 import net.sf.jsqlparser.statement.show.ShowTablesStatement
+import net.sf.jsqlparser.expression.{Expression,BooleanValue, LongValue, StringValue, DoubleValue, NullValue, Function, JdbcParameter}
 import net.sf.jsqlparser.expression.operators.relational.{ExpressionList,ParenthesedExpressionList}
 import net.sf.jsqlparser.expression.{ExpressionVisitorAdapter,AllValue,BinaryExpression}
 import net.sf.jsqlparser.expression.operators.conditional.{OrExpression,AndExpression}
 import net.sf.jsqlparser.expression.operators.relational.{EqualsTo,NotEqualsTo, GreaterThan, GreaterThanEquals, MinorThan, MinorThanEquals}
 import net.sf.jsqlparser.expression.operators.relational.IsNullExpression
+import java.sql.SQLException
 
-case class SQLRows(columns:Array[String],data:Array[Array[Any]])
+/**
+  * SQLRows represents query results, where 'columns' represent column names,' 
+  * dataTypes' represent the data types of each column, 
+  * 'data' represents data rows, and each row of data is represented as an Array[Any]. Users can use type assertions to obtain query values.
+  * Note that elements with null query results also correspond to the values of scala/java null in this array.
+  * 
+  */
+case class SQLRows(columns:Array[String],dataTypes:Array[String],data:Array[Array[Any]])
+
+/**
+  * SQLResult represents the execution result of SQL statements, such as create/insert/update/delete...
+  * 
+  */
 case class SQLResult(lastInsertId:Long,rowsAffected:Long)
 
-trait SQLTx:
-    def commit:Unit
-    def rollback:Unit
+/**
+  * SQLOptions represents the parameters required to create an SQLEngine object.
+  * The parameters of the current object are consistent with those required to create the platdb.DB object.
+  */
+case class SQLEngineOptions(path:String,dbOps:Options)
+
+/**
+  * DBTransaction represents an SQLEngine transaction interface, 
+  * and errors encountered during transaction execution will be thrown as Exception.
+  * 
+  */
+trait DBTransaction:
+    // Submit transaction 
+    def commit():Unit
+    // Rollback transaction 
+    def rollback():Unit
+    // Execute query statements, such as select/show 
     def query(stmt:String):SQLRows
+    // Execute DD or DML statements, such as create/drop/insert/update/delete
     def exec(stmt:String):SQLResult
 
-case class SQLEngineOptions(path:String)
-
-private[platdb] class sqlTx(val id:Long,val se:SQLEngine) extends SQLTx:
-    def commit: Unit = 
+private class sqlTx(val id:Long,val se:SQLEngine) extends DBTransaction:
+    def commit(): Unit = 
         se.dbTx.remove(id) match
             case None => None
-            case Some(tx) => tx.rollback()   
-    def rollback: Unit = 
+            case Some(tx) => tx.commit()
+    def rollback(): Unit = 
         se.dbTx.remove(id) match
             case None => None
-            case Some(tx) => tx.rollback() //TODO: need clean tableInfo in db.tbs
+            case Some(tx) => tx.rollback() //TODO: clean tableInfo in db.tbs if need.
     def query(stmt: String): SQLRows = 
         se.dbTx.get(id) match
             case None => throw new Exception("wrong tx")
@@ -74,23 +103,29 @@ private[platdb] class sqlTx(val id:Long,val se:SQLEngine) extends SQLTx:
         se.dbTx.get(id) match
             case None => throw new Exception("wrong tx")
             case Some(tx) => se.txExec(stmt,tx)
-
-private[platdb] class columnInfo(val name:String,val ctype:String): //TODO: use Byte as ctype type.
+/**
+  * Record the column information of the table.
+  * 
+  */
+private class columnInfo(val name:String,val ctype:String):
     var autoNext:Long = 0 
     var auto:Boolean = false 
     var notNull:Boolean = false 
     var hide:Boolean = false 
     var defVal:String = ""
-
-private[platdb] class tableInfo(val name:String):
+/**
+  * Record table meta info.
+  * 
+  */
+private class tableInfo(val name:String):
     var id:Int = 0
     // if the table not setting pk,then we use rowId as its pk. 
     var rowId:Long = 0 
+    // primary key column name.
     var pk:String = ""
-    var charSet:String = ""
     var cols:Array[columnInfo] = new Array[columnInfo](0)
 
-private[platdb] object tableProto extends DefaultJsonProtocol {
+private object tableProto extends DefaultJsonProtocol {
     implicit object colJsonFormat extends JsonFormat[columnInfo] {
         override def write(obj: columnInfo): JsValue = JsObject(
             "name" -> JsString(obj.name),
@@ -126,6 +161,7 @@ private[platdb] object tableProto extends DefaultJsonProtocol {
             val fields = json.asJsObject.fields
             val name = fields("name").convertTo[String]
             val tb = new tableInfo(name)
+            tb.pk = fields("pk").convertTo[String]
             tb.id = fields("id").convertTo[Int]
             tb.rowId = fields("rowId").convertTo[Long]
             tb.cols = fields("cols").convertTo[Array[columnInfo]]
@@ -134,32 +170,37 @@ private[platdb] object tableProto extends DefaultJsonProtocol {
     }
 }
 
+/**
+  * A SQL expression evaluator.
+  * 
+  */
 private class SQLEvaluator(val table:tableInfo,var row:Array[Array[Byte]]) extends ExpressionVisitorAdapter[(Array[Byte],Byte)] {
     override def visit[S](col: Column,ctx: S): (Array[Byte],Byte) = 
         var idx:Int = -1 
         breakable(
-            for i <- 0 until table.cols.length do 
-                if col.getColumnName() == table.cols(i).name then 
-                    idx = i 
+            for (c,i) <- table.cols.zipWithIndex do 
+                if col.getColumnName() == c.name then 
+                    idx = i
                     break()
         )
         if idx < 0 then throw new IllegalArgumentException(s"Column '${col.getColumnName}' not found in context")
         var t:Byte = 0
-        if row(idx).length > 0 then t = table.cols(idx).ctype match
-            case "char"|"varchar" => 1.toByte
-            case "float"|"double" => 2.toByte
-            case "int"|"bigint" => 3.toByte
-            case _ => -1.toByte
+        if row(idx).length > 0 then 
+            t = table.cols(idx).ctype match
+                case "char"|"varchar" => 1.toByte
+                case "float"|"double" => 2.toByte
+                case "int"|"bigint" => 3.toByte
+                case _ => -1.toByte
         (row(idx),t)
     override def visit[S](b:BooleanValue,ctx:S): (Array[Byte],Byte) = (Array[Byte](if b.getValue then 1.toByte else 0.toByte),4.toByte) // Boolean:4
-    override def visit[S](l: LongValue,ctx:S): (Array[Byte],Byte) = (Util.longToBytes(l.getValue),3)
-    override def visit[S](d: DoubleValue,ctx:S): (Array[Byte],Byte) = (Util.doubleToBytes(d.getValue),2)
-    override def visit[S](s: StringValue,ctx:S): (Array[Byte],Byte) = (s.getValue.getBytes(StandardCharsets.UTF_8),1)
-    override def visit[S](n: NullValue,ctx:S): (Array[Byte],Byte) = (Array[Byte](),0)
+    override def visit[S](l:LongValue,ctx:S): (Array[Byte],Byte) = (Util.longToBytes(l.getValue),3)
+    override def visit[S](d:DoubleValue,ctx:S): (Array[Byte],Byte) = (Util.doubleToBytes(d.getValue),2)
+    override def visit[S](s:StringValue,ctx:S): (Array[Byte],Byte) = (s.getValue.getBytes(SQLEngine.defaultCharset),1)
+    override def visit[S](n:NullValue,ctx:S): (Array[Byte],Byte) = (Array[Byte](),0)
     override def visit[S](equ: EqualsTo,ctx:S):(Array[Byte],Byte) = {
         val (l,_) = equ.getLeftExpression.accept(this, ctx)
         val (r,_) = equ.getRightExpression.accept(this, ctx)
-        if l != null && l.equals(r) then (Array[Byte](1),4) else (Array[Byte](0),4)
+        if l != null && l.sameElements(r) then (Array[Byte](1),4) else (Array[Byte](0),4)
     }
     override def visit[S](g: GreaterThan, ctx: S): (Array[Byte],Byte) = {
         val (l,tl) = g.getLeftExpression.accept(this, ctx)
@@ -298,39 +339,54 @@ private class SQLEvaluator(val table:tableInfo,var row:Array[Array[Byte]]) exten
 }
 
 object SQLEngine:
-    val errValueFmt = new Exception("The data format doesn't match the column field type")
-    val errClosed = new Exception("db is closed state")
-    val errNoTable = new Exception("not found table")
-    val errTable = new Exception("internal table error")
+    val maxColumnNameLen:Int = 1024
+    val maxTableNameLen:Int = 1024
+    val errValueType = new SQLException("the value doesn't match the column field type")
+    val errClosed = new SQLException("db is closed state")
+    val errNoTable = new SQLException("not found table")
+    val errInnerTable = new SQLException("internal table error")
+    val errNotSup = new SQLException("not support the sql now")
+    def defaultCharset:Charset = StandardCharsets.UTF_8
+    def apply(ops: SQLEngineOptions):SQLEngine = new SQLEngine(ops)
+    def apply(path:String)(using ops:Options):SQLEngine = new SQLEngine(SQLEngineOptions(path,ops))
 
-class SQLEngine(val path:String,val ops:Options):
+/**
+  * The SQLEngine object encapsulates the underlying platdb KV storage interface. 
+  * As a computing layer, it supports basic SQL statements and database transactions, 
+  * making PlatDB usable as a simple embedded relational database.
+  * 
+  */
+class SQLEngine(ops:SQLEngineOptions):
     import tableProto._
-    private[platdb] val metaTb:String = "platdb_info_meta"
-    private[platdb] val tableTb:String = "platdb_info_table"
-    private[platdb] val indexTb:String = "platdb_info_index"
-    private[platdb] var openFlag:Boolean = false
-    private[platdb] var db:DB = null
+    // The metadata table of the database.
+    private val metaTb:String = "platdb_info_meta"
+    // Database table information, storing JSON data for all table names and corresponding table information.
+    private val tableTb:String = "platdb_info_table"
+    private val indexTb:String = "platdb_info_index"
+    private val charRgx:Regex = """char\((\d*)\)""".r
+    private val varcharRgx:Regex = """varchar\((\d*)\)""".r
+    private val valueEncode = Base64.getEncoder()
+    private val valueDecode = Base64.getDecoder()
+    private var openFlag:Boolean = false
+    private var db:DB = null
+    // Cache table information.
     private[platdb] var tbs:Map[String,tableInfo] = Map[String,tableInfo]()
     private[platdb] var dbTx:Map[Long,Transaction] = Map[Long,Transaction]()
-    //
-    def characterSet:String = StandardCharsets.UTF_8.toString()
-    //
-    private def contains(name:String):Boolean =
-        if tbs.contains(name) then
-            true
-        else
-            db.get(tableTb,name) match
-                case Success(_,s) =>
-                    val tb = s.parseJson.convertTo[tableInfo]
-                    tbs.put(name,tb)
-                    true
-                case Failure(e) => if !DB.isNotExists(e) then throw e else true
-    //
-    def open:Try[Unit] =
+
+    /**
+      * The default encoding of the database cannot be changed currently.
+      */
+    def defaultCharset:Charset = StandardCharsets.UTF_8
+    /**
+      * Initialize the database. Before using SQLEngine, 
+      * this method must be called once to open the underlying storage.
+      * 
+      */
+    def open():Try[Unit] =
         try
             if openFlag then
                 return Success(None)
-            db = new DB(path)(using ops)
+            db = new DB(ops.path)(using ops.dbOps)
             db.open() match
                 case Failure(e) => throw e
                 case Success(_) => None
@@ -355,8 +411,13 @@ class SQLEngine(val path:String,val ops:Options):
         catch
             case ex:Exception => Failure(ex)
             case er:Error => Failure(er)
-    // 
-    def close:Try[Unit] = 
+    /**
+      * Close the database. 
+      * After using SQLEngine (or exiting due to an exception), 
+      * this method needs to be executed once to shut down the database, 
+      * which will perform some necessary cleaning operations.
+      */
+    def close():Try[Unit] = 
         if !openFlag then return Success(None)
         try
             for (id,tx) <- dbTx do 
@@ -371,7 +432,10 @@ class SQLEngine(val path:String,val ops:Options):
         catch
             case ex:Exception => Failure(ex)
             case er:Error => Failure(er)
-    //
+    /**
+      * Execute SQL query statements and return query results or exception information. 
+      * Note that this statement will be executed as a transaction.
+      */
     def query(stmt:String):Try[SQLRows] =  
         if !openFlag then return Failure(SQLEngine.errClosed)
         var tx:Transaction = null 
@@ -380,14 +444,120 @@ class SQLEngine(val path:String,val ops:Options):
                 case Failure(e) => throw e
                 case Success(t) => tx = t 
             val res = txQuery(stmt,tx) 
-            tx.commit() 
             Success(res)
         catch
             case e:Exception => Failure(e)
             case e:Error => Failure(e)
         finally
-            if tx != null then tx.rollback()
-    // 
+            if tx != null && !tx.closed then tx.rollback()
+    /**
+      * Execute SQL statements and return execution results or exception information. 
+      * Note that this statement will be executed as a transaction.
+      */
+    def exec(stmt:String):Try[SQLResult] = 
+        if !openFlag then return Failure(SQLEngine.errClosed)
+        var tx:Transaction = null
+        try
+            db.begin(true) match
+                case Failure(e) => throw e 
+                case Success(t) => tx = t 
+            val res = txExec(stmt,tx) 
+            tx.commit() 
+            Success(res)
+        catch 
+            case e:Exception => Failure(e)
+            case e:Error => Failure(e)
+        finally
+            if tx != null && !tx.closed then tx.rollback()
+    /**
+      * Open a read-only or read-write transaction.
+      */
+    def beginTx(readOnly:Boolean):Try[DBTransaction] = 
+        if !openFlag then 
+            Failure(SQLEngine.errClosed)
+        else 
+            db.begin(!readOnly) match
+                case Failure(e) => Failure(e)
+                case Success(tx) =>
+                    dbTx.put(tx.id,tx)
+                    Success(new sqlTx(tx.id,this))
+    // Check if the table exists.
+    private def contains(tx:Transaction,name:String):Boolean =
+        if tbs.contains(name) then
+            true
+        else
+            tx.openBucket(tableTb) match
+                case Some(bk) => bk.get(name) match
+                    case Some(s) => 
+                        val tb = s.parseJson.convertTo[tableInfo]
+                        tbs.put(name,tb)
+                        true
+                    case None => false
+                case None => throw SQLEngine.errInnerTable
+    // Preprocess SQL statements.
+    private def preprocess(s:String):String =
+        if s.count(p => p ==';') > 1 then
+            throw new SQLException("not support muti-rows statement now")
+        //(for ss <- s.split(";") if s.length > 0 yield ss.replaceAll("`","").replaceAll("\"","")).toArray
+        s.replaceAll("`","").replaceAll("\"","")
+    // Execute statements in the specified transaction environment.
+    private[platdb] def txExec(stmt:String,tx:Transaction):SQLResult = 
+        if !openFlag then throw SQLEngine.errClosed
+        val sql = preprocess(stmt)
+        val stat: Statement = CCJSqlParserUtil.parse(sql) // JSQLParserException
+        stat match
+            case ct:CreateTable => 
+                val tb = parseCreateTable(ct)
+                // check table if exists.
+                if contains(tx,tb.name) then
+                    if ct.isIfNotExists() then
+                        return SQLResult(0,0)
+                    else
+                        throw new SQLException(s"already exists table ${tb.name}")
+                // 4.create a tables bucket with table_name. 
+                // reate a table_info record, save it to tableTb
+                val tbInfo:String = tb.toJson.compactPrint
+                tx.createBucket(tb.name) 
+                tx.openBucket(tableTb) match 
+                    case None => throw SQLEngine.errInnerTable
+                    case Some(bk) => 
+                        bk.put(tb.name,tbInfo) 
+                        tbs.put(tb.name,tb)
+                        SQLResult(0,0)
+            case dp:Drop => 
+                val name = dp.getName().getName().toLowerCase()
+                if !contains(tx,name) then
+                    return SQLResult(0,0)
+                // 2. delete table bucket, delete table_info
+                tx.deleteBucket(name)
+                tx.openBucket(tableTb) match 
+                    case None => throw SQLEngine.errInnerTable
+                    case Some(bk) =>
+                        bk.delete(name) 
+                        tbs.remove(name)
+                        SQLResult(0,0) // TODO get table length.
+            case ins:Insert => 
+                val (table,data) = parseInsert(ins,tx)
+                // insert the data to db
+                tx.openBucket(table) match
+                    case None => throw SQLEngine.errNoTable
+                    case Some(bk) =>
+                        for (k,v) <- data do 
+                            if bk.contains(k) then
+                                throw new SQLException(s"duplicate primary key ${k}")
+                            else
+                                bk.put(k,v)
+                tx.openBucket(tableTb) match
+                    case Some(bk) => tbs.get(table) match
+                        case Some(info) => 
+                            bk.put(table,info.toJson.compactPrint) 
+                            SQLResult(0,data.length)
+                        case None => throw SQLEngine.errInnerTable
+                    case None => throw SQLEngine.errInnerTable
+            case up:Update => execUpdate(up,tx)
+            case del:Delete => execDelete(del,tx)
+            case _ => throw SQLEngine.errNotSup
+    // Execute statements in the specified transaction environment.
     private[platdb] def txQuery(stmt:String,tx:Transaction):SQLRows = 
         if !openFlag then throw SQLEngine.errClosed
         val sql = preprocess(stmt)
@@ -396,59 +566,75 @@ class SQLEngine(val path:String,val ops:Options):
             case sel:Select => sel.getSelectBody() match
                 case ps:PlainSelect =>
                     // 1.check table
-                    val tables = ArrayBuffer[String]()
-                    ps.getFromItem().accept( new FromItemVisitorAdapter{
-                        override def visit(table: Table): Unit = tables.append(table.getName())
-                    })
-                    if tables.length == 0 then 
-                        throw new Exception("no table found in sql")
-                    else if tables.length != 1 then 
-                        throw new Exception("not support muti-tables query now")
-                    val name = tables(0).toLowerCase()
-                    if !contains(name) then throw SQLEngine.errNoTable
+                    var name:String = ""
+                    Option(ps.getFromItem).collect { case table: Table =>
+                        name = table.getName
+                    }
+                    if !contains(tx,name) then throw SQLEngine.errNoTable
                     val tbi = tbs.get(name) match
                         case Some(v) => v 
                         case None => throw SQLEngine.errNoTable
                     
                     // 2.check column
                     var allFlag:Boolean = false 
-                    val columns = ArrayBuffer[String]()
-                    val items = ps.getSelectItems().asScala.toList
+                    var cntFlag:Boolean = false 
+                    val columns = ArrayBuffer[(String,String)]()
+
+                    if ps.getSelectItems() == null then
+                        throw new SQLException("select statement columns is empty")
+                    val items = ps.getSelectItems().asScala
                     items.foreach( item =>
-                        item match
-                            case exp:Expression => 
-                                exp.accept(new ExpressionVisitorAdapter {
-                                    override def visit(column: Column): Unit = 
-                                        if item.getAliasName() != "" then
-                                            columns.append(item.getAliasName())
+                        item.accept(new SelectItemVisitorAdapter[Unit] {
+                            override def visit[S](si: SelectItem[? <: Expression], context: S): Unit = 
+                                si.getExpression() match
+                                    case col:Column =>
+                                        val al = Option(si.getAlias).map(_.getName).getOrElse("")
+                                        columns.append((col.getColumnName().toLowerCase(),al))
+                                    case all:AllColumns => allFlag = true 
+                                    case f:Function => 
+                                        if f.getName().toLowerCase() == "count"  then
+                                            if f.getParameters() != null then
+                                                f.getParameters().asScala.toList.foreach( arg =>
+                                                    if arg.toString() == "*" then cntFlag = true 
+                                                )
                                         else
-                                            columns.append(column.getColumnName())
-                                    override def visit(all: AllColumns): Unit = allFlag = true 
-                                })
-                            case _ => throw new Exception("not support other type column now") 
+                                            throw new SQLException(s"not support such function ${f.toString()} now")
+                                    case _ => None
+                        },null)
                     )
-                    if columns.length == 0 && !allFlag then 
-                        throw new Exception("query column is empty")
+                    if columns.length == 0 && !allFlag && !cntFlag then 
+                        throw new SQLException("query column is empty")
                     else if allFlag && columns.length != 0 then 
-                        throw new Exception("not support such columns")
+                        throw new SQLException("not support such columns")
+                    else if cntFlag && (columns.length != 0 || allFlag) then
+                        throw new SQLException("not support such columns")
+
+                    if cntFlag then 
+                        tx.openBucket(name) match
+                            case Some(bk) => 
+                                val data = Array[Array[Any]](Array[Any](bk.length))
+                                return SQLRows(Array[String]("count(*)"),Array[String]("int"),data)
+                            case None => throw SQLEngine.errInnerTable
                     // get columns type info
-                    val ftypes = new ArrayBuffer[String](columns.length)
+                    val ftypes = ArrayBuffer[String]()
+                    val cidx = ArrayBuffer[Int]()
                     if allFlag then 
-                        for col <- tbi.cols do 
-                            columns.append(col.name)
+                        for (col,i) <- tbi.cols.zipWithIndex do 
+                            columns.append((col.name,""))
                             ftypes.append(col.ctype)
+                            cidx.append(i)
                     else
-                        for c <- columns do 
+                        for (c,_) <- columns do 
                             var i:Int = -1
                             breakable(
-                                for j <- 0 until tbi.cols.length do 
-                                    if tbi.cols(j).name == c then 
+                                for (col,j) <- tbi.cols.zipWithIndex do 
+                                    if col.name == c then 
                                         i = j 
                                         break()
                             )
-                            if i < 0 then 
-                                throw new Exception(s"not found column ${c}")
+                            if i < 0 then throw new SQLException(s"not found column ${c}")
                             ftypes.append(tbi.cols(i).ctype)
+                            cidx.append(i)
                     // 3.filter row by where 
                     val rd = new ArrayBuffer[Array[Any]]()
                     ps.getWhere() match
@@ -458,9 +644,8 @@ class SQLEngine(val path:String,val ops:Options):
                                 for kv <- bk.iterator do 
                                     kv match
                                         case Some(_,str) =>
-                                            val row = splitRow(str,tbi)
-                                            val r = project(columns,ftypes,row)
-                                            rd.append(r)
+                                            val row = decode(str,tbi)
+                                            rd.append(project(cidx,ftypes,row))
                                         case None => None 
                         case exp:Expression => 
                             val eva = new SQLEvaluator(tbi,null)
@@ -469,98 +654,103 @@ class SQLEngine(val path:String,val ops:Options):
                                 case Some(bk) =>
                                     for kv <- bk.iterator do kv match 
                                         case Some(_,str) => 
-                                            val row = splitRow(str,tbi)
+                                            val row = decode(str,tbi)
                                             eva.row = row 
                                             val (ok,_) = exp.accept(eva,null)
-                                            if ok.length > 0 && (ok(0)&1) != 0 then 
-                                                val r = project(columns,ftypes,row)
-                                                rd.append(r)
+                                            if ok.length > 0 && (ok(0)&1) != 0 then
+                                                rd.append(project(cidx,ftypes,row))
                                         case None => None
-                    SQLRows(columns.toArray,rd.toArray)
-                case _ => throw new Exception("not support the sql now")   
+                    val cols = (for (a,b) <- columns yield if b != "" then b else a).toArray
+                    SQLRows(cols,ftypes.toArray,rd.toArray)
+                case _ => throw SQLEngine.errNotSup  
             case st:ShowTablesStatement => 
                 // list all tables name
                 val ts = new ArrayBuffer[Array[Any]]
                 tx.openBucket(tableTb) match
                     case None => None
                     case Some(bk) => 
-                        for kv <- bk.iterator do 
-                            kv match
-                                case Some(_,v) => ts.append(Array[Any](v))
-                                case None => None
-                SQLRows(Array[String]("tables"),ts.toArray)
+                        for kv <- bk.iterator do kv match
+                            case Some(k,_) => ts.append(Array[Any](k))
+                            case None => None
+                SQLRows(Array[String]("tables"),Array[String]("string"),ts.toArray)
             case sc:ShowColumnsStatement => 
                 val table = sc.getTableName().toLowerCase()
                 tx.openBucket(tableTb) match
-                    case None => throw SQLEngine.errNoTable
-                    case Some(bk) => 
-                        bk.get(table) match
-                            case None => throw SQLEngine.errNoTable
-                            case Some(v) => 
-                                val info = v.toJson.convertTo[tableInfo]
-                                val rows = new Array[Array[Any]](info.cols.length)
-                                for i <- 0 until info.cols.length do 
-                                    rows(i) = Array[Any](info.cols(i).name,info.cols(i).ctype,"")
-                                    if info.cols(i).name == info.pk then 
-                                        rows(i)(3) = "primary key"
-                                SQLRows(Array[String]("name","type","info"),rows)
-            case _ => throw new Exception("not support the query sql now")
-    //
-    private def project(cols:ArrayBuffer[String],ftype:ArrayBuffer[String],row:Array[Array[Byte]]):Array[Any] = 
-        val res = new Array[Any](cols.length)
-        for i <- 0 until cols.length do 
-            res(i) = (if row(i).length == 0 then null 
+                    case None => throw SQLEngine.errInnerTable
+                    case Some(bk) => bk.get(table) match
+                        case None => throw SQLEngine.errNoTable
+                        case Some(v) => 
+                            val info = v.parseJson.convertTo[tableInfo]
+                            val rows = new Array[Array[Any]](info.cols.length)
+                            for (col,i) <- info.cols.zipWithIndex do 
+                                rows(i) = Array[Any](col.name,col.ctype,"")
+                                if col.name == info.pk then
+                                    rows(i)(2) = "primary key"
+                            SQLRows(Array[String]("column_name","data_type","specs"),Array[String]("string","string","string"),rows)
+            case _ => throw SQLEngine.errNotSup
+    // Projection operation. Get the required columns.
+    private def project(cidx:ArrayBuffer[Int],ftype:ArrayBuffer[String],row:Array[Array[Byte]]):Array[Any] = 
+        val res = new Array[Any](ftype.length)
+        for (j,i) <- cidx.zipWithIndex do 
+            res(i) = (
+                if row(j) == null || row(j).length == 0 then 
+                    null 
                 else ftype(i) match
-                    case "char"|"varchar" => new String(row(i),StandardCharsets.UTF_8) 
-                    case "int" => Util.bytesToInt(row(i))
-                    case "bigint" => Util.bytesToLong(row(i)) 
-                    case "float" =>  Util.bytesToFloat(row(i)) 
-                    case "double" => Util.bytesToDouble(row(i)) 
-                    case _ =>  null
+                    case "char"|"varchar" => new String(row(j),defaultCharset) 
+                    case "int" => Util.bytesToLong(row(j))
+                    case "bigint" => Util.bytesToLong(row(j)) 
+                    case "float" =>  Util.bytesToDouble(row(j)) 
+                    case "double" => Util.bytesToDouble(row(j))
+                    case _ => null
             )
-        res 
-    //
+        res
+    // Resolve the 'create table...' statement.
     private def parseCreateTable(ct:CreateTable):tableInfo = 
-        // 1.get table name, check if exists
-        val name = ct.getTable.getName
-        if contains(name) then 
-            throw new Exception("table already exists")
+        val name = ct.getTable.getName.toLowerCase()
+        if name.length() > SQLEngine.maxTableNameLen then
+            throw new SQLException("table name too long")
         // init a table info obj
         val tb = new tableInfo(name)
         // 2.check field type
         val cols = new ArrayBuffer[columnInfo]()
-        val cd = ct.getColumnDefinitions.asScala.toList
+        val cd = (if ct.getColumnDefinitions != null then 
+                ct.getColumnDefinitions.asScala.toList
+            else 
+                throw new SQLException("columns definations is empty")
+        )
         cd.foreach( col => 
-            val cname = col.getColumnName
-            val ctype = col.getColDataType
-            val tname = ctype.getDataType.toLowerCase
-            val targs = ctype.getArgumentsStringList.asScala.toArray
-            tname match
-                case "varchar" => 
-                    if targs.length != 1 then
-                        throw new Exception(s"invalid field ${tname}")
-                    val l = targs(0).toInt
-                    if l <= 0 || l > 65535 then
-                        throw new Exception(s"invalid field ${tname}(${l})")
-                case "char" => 
-                    if targs.length != 1 then
-                        throw new Exception(s"invalid field ${tname}")
-                    val l = targs(0).toInt
-                    if l <= 0 || l > 255 then
-                        throw new Exception(s"invalid field ${tname}(${l})")
-                case "int"|"bigint"|"double"|"float" => None 
-                case _ => throw new Exception(s"not support field type ${tname} now")
+            val cname = col.getColumnName.toLowerCase()
+            if cname.length() > SQLEngine.maxColumnNameLen then
+                throw new SQLException("column name too long")
+            val ctype = col.getColDataType.getDataType.toLowerCase.replace(" ","")
+            var cargs:Array[String] = Array[String]()
+            if col.getColDataType.getArgumentsStringList() != null then
+                cargs = col.getColDataType.getArgumentsStringList().asScala.toArray
+            //val targs = ctype.getArgumentsStringList.asScala.toArray
+            val tname = ctype match
+                case varcharRgx(n) => 
+                    if n.toInt <= 0 || n.toInt > 65535 then
+                        throw new SQLException(s"invalid field ${ctype}")
+                    "varchar"
+                case charRgx(n) => 
+                    if n.toInt <= 0 || n.toInt > 255 then
+                        throw new SQLException(s"invalid field type ${ctype}")
+                    "char"
+                case "char" | "varchar" => ctype
+                case "int"|"bigint"|"double"|"float" => ctype
+                case _ => throw new SQLException(s"not support field type ${ctype}} now")
             val c = new columnInfo(cname,tname)
-            val specs = col.getColumnSpecs.asScala.toList
+            val specs = if col.getColumnSpecs != null then col.getColumnSpecs.asScala.toList else List[String]()
             specs.foreach( sp => 
                 if sp.toLowerCase() == "auto_increment" then
-                    if tname != "int" || tname != "bigint" then 
-                        throw new Exception(s"${cname} filed type is ${tname},not support AUTO_INCREMENT")
-                    else
+                    if tname == "int" || tname == "bigint" then 
                         c.auto = true
+                    else
+                        throw new SQLException(s"${cname} field type is '${tname}',not support AUTO_INCREMENT")
+                        
                 if sp.toLowerCase == "primary" then
                     if tb.pk != "" then 
-                        throw new Exception("not support composite keys now")
+                        throw new SQLException("not support composite keys now")
                     else
                         tb.pk = cname
                 // TODO: process other options,example, not null, default value
@@ -569,61 +759,65 @@ class SQLEngine(val path:String,val ops:Options):
         )
         tb.cols = cols.toArray
         // 
-        val index = ct.getIndexes.asScala.toList
+        var index:List[Index] = List[Index]()
+        if ct.getIndexes != null then
+            index = ct.getIndexes.asScala.toList
         index.foreach( idx =>
             if (idx.getType == "PRIMARY KEY") then 
                 val pks = idx.getColumns.asScala.map(_.getColumnName).toArray
                 
                 if pks.length != 1 then 
-                    throw new Exception("not support composite keys now")
+                    throw new SQLException("not support composite keys now")
 
                 if tb.pk != "" && tb.pk != pks(0) then
-                    throw new Exception("primary key duplication")
+                    throw new SQLException("primary key duplication")
 
                 tb.pk = pks(0)
                 var ok:Boolean = false 
                 for c <- tb.cols do
                     if c.name == tb.pk then ok = true 
                 if !ok then 
-                    throw new Exception("primary key field not exists")
+                    throw new SQLException("primary key field not exists")
             else
-                throw new Exception("not support secondary index now")
+                throw new SQLException("not support secondary index now")
         )
         tb 
-    // get table name.
-    private def parseDrop(dt:Drop):String = 
-        // 1.get table name, check if exists
-        val name = dt.getName.getName()
-        if !contains(name) then throw SQLEngine.errNoTable else name 
-    //
-    private def parseInsert(ins:Insert):(String,ArrayBuffer[(String,String)]) = 
-        // sql = "INSERT INTO employees (id, name) VALUES (1, 'John')";
-        val table = ins.getTable().getName()
-        if !contains(table) then throw SQLEngine.errNoTable
+    // Resolve the 'insert into...' statement.
+    private def parseInsert(ins:Insert,tx:Transaction):(String,ArrayBuffer[(String,String)]) = 
+        val table = ins.getTable().getName().toLowerCase()
+        if !contains(tx,table) then 
+            throw new SQLException(s"table '${table}' not exists")
         tbs.get(table) match
-            case None => throw new Exception("table not exists")
+            case None => throw SQLEngine.errInnerTable
             case Some(tbi) => 
                 // check the field exists
-                val cols = ins.getColumns().asScala.toArray
-                if cols.length == 0 then throw new Exception("columns is empty")
-                val cidx = new Array[Int](cols.length)
-                for i <- 0 until cols.length do 
-                    val c = cols(i)
-                    var j = -1 
-                    breakable(
-                        for k <- 0 until tbi.cols.length do 
-                            if c.getColumnName().toLowerCase() == tbi.cols(k).name then 
-                                j = k
-                                break()
-                    )
-                    if j<0 then 
-                        throw new Exception(s"field ${c.getColumnName()} not exists")
-                    else
-                        cidx(i) = j 
+                var cols = Array[Column]()
+                var cidx:Array[Int] = null
+                if ins.getColumns() != null then
+                    cols = ins.getColumns().asScala.toArray
+                    if cols.length > tbi.cols.length then 
+                        throw new SQLException("too much columns") //TODO use sql exception
+                    cidx = new Array[Int](cols.length)
+                    for (c,i) <- cols.zipWithIndex do 
+                        var j = -1 
+                        breakable ( 
+                            for (col,k) <- tbi.cols.zipWithIndex do 
+                                if c.getColumnName().toLowerCase() == col.name then 
+                                    j = k
+                                    break()
+                        )
+                        if j < 0 then 
+                            throw new SQLException(s"field ${c.getColumnName()} not exists in table ${table}")
+                        else
+                            cidx(i) = j 
+                else
+                    // all columns
+                    cidx = new Array[Int](tbi.cols.length)
+                    for i <- 0 until cidx.length do cidx(i) = i 
                 // process values. check data type.
-                val data = ArrayBuffer[(String,String)]()
+                val data = ArrayBuffer[(String,String)]() // (key,row_record)
                 Option(ins.getValues()) match
-                    case None => throw new Exception("insert values is empty")
+                    case None => throw new SQLException("insert values is empty")
                     case Some(vals:Values) => 
                         val rows = vals.getExpressions.asScala.toArray
                         breakable(
@@ -631,166 +825,175 @@ class SQLEngine(val path:String,val ops:Options):
                                 case row:ParenthesedExpressionList[Expression] =>
                                     // muti-rows insert
                                     val r = row.getExpressions().asScala.toArray 
-                                    val (k,v) = format(table,cidx,r) 
-                                    data.append((k,v))
-                                case _:Expression => break() // single row insert 
-                                case null => throw new Exception("insert values is empty")
+                                    if r.length != cidx.length then
+                                        throw new SQLException("columns number and values number not matching")
+                                    data.append(encode(tbi,cidx,r))
+                                case _:Expression => break() // TODO: single row insert 
+                                case null => throw new SQLException("insert values is empty")
                         )
                         if data.length == 0 then 
-                            data.append(format(table,cidx,rows))
+                            data.append(encode(tbi,cidx,rows))
                 (table,data)
-    // the row record format: head+data --> the head is a offset array.
-    private def format(table:String,cidx:Array[Int],row:Array[Expression]):(String,String) =
-        tbs.get(table) match
-            case Some(tbi) => 
-                // head: offset array
-                var key:String = ""
-                val data = new Array[Array[Byte]](tbi.cols.length)
-                for i <- 0 until cidx.length do 
-                    val j = cidx(i)
-                    val exp = row(i)
-                    val col = tbi.cols(j)
-                    data(j) = exp match
-                        case lv:LongValue => 
-                            if col.ctype != "int" || col.ctype != "bigint" then throw SQLEngine.errValueFmt
-                            Util.longToBytes(lv.getValue)
-                        case sv: StringValue    => 
-                            if col.ctype != "char" || col.ctype != "varchar" then throw SQLEngine.errValueFmt
-                            sv.getValue.getBytes()
-                        case dv: DoubleValue => 
-                            if col.ctype != "float" || col.ctype != "double" then throw SQLEngine.errValueFmt
-                            Util.doubleToBytes(dv.getValue)
-                        case jp: JdbcParameter  => jp.toString.getBytes(StandardCharsets.UTF_8)
-                        case _  => exp.toString.getBytes(StandardCharsets.UTF_8)
-                    if col.name == tbi.pk then 
-                        if col.auto then // TODO: if exp not null,return a error 
-                            key = s"${col.autoNext}"
-                            col.autoNext += 1
-                        else
-                            key = exp.toString
-                for i <- 0 until tbi.cols.length do 
-                    if tbi.cols(i).auto then 
-                        data(i) = Util.longToBytes(tbi.cols(i).autoNext)
-                        tbi.cols(i).autoNext += 1 
-                    // TODO process default value
-                // default primary key.
-                if key == "" && tbi.pk == "" then 
-                    key = s"${tbi.rowId}"
-                    tbi.rowId += 1 
+    // Encode the data rows of the table into a key value pair. The value format is the column offset+data format.
+    private def encode(tbi:tableInfo,cidx:Array[Int],row:Array[Expression]):(String,String) =
+        // head: offset array
+        var key:String = ""
+        val data = new Array[Array[Byte]](tbi.cols.length)
+        for (j,i) <- cidx.zipWithIndex do 
+            val col = tbi.cols(j)
+            data(j) = row(i) match
+                case iv:LongValue => 
+                    if col.ctype == "int" || col.ctype == "bigint" then
+                        Util.longToBytes(iv.getValue)
+                    else
+                        throw SQLEngine.errValueType
+                case dv:DoubleValue => 
+                    if col.ctype == "float" || col.ctype == "double" then
+                        Util.doubleToBytes(dv.getValue)
+                    else
+                        throw SQLEngine.errValueType
+                case sv:StringValue => 
+                    if col.ctype == "char" || col.ctype == "varchar" then 
+                        sv.getValue.getBytes(defaultCharset)
+                    else
+                        throw SQLEngine.errValueType
+                case _  => throw new SQLException(s"not support value type ${row(i).toString()}")
+            
+            if col.name == tbi.pk then 
+                if col.auto then // TODO: if exp not null,return a error 
+                    key = s"${col.autoNext}"
+                    tbi.cols(j).autoNext += 1
+                else
+                    key = row(i).toString 
+            
+        for (col,i) <- tbi.cols.zipWithIndex do  // TODO process default value
+            if col.auto then 
+                if col.name == tbi.pk then
+                    key = col.autoNext.toString()
+                data(i) = Util.longToBytes(col.autoNext)
+                tbi.cols(i).autoNext += 1
+            
+        // default primary key.
+        if key == "" && tbi.pk == "" then 
+            key = s"${tbi.rowId}"
+            tbi.rowId += 1
 
-                var size:Int = tbi.cols.length*4
-                for d <- data do {
-                    size += d.length
-                }
-                var buf:ByteBuffer = ByteBuffer.allocate(size)
-                var offset:Int = tbi.cols.length*4
-                for d <- data do 
-                    offset += d.length
-                    buf.putInt(offset)
-                for d <- data if d.length > 0 do buf.put(d)
-                (key,new String(buf.array(), StandardCharsets.UTF_8))
-            case None => throw new Exception("table wrong")
+        (key,makeRow(tbi.cols.length*4,data))
     //
-    private def splitRow(row:String,tbi:tableInfo):Array[Array[Byte]] = 
-        val arr = row.getBytes(StandardCharsets.UTF_8)
+    private def makeRow(base:Int,data:Array[Array[Byte]]):String = 
+        var size:Int = base
+        for d <- data do size += (if d != null then d.length else 0)
+        var buf:ByteBuffer = ByteBuffer.allocate(size)
+        size = base
+        for d <- data do 
+            size += (if d != null then d.length else 0)
+            buf.putInt(size)
+        for d <- data if (d != null && d.length > 0) do buf.put(d)
+        valueEncode.encodeToString(buf.array())
+    // Decoding a string formatted row data into a table with a record row.
+    private def decode(row:String,tbi:tableInfo):Array[Array[Byte]] = 
+        val arr = valueDecode.decode(row)
         val res = new Array[Array[Byte]](tbi.cols.length)
         var l:Int = tbi.cols.length*4
         for i <- 0 until tbi.cols.length do 
-            val r = Util.bytesToInt(arr.slice(i,i+4))
-            if r - l > 0 then 
-                res(i) = arr.slice(l,r)
+            val r = Util.bytesToInt(arr.slice(4*i,4*i+4))
+            if r > l  then res(i) = arr.slice(l,r)
+            l = r 
         res
-    //
+    // Analyze the delete statement and filter the keys that need to be deleted.
     private def parseDelete(del:Delete,tx:Transaction):(String,ArrayBuffer[String],Boolean) = 
-        val table = del.getTable().getName()
-        if !contains(table) then throw SQLEngine.errNoTable
+        val table = del.getTable().getName().toLowerCase()
+        if !contains(tx,table) then throw SQLEngine.errNoTable
         tbs.get(table) match
-            case None => throw new Exception("table not exists")
+            case None => throw SQLEngine.errNoTable
             case Some(tbi) => del.getWhere() match
                 case null => (table,null,true)
                 case exp:Expression => 
                     val eva = new SQLEvaluator(tbi,null)
                     val arr = ArrayBuffer[String]()
                     tx.openBucket(table) match
-                        case None =>  None 
+                        case None => None 
                         case Some(bk) =>
-                            for kv <- bk.iterator do 
-                                kv match
-                                    case None => None
-                                    case Some(k,value) => 
-                                        eva.row = splitRow(value,tbi)
-                                        val (res,_) = exp.accept(eva,null)
-                                        if res.length > 0 && (res(0).toInt & 1) != 0 then 
-                                            arr.append(k)
+                            for kv <- bk.iterator do kv match
+                                case None => None
+                                case Some(k,value) => 
+                                    eva.row = decode(value,tbi)
+                                    val (res,_) = exp.accept(eva,null)
+                                    if res.length > 0 && (res(0).toInt & 1) != 0 then 
+                                        arr.append(k)
                     (table,arr,false)
-    //
+    // Analyze and execute the update statement.
     private def execUpdate(up:Update,tx:Transaction):SQLResult = 
         val table = up.getTable().getName().toLowerCase()
-        if !contains(table) then 
+        if !contains(tx,table) then 
             throw SQLEngine.errNoTable
         tbs.get(table) match
             case Some(tbi) =>
                 // check set columns and values
                 val cidx = new ArrayBuffer[Int]()
-                val vals = new ArrayBuffer[Array[Byte]]()
+                val newVal = new ArrayBuffer[Array[Byte]]()
                 val eva = new SQLEvaluator(tbi,null)
-                val set = up.getUpdateSets().asScala.toList
-                set.foreach( s =>
-                    val cols = s.getColumns().asScala.toList
-                    val exps = s.getValues().asScala.toList
-                    cols.zip(exps).foreach( (col,exp) => 
-                        val name = col.getColumnName().toLowerCase()
-                        breakable(
-                            for i <- 0 until tbi.cols.length do 
-                                if tbi.cols(i).name == name then 
-                                    cidx.append(i)
-                                    if tbi.pk == name then 
-                                        throw new Exception(s"'${name}' column is primary key")
-                                    if tbi.cols(i).auto then 
-                                        throw new Exception(s"'${name}' column is auto_increment")
-                                    val (v,tp) =  exp.accept(eva,null)
-                                    if !eva.checkType(tp,tbi.cols(i).ctype) then 
-                                        throw new Exception(s"column ${name} type is ${tbi.cols(i).ctype}")
-                                    vals.append(v)
-                                    break()
+                Option(up.getUpdateSets) match
+                    case Some(sets) => sets.asScala.foreach( s =>
+                        val cols = s.getColumns().asScala
+                        val exps = s.getValues().asScala
+                        cols.zip(exps).foreach( (col,exp) => 
+                            val name = col.getColumnName().toLowerCase()
+                            breakable(
+                                for (col,i) <- tbi.cols.zipWithIndex do 
+                                    if col.name == name then 
+                                        cidx.append(i)
+                                        if tbi.pk == name then 
+                                            throw new SQLException(s"'${name}' column is primary key")
+                                        if col.auto then 
+                                            throw new SQLException(s"'${name}' column is auto_increment")
+                                        val (v,tp) =  exp.accept(eva,null)
+                                        if !eva.checkType(tp,col.ctype) then 
+                                            throw new SQLException(s"column ${name} type is ${tbi.cols(i).ctype}")
+                                        newVal.append(v)
+                                        break()
+                            )
                         )
                     )
-                )
+                    case None => throw new SQLException("set columns is empty")
+                if cidx.length == 0 then throw new SQLException("set columns is empty")
+                if cidx.length != newVal.length then 
+                    throw new SQLException(s"found ${cidx.length} columns but new value ${newVal.length}")
                 // filter table rows,generate new row
-                val w = up.getWhere()
+                val w = Option(up.getWhere())
                 val keys = new ArrayBuffer[String]()
                 val rows = new ArrayBuffer[Array[Array[Byte]]]()
                 tx.openBucket(table) match
-                    case None => None
+                    case None => throw SQLEngine.errNoTable
                     case Some(bk) =>
-                        for kv <- bk.iterator do 
-                            kv match
-                                case Some(k,str) =>
-                                    eva.row = splitRow(str,tbi)
-                                    val (ok,_) = w.accept(eva,null)
+                        for kv <- bk.iterator do kv match
+                            case Some(k,str) => w match
+                                case None => 
+                                    keys.append(k)
+                                    rows.append(decode(str,tbi))
+                                case Some(exp) => 
+                                    eva.row = decode(str,tbi)
+                                    val (ok,_) = exp.accept(eva,null)
                                     if ok.length > 0 && (ok(0)&1) != 0 then 
                                         keys.append(k)
                                         rows.append(eva.row)
-                                case None => None 
+                            case None => None 
                         // update table
-                        var buf:ByteBuffer = ByteBuffer.allocate(tbi.cols.length*4)
-                        keys.zip(rows).foreach( (key,vs) => 
-                            for i <- cidx do 
-                                vs(i) = vals(i)
-                            buf.clear()
-                            var offset:Int = tbi.cols.length*4
-                            for d <- vs do 
-                                offset += d.length
-                                buf.putInt(offset)
-                            for d <- vs if d.length > 0 do buf.put(d)
-                            bk.put(key,new String(buf.array(),StandardCharsets.UTF_8)) 
+                        keys.zip(rows).foreach( (key,row) => 
+                            // update column,and write to kv-store
+                            for (i,j) <- cidx.zipWithIndex do row(i) = newVal(j)
+                            bk.put(key,makeRow(tbi.cols.length*4,row))
                         )
+                // update table info if need.
+                //tx.openBucket(tableTb) match4
+                //    case None => throw SQLEngine.errInnerTable
+                //    case Some(bk) => bk.put(table,tbi.toJson.compactPrint)
                 SQLResult(0,keys.length.toLong)
             case None => throw SQLEngine.errNoTable
     //
     private def execDelete(del:Delete,tx:Transaction):SQLResult = 
         val table = del.getTable().getName()
-        if !contains(table) then throw SQLEngine.errNoTable
+        if !contains(tx,table) then throw SQLEngine.errNoTable
         val (keys,all) = tbs.get(table) match
             case None => throw SQLEngine.errNoTable
             case Some(tbi) => del.getWhere() match
@@ -799,19 +1002,18 @@ class SQLEngine(val path:String,val ops:Options):
                     val eva = new SQLEvaluator(tbi,null)
                     val arr = ArrayBuffer[String]()
                     tx.openBucket(table) match
-                        case None => throw SQLEngine.errNoTable
+                        case None => throw SQLEngine.errInnerTable
                         case Some(bk) =>
-                            for kv <- bk.iterator do 
-                                kv match
-                                    case None => None
-                                    case Some(k,value) => 
-                                        eva.row = splitRow(value,tbi)
-                                        val (res,_) = exp.accept(eva,null)
-                                        if res.length > 0 && (res(0).toInt & 1) != 0 then 
-                                            arr.append(k)
+                            for kv <- bk.iterator do kv match
+                                case None => None
+                                case Some(k,value) => 
+                                    eva.row = decode(value,tbi)
+                                    val (res,_) = exp.accept(eva,null)
+                                    if res.length > 0 && (res(0).toInt & 1) != 0 then 
+                                        arr.append(k)
                             (arr,false)
         tx.openBucket(table) match
-            case None => throw throw SQLEngine.errNoTable
+            case None => throw SQLEngine.errInnerTable
             case Some(bk) => 
                 if all then 
                     val r = bk.length
@@ -820,85 +1022,3 @@ class SQLEngine(val path:String,val ops:Options):
                 else 
                     for key <- keys do bk.delete(key)
                     SQLResult(0,keys.length.toLong)
-    //
-    def exec(stmt:String):Try[SQLResult] = 
-        if !openFlag then return Failure(SQLEngine.errClosed)
-        var tx:Transaction = null
-        try
-            db.begin(true) match
-                case Failure(e) => throw e 
-                case Success(t) => tx 
-            val res = txExec(stmt,tx) 
-            tx.commit()     
-            Success(res)
-        catch 
-            case e:Exception => Failure(e)
-            case e:Error => Failure(e)
-        finally
-            if tx != null then tx.rollback()
-
-    // create table,drop table
-    // insert into...
-    // update...
-    // delete...
-    private[platdb] def txExec(stmt:String,tx:Transaction):SQLResult = 
-        if !openFlag then throw SQLEngine.errClosed
-        val sql = preprocess(stmt)
-        val stat: Statement = CCJSqlParserUtil.parse(sql) // JSQLParserException
-        stat match
-            case ct:CreateTable => 
-                val tb = parseCreateTable(ct)
-                // 4.create a tables bucket with table_name. reate a table_info record, save it to tableTb
-                val tbInfo:String = tb.toJson.compactPrint
-                tx.createBucket(tb.name) 
-                tx.openBucket(tableTb) match 
-                    case None => throw SQLEngine.errTable
-                    case Some(bk) => 
-                        bk.put(tb.name,tbInfo) 
-                        tbs.put(tb.name,tb)
-                        SQLResult(0,0)
-            case dp:Drop => 
-                val name = parseDrop(dp)
-                // 2. delete table bucket, delete table_info
-                    tx.deleteBucket(name)
-                    tx.openBucket(tableTb) match 
-                        case None => throw SQLEngine.errTable
-                        case Some(bk) =>
-                            bk.delete(name) 
-                            tbs.remove(name)
-                            SQLResult(0,0) // TODO get table length.
-            case ins:Insert => 
-                val (table,data) = parseInsert(ins)
-                // insert the data to db
-                tx.openBucket(table) match
-                    case None => throw SQLEngine.errNoTable
-                    case Some(bk) =>
-                        for (k,v) <- data do 
-                            if bk.contains(k) then
-                                throw new Exception("duplicate primary key")
-                            else
-                                bk.put(k,v)       
-                tx.openBucket(tableTb) match
-                    case None => throw SQLEngine.errTable
-                    case Some(bk) => tbs.get(table) match
-                        case None => throw new Exception("table wrong")
-                        case Some(info) => 
-                            bk.put(table,info.toJson.compactPrint) 
-                            SQLResult(0,data.length)
-            case up:Update => execUpdate(up,tx)
-            case del:Delete => execDelete(del,tx)
-            case _ => throw new Exception("not support the sql now")
-    // create a new transaction.
-    def beginTx(readOnly:Boolean):Try[SQLTx] = 
-        if !openFlag then 
-            Failure(SQLEngine.errClosed)
-        else 
-            db.begin(!readOnly) match
-                case Failure(e) => Failure(e)
-                case Success(tx) =>
-                    dbTx.put(tx.id,tx)
-                    Success(new sqlTx(tx.id,this))
-    //
-    private def preprocess(s:String):String =
-        //(for ss <- s.split(";") if s.length > 0 yield ss.replaceAll("`","").replaceAll("\"","")).toArray
-        s.replaceAll("`","").replaceAll("\"","")

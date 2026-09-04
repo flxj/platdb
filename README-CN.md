@@ -638,6 +638,11 @@ curl -H "Content-Type: application/json" -X POST -d '{"readonly": false,"operati
 ```
 
 
+### sql支持
+
+platdb可以作为一个嵌入型的关系数据库使用，用户只需创建一个SQLEngine对象即可.
+
+
 其它没有列出的api可参看swagger文档(TODO)
 
 

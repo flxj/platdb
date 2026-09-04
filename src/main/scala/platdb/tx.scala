@@ -292,7 +292,7 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
       *
       * @return
       */
-    private[platdb] def rollbackTx(): Boolean = 
+    def rollbackTx(): Boolean = 
         if closed then 
             return true 
         else if db.closed then
