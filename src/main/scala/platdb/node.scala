@@ -22,40 +22,6 @@ import scala.util.control.Breaks._
 import java.nio.charset.StandardCharsets
 import java.nio.charset.Charset
 
-private[platdb] class NodeEntry(var flag:Byte,var child:Long,var key:String,var value:String):
-    private var kb:Array[Byte] = null 
-    private var vb:Array[Byte] = null
-    private var v1:Boolean = false  // if v1 == true then the kb is newest
-    private var v2:Boolean = false  // if v2 == true then the vb is newest
-    def keySize(cs:Charset):Int = 
-        if !v1 then 
-            kb = key.getBytes(cs)
-            v1 = true
-        kb.length
-    def keyBytes(cs:Charset):Array[Byte] = 
-        if !v1 then
-            kb = key.getBytes(cs)
-            v1 = true
-        kb
-    def valueSize(cs:Charset):Int = 
-        if !v2 then
-            vb = value.getBytes(cs)
-            v2 = true 
-        vb.length
-    def valueBytes(cs:Charset):Array[Byte] = 
-        if !v2 then
-            vb = value.getBytes(cs)
-            v2 = true 
-        vb
-    def updateValue(v:String):Unit = 
-        value = v 
-        v2 = false
-        vb = null
-    def updateKey(k:String):Unit = 
-        key = k 
-        v1 = false 
-        kb = null 
-
 
 /* node storage construct on block:
 +------------------+-----------------------------------------+
@@ -74,7 +40,7 @@ private[platdb] class NodeEntry(var flag:Byte,var child:Long,var key:String,var 
   * @param keySize
   * @param valSize
   */
-private[platdb] case class NodeIndex(offset:Int,keySize:Int,valSize:Long,flag:Byte)
+private case class NodeIndex(offset:Int,keySize:Int,valSize:Long,flag:Byte)
 
 /**
   * for branch node element, its value filed is null,its falg field is 0;
@@ -86,7 +52,7 @@ private[platdb] case class NodeIndex(offset:Int,keySize:Int,valSize:Long,flag:By
   * @param key
   * @param value
   */
-private[platdb] class NodeElement(var flag:Byte,var child:Long,var key:String,var value:String): // TODO: use Array[Byte] as key,value type
+private class NodeElement(var flag:Byte,var child:Long,var key:String,var value:String): // TODO: use Array[Byte] as key,value type
     def keySize(cs:Charset):Int = key.getBytes(cs).length
     def keyBytes(cs:Charset):Array[Byte] = key.getBytes(cs)
     def valueSize(cs:Charset):Int = value.getBytes(cs).length
@@ -107,8 +73,10 @@ extension (arr:ArrayBuffer[NodeElement])
                 low = mid+1
         idx
 
-private[platdb] object Node:
-    val indexSize = 17
+private object Node:
+    val flagBucket:Byte = 5 
+    val flagRegion:Byte = 6 
+    val indexSize:Int = 17
     val charSet = StandardCharsets.UTF_8
     // parse node elements form block.
     def elements(bk:Block):Option[ArrayBuffer[NodeElement]] = 
@@ -131,12 +99,50 @@ private[platdb] object Node:
                                 val key = new String(data.slice(off,off+ni.keySize),charSet)
                                 var child = ni.valSize 
                                 var value:String = ""
-                                if bk.header.flag == leafType then
+                                if bk.header.flag == Block.typeLeaf then
                                     child = 0 
                                     value = new String(data.slice(off+ni.keySize,(off+ni.keySize+ni.valSize).toInt),charSet)
                                 elems += new NodeElement(ni.flag,child,key,value)
                 )
                 if !err then Some(elems) else None
+    //
+    def rawElements(bk:Block):Option[ArrayBuffer[RawNodeElement]] = 
+        bk.getBytes() match
+            case None => None
+            case Some(data) =>
+                if data.length < bk.header.count*indexSize then
+                    return None
+                var elems = new ArrayBuffer[RawNodeElement]()
+                var err:Boolean = false 
+                breakable( 
+                    for i <- 0 until bk.header.count do
+                        val idx = data.slice(indexSize*i,(i+1)*indexSize) 
+                        unmashalIndex(idx) match
+                            case None => 
+                                err = true
+                                break() 
+                            case Some(ni) =>
+                                val off = ni.offset - BlockHeader.size
+                                val key = data.slice(off,off+ni.keySize)
+                                var child = ni.valSize 
+                                var value:Array[Byte] = null
+                                if bk.header.flag == Block.typeLeaf then
+                                    child = 0 
+                                    value = data.slice(off+ni.keySize,(off+ni.keySize+ni.valSize).toInt)
+                                elems += new RawNodeElement(ni.flag,child,key,value)
+                )
+                if !err then Some(elems) else None
+    // convert block to node.
+    def rawNode(bk:Block):Option[RawNode] = 
+        var node:Option[RawNode] = None
+        rawElements(bk) match
+            case None => None
+            case Some(elems) =>
+                var n = new RawNode(bk.header)
+                n.elements = elems 
+                if n.length > 0 then
+                    n.minKey = n.elements(0).key
+                Some(n)
 
     // convert block to node.
     def apply(bk:Block):Option[Node] = 
@@ -151,9 +157,9 @@ private[platdb] object Node:
                 Some(n)
 
     // min elements number for node type.
-    def lowerBound(ntype:Int):Int = if ntype == leafType then 1 else 2
-    def isLeaf(node:Node):Boolean = node.header.flag == leafType
-    def isBranch(node:Node):Boolean = node.header.flag == branchType
+    def lowerBound(ntype:Int):Int = if ntype == Block.typeLeaf then 1 else 2
+    def isLeaf(node:Node):Boolean = node.header.flag == Block.typeLeaf
+    def isBranch(node:Node):Boolean = node.header.flag == Block.typeBranch
     def minKeysPerBlock:Int = 2
     // convert node index to bytes.
     def marshalIndex(e:NodeIndex):Array[Byte] = 
@@ -203,7 +209,7 @@ The leaf node internally maintains an ordered list of elements with key and valu
 
 Vi represents the value corresponding to the Ki element, and Fi is the flag information used to indicate the type of Vi (ordinary value or subbucket).
 */
-private[platdb] class Node(var header:BlockHeader) extends Persistence:
+private class Node(var header:BlockHeader) extends Persistence:
     var unbalanced:Boolean = false
     var spilled:Boolean = false
     var minKey:String = ""
@@ -214,15 +220,14 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
     def id:Long = header.pgid
     def length:Int = elements.length 
     def ntype:Byte = header.flag
-    def isLeaf:Boolean = header.flag == leafType
-    def isBranch:Boolean = header.flag == branchType
+    def isLeaf:Boolean = header.flag == Block.typeLeaf
+    def isBranch:Boolean = header.flag == Block.typeBranch
     def isRoot:Boolean = parent match
         case Some(n) => false
         case None => true
-    def root:Node = parent match {
-            case Some(node:Node) => node.root
-            case None => this
-        }
+    def root:Node = parent match 
+        case Some(node:Node) => node.root
+        case None => this
     /**
       *  insert a element into node. if the return flag is true,means that oldkey already exists.
       *
@@ -301,10 +306,7 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
             dataSize += e.keySize(Node.charSet) + e.valueSize(Node.charSet)
         dataSize
     def writeTo(bk:Block):Int =
-        if isLeaf then
-            bk.header.flag = leafType
-        else 
-            bk.header.flag = branchType
+        bk.header.flag = if isLeaf then Block.typeLeaf else Block.typeBranch
         bk.header.count = elements.length
         bk.header.size = size()
         bk.header.overflow = (size()+DB.pageSize)/DB.pageSize - 1

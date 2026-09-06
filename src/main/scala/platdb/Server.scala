@@ -404,7 +404,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
         if op.collection != "" then
             val tp = cols.get(op.collection) match
                 case None => CollectionType.Nothing
-                case Some(t) => collectionType(t)
+                case Some(t) => Collection.getType(t)
             tp match
                 case CollectionType.Bucket =>
                     op.collectionOp match
@@ -418,7 +418,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                         case "create" =>
                             tx.createBucketIfNotExists(op.collection) match
                                 case Some(_) => 
-                                    cols(op.collection) = dataTypeName(bucketDataType)
+                                    cols(op.collection) = Collection.typeName(Collection.typeBucket)
                                     successResult
                                 case None => Failure(new Exception("craete bucket failed"))
                         case "get" => 
@@ -463,7 +463,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                         case "create" =>
                             tx.createListIfNotExists(op.collection) match
                                 case Some(_) => 
-                                    cols(op.collection) = dataTypeName(blistDataType)
+                                    cols(op.collection) = Collection.typeName(Collection.typeList)
                                     successResult
                                 case None => Failure(new Exception(""))
                         case "get" => 
@@ -529,7 +529,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                         case "create" =>
                             tx.createBSetIfNotExists(op.collection) match
                                 case Some(_) => 
-                                    cols(op.collection) = dataTypeName(bsetDataType)
+                                    cols(op.collection) = Collection.typeName(Collection.typeSet)
                                     successResult
                                 case None => Failure(new Exception(""))
                         case "get" =>
@@ -667,7 +667,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                 get {
                     log.debug("start get collectins info")
                     val res:Future[Try[Seq[(String,String)]]] = Future{
-                        db.listCollection("") match
+                        db.listCollection(CollectionType.Nothing) match
                             case Failure(e) => Failure(e)
                             case Success(s) => Success(s)
                     }
@@ -685,7 +685,8 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                     entity(as[CollectionCreateOptions]) { ops =>
                         log.debug("start to create collection {}",ops.name)
                         val created: Future[Try[Unit]] = Future {
-                            db.createCollection(ops.name,ops.collectionType,ops.dimension,ops.ignoreExists)
+                            val tp = Collection.getType(ops.collectionType)
+                            db.createCollection(ops.name,tp,ops.dimension,ops.ignoreExists)
                         }
                         onSuccess(created) { 
                             case Success(_) => complete(StatusCodes.OK,s"create ${ops.collectionType} ${ops.name} success\n")
@@ -700,7 +701,8 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                     entity(as[CollectionDeleteOptions]) { ops =>
                         log.debug("start to delete collection {}",ops.name)
                         val deleted: Future[Try[Unit]] = Future {
-                            db.deleteCollection(ops.name,ops.collectionType,ops.ignoreNotExists)
+                            val tp = Collection.getType(ops.collectionType)
+                            db.deleteCollection(ops.name,tp,ops.ignoreNotExists)
                         }
                         onSuccess(deleted) { 
                             case Success(_) => complete(StatusCodes.OK,s"delete ${ops.collectionType} ${ops.name} success\n")
@@ -726,7 +728,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                     get {
                         log.debug("start to get Buckets info")
                         val res:Future[Try[Seq[(String,String)]]] = Future{
-                            db.listCollection(DB.typeBucket)
+                            db.listCollection(CollectionType.Bucket)
                         }
                         onSuccess(res) {
                             case Success(value) =>
@@ -742,7 +744,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                         entity(as[BucketCreateOptions]) { ops =>
                             log.debug("start to create Bucket {}",ops.name)
                             val created: Future[Try[Unit]] = Future {
-                                db.createCollection(ops.name,DB.typeBucket,0,ops.ignoreExists)
+                                db.createCollection(ops.name,CollectionType.Bucket,0,ops.ignoreExists)
                             }
                             onSuccess(created) { 
                                 case Success(_) => complete(StatusCodes.OK,s"create Bucket ${ops.name} success\n")
@@ -757,7 +759,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                         entity(as[BucketDeleteOptions]) { ops =>
                             log.debug("start to delete Bucket {}",ops.name)
                             val deleted: Future[Try[Unit]] = Future {
-                                db.deleteCollection(ops.name,DB.typeBucket,ops.ignoreNotExists)
+                                db.deleteCollection(ops.name,CollectionType.Bucket,ops.ignoreNotExists)
                             }
                             onSuccess(deleted) { 
                                 case Success(_) => complete(StatusCodes.OK,s"delete Bucket ${ops.name} success\n")
@@ -845,7 +847,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                     get {
                         log.debug("start to get BList info")
                         val res:Future[Try[Seq[(String,String)]]] = Future{
-                            db.listCollection(DB.typeBList)
+                            db.listCollection(CollectionType.BList)
                         }
                         onSuccess(res) {
                             case Success(value) =>
@@ -861,7 +863,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                         entity(as[BListCreateOptions]) { ops =>
                             log.debug("start to create BList {}",ops.name)
                             val created: Future[Try[Unit]] = Future {
-                                db.createCollection(ops.name,DB.typeBList,0,ops.ignoreExists)
+                                db.createCollection(ops.name,CollectionType.BList,0,ops.ignoreExists)
                             }
                             onSuccess(created) { 
                                 case Success(_) => complete(StatusCodes.OK,s"create BList ${ops.name} success\n")
@@ -876,7 +878,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                         entity(as[BListDeleteOptions]) { ops =>
                             log.debug("start to delete BSet {}",ops.name)
                             val deleted: Future[Try[Unit]] = Future {
-                                db.deleteCollection(ops.name,DB.typeBList,ops.ignoreNotExists)
+                                db.deleteCollection(ops.name,CollectionType.BList,ops.ignoreNotExists)
                             }
                             onSuccess(deleted) { 
                                 case Success(_) => complete(StatusCodes.OK,s"delete BList ${ops.name} success\n")
@@ -996,7 +998,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                     get {
                         log.debug("start to get BSet info")
                         val res:Future[Try[Seq[(String,String)]]] = Future{
-                            db.listCollection(DB.typeBSet)
+                            db.listCollection(CollectionType.BSet)
                         }
                         onSuccess(res) {
                             case Success(value) =>
@@ -1012,7 +1014,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                         entity(as[BSetCreateOptions]) { ops =>
                             log.debug("start to create BSet {}",ops.name)
                             val created: Future[Try[Unit]] = Future {
-                                db.createCollection(ops.name,DB.typeBSet,0,ops.ignoreExists)
+                                db.createCollection(ops.name,CollectionType.BSet,0,ops.ignoreExists)
                             }
                             onSuccess(created) { 
                                 case Success(_) => complete(StatusCodes.OK,s"create BSet ${ops.name} success")
@@ -1027,7 +1029,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                         entity(as[BSetDeleteOptions]) { ops =>
                             log.debug("start to delete BSet {}",ops.name)
                             val deleted: Future[Try[Unit]] = Future {
-                                db.deleteCollection(ops.name,DB.typeBSet,ops.ignoreNotExists)
+                                db.deleteCollection(ops.name,CollectionType.BSet,ops.ignoreNotExists)
                             }
                             onSuccess(deleted) { 
                                 case Success(_) => complete(StatusCodes.OK,s"delete BSet ${ops.name} success")

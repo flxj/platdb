@@ -45,15 +45,13 @@ private[platdb] trait Persistence:
       */
     def writeTo(block:Block):Int
 
-// block flag.
-private[platdb] val metaType:Byte = 1 
-private[platdb] val branchType:Byte = 2
-private[platdb] val leafType:Byte = 3
-private[platdb] val freelistType:Byte = 4
 
-// node element type
-private[platdb] val bucketType:Byte = 5
-private[platdb] val regionType:Byte = 6
+private object Block:
+    // block flag.
+    val typeMeta:Byte = 1 
+    val typeBranch:Byte = 2
+    val typeLeaf:Byte = 3
+    val typeFreelist:Byte = 4
 
 /**
   * 
@@ -64,7 +62,7 @@ private[platdb] val regionType:Byte = 6
   * @param overflow
   * @param size
   */
-private[platdb] class BlockHeader(var pgid:Long,var flag:Byte,var count:Int,var overflow:Int,var size:Int):
+private class BlockHeader(var pgid:Long,var flag:Byte,var count:Int,var overflow:Int,var size:Int):
     override def clone:BlockHeader = new BlockHeader(pgid,flag,count,overflow,size)
     def getBytes():Array[Byte] =
         var buf:ByteBuffer = ByteBuffer.allocate(BlockHeader.size)
@@ -75,7 +73,7 @@ private[platdb] class BlockHeader(var pgid:Long,var flag:Byte,var count:Int,var 
         buf.put(flag)
         buf.array()
 
-private[platdb] object BlockHeader:
+private object BlockHeader:
     val size = 21
     def apply(bs:Array[Byte]):Option[BlockHeader] =
         if bs.length != size then 
@@ -91,7 +89,7 @@ private[platdb] object BlockHeader:
   *
   * @param cap
   */
-private[platdb] class Block(val cap:Int):
+private class Block(val cap:Int):
     var header:BlockHeader = new BlockHeader(-1L,0,0,0,0)
     //
     private var data:Array[Byte] = new Array[Byte](cap)
@@ -111,12 +109,12 @@ private[platdb] class Block(val cap:Int):
     def reset():Unit = idx = 0
     //
     def write(offset:Int,d:Array[Byte]):Unit =
-        if offset<0 || d.length == 0 then 
+        if offset < 0 || d == null || d.length == 0 then 
             return None
-        if offset+d.length > capacity then 
-            data++=new Array[Byte](offset+d.length-capacity)
+        if offset + d.length > capacity then 
+            data ++= new Array[Byte](offset+d.length-capacity)
         val n = d.copyToArray(data,offset)
-        if n!=d.length then
+        if n != d.length then
             throw new Exception("write data to block failed")
         if n+offset > idx then
             idx = n+offset
@@ -128,7 +126,7 @@ private[platdb] class Block(val cap:Int):
     def getBytes():Option[Array[Byte]] = 
         if header.size >= BlockHeader.size then
             return Some(data.slice(BlockHeader.size,header.size))
-        else if idx>=BlockHeader.size then
+        else if idx >= BlockHeader.size then
             return Some(data.slice(BlockHeader.size,idx))
         None
     // all data except header.
@@ -141,7 +139,7 @@ private[platdb] class Block(val cap:Int):
   * @param maxsize
   * @param fm
   */
-private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
+private class BlockBuffer(val maxsize:Int,var fm:FileManager):
     // Save some useless blocks that have been kicked out of the cache queue to speed up the creation of block structures.
     val poolsize:Int = 16
     var idleLock:ReentrantReadWriteLock = new ReentrantReadWriteLock()
@@ -324,7 +322,7 @@ private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
         idle.clear()
 
 // 
-private[platdb] class FileManager(val path:String,val readonly:Boolean):
+private class FileManager(val path:String,val readonly:Boolean):
     var opend:Boolean = false
     var lockpath:String = ""
     var lockfile:File = null
@@ -504,7 +502,7 @@ private[platdb] class FileManager(val path:String,val readonly:Boolean):
             return true
         if bk.id < 0 then
             throw new Exception(s"block type error: block id is ${bk.id},flag is ${bk.btype}")
-        if bk.id <=1 && bk.btype != metaType then // TODO remove this check to tx
+        if bk.id <= 1 && bk.btype != Block.typeMeta then // TODO remove this check to tx
             throw new Exception(s"block type error: block id is ${bk.id} type is ${bk.btype}")
         
         var w:RandomAccessFile = null

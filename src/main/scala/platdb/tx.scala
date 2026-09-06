@@ -191,7 +191,32 @@ trait Transaction:
       * @return
       */
     def copyToFile(path:String):Long
-
+    /**
+      * open a raw bucket,if not exists will return an exception message.
+      *
+      * @param name
+      * @return
+      */
+    def openRawBucket(name:String):Option[RawBucket]
+    /**
+      * create a raw bucket, and return an exception message if the object already exists.
+      *
+      * @param name
+      */
+    def createRawBucket(name:String):Option[RawBucket]
+    /**
+      * create a raw bucket,if exists then return the bucket.
+      *
+      * @param name
+      */
+    def createRawBucketIfNotExists(name:String):Option[RawBucket]
+    /**
+      * delete a raw bucket,if not exists will return an exception message.
+      *
+      * @param name
+      * @return
+      */
+    def deleteRawBucket(name:String):Unit
 
 private[platdb] object Tx:
     def apply(readonly:Boolean,db:DB):Tx =
@@ -229,7 +254,7 @@ private[platdb] object Tx:
     Modifications to the DB by a successfully committed write transaction are persisted to the disk file,
     and an uncommitted transaction does not affect the contents of the DB.
 */
-private[platdb] class Tx(val readonly:Boolean) extends Transaction:
+private class Tx(val readonly:Boolean) extends Transaction:
     var sysCommit:Boolean = false 
     var db:DB = null
     var meta:Meta = null
@@ -247,13 +272,13 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
     //
     def rootBucket():Option[Bucket] = Some(root)
     // open and return a bucket
-    def openBucket(name:String):Option[Bucket] = root.getBucket(name)
+    def openBucket(name:String):Option[Bucket] = root.getBucket(name,Collection.typeBucket)
     // craete a bucket
-    def createBucket(name:String):Option[Bucket] = root.createBucket(name)
+    def createBucket(name:String):Option[Bucket] = root.createBucket(name,Collection.typeBucket)
     // 
-    def createBucketIfNotExists(name:String):Option[Bucket] = root.createBucketIfNotExists(name)
+    def createBucketIfNotExists(name:String):Option[Bucket] = root.createBucketIfNotExists(name,Collection.typeBucket)
     // delete bucket
-    def deleteBucket(name:String):Unit = root.deleteBucket(name)
+    def deleteBucket(name:String):Unit = root.deleteBucket(name,Collection.typeBucket)
     // commit current transaction
     def commit():Unit = 
         if closed then
@@ -271,14 +296,16 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
             // spill buckets to dirty blocks
             root.split()
         catch
-            case e:Exception => return rollback()
+            case e:Exception => 
+                rollback()
+                throw e
         
         // updata meta info
         meta.root = root.bkv
         // free the old freelist and write the new list to db file.
-        if meta.freelistId!=0 then
+        if meta.freelistId != 0 then
             db.freelist.free(id,db.freelist.header.pgid,db.freelist.header.overflow)
-        //
+        // write dirty page to disk file.
         try 
             writeFreelist() 
             writeBlock()
@@ -540,3 +567,11 @@ private[platdb] class Tx(val readonly:Boolean) extends Transaction:
     def createRegionIfNotExists(name:String,dimension:Int):Option[Region] = root.createRegionIfNotExists(name,dimension)
     //
     def deleteRegion(name:String):Unit = root.deleteRegion(name)
+
+    def openRawBucket(name:String):Option[RawBucket] =  root.getRawBucket(name)
+    
+    def createRawBucket(name:String):Option[RawBucket] = root.createRawBucket(name)
+    
+    def createRawBucketIfNotExists(name:String):Option[RawBucket] = root.createRawBucketIfNotExists(name)
+    
+    def deleteRawBucket(name:String):Unit = root.deleteRawBucket(name)

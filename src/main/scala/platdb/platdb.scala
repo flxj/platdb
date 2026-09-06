@@ -28,6 +28,7 @@ import java.util.concurrent.locks.ReentrantLock
 import java.util.concurrent.TimeUnit
 import scala.concurrent.Future
 import java.nio.charset.StandardCharsets
+import java.nio.charset.Charset
 
 /**
   * 
@@ -64,15 +65,18 @@ object DB:
     //
     val minEntries = 32
     //
-    val typeBucket = "Bucket"
-    val typeBSet = "BSet"
-    val typeBList = "BList"
-    val typeRegion = "Region"
+    val typeNameBucket = "bucket"
+    val typeNameRawBucket = "rawBucket"
+    val typeNameSet = "set"
+    val typeNameList = "list"
+    val typeNameRegion = "region"
     private[platdb] var pageSize = defaultPageSize
     private[platdb] var fillPercent = defaultFillPercent
     private[platdb] val meta0Page = 0
     private[platdb] val meta1Page = 1
     private[platdb] val magicStr = "(2^32582657-1)=12457502601536..."
+    private[platdb] val magicBytes = magicStr.getBytes()
+
     //
     val exTxClosed = new Exception("transaction is closed")
     val exNotAllowOp = new Exception("readonly transaction not allow current operation")
@@ -146,7 +150,7 @@ class DB(val path:String)(using ops:Options):
     private var metaLock:ReentrantLock = new ReentrantLock()
     private var openFlag:Boolean = false
 
-    def charset:String = StandardCharsets.UTF_8.toString()
+    def charset:Charset = StandardCharsets.UTF_8
 
     def name:String = path
     /**
@@ -229,14 +233,14 @@ class DB(val path:String)(using ops:Options):
       */
     private def init():Unit =
         // 1.create two null meta object and write to file.
-        for i<- 0 to 1 do
+        for i <- 0 to 1 do
             var m = new Meta(i)
-            m.flag = metaType
+            m.flag = Block.typeMeta
             m.pageSize = DB.defaultPageSize
             m.txid = 0
             m.freelistId = 2
             m.pageId = 4
-            m.root = new BucketValue(3L,0L,0L,bucketDataType)
+            m.root = new BucketValue(3L,0L,0L,Collection.typeBucket)
 
             var bk = blockBuffer.get(DB.defaultPageSize)
             bk.setid(m.id)
@@ -252,7 +256,7 @@ class DB(val path:String)(using ops:Options):
                 case Failure(e) => throw e 
 
         // 2.create a null freelist and write to file.
-        var fl = new Freelist(new BlockHeader(2L,freelistType,0,0,0))
+        var fl = new Freelist(new BlockHeader(2L,Block.typeFreelist,0,0,0))
         var fbk = blockBuffer.get(DB.defaultPageSize)
         fbk.setid(2)
         val n = fl.writeTo(fbk) 
@@ -261,7 +265,7 @@ class DB(val path:String)(using ops:Options):
             case Failure(e) => throw e 
 
         // 3.craete null root bucket.
-        var root = new Node(new BlockHeader(3L,leafType,0,0,0))
+        var root = new Node(new BlockHeader(3L,Block.typeLeaf,0,0,0))
         var rbk = blockBuffer.get(DB.defaultPageSize)
         rbk.setid(3)
         root.writeTo(rbk)
@@ -515,8 +519,9 @@ class DB(val path:String)(using ops:Options):
                         tx.sysCommit = false
                         tx.rollback()
                         if !(ignoreNotExists && DB.isNotExists(e)) then
-                            return Failure(e)
-                        Success(None)
+                            Failure(e)
+                        else
+                            Success(None)
                 finally
                     tx.rollbackTx()
     /**
@@ -524,13 +529,13 @@ class DB(val path:String)(using ops:Options):
       *
       * @return
       */
-    def listCollection(collectionType:String):Try[Seq[(String,String)]] =
+    def listCollection(cType:CollectionType):Try[Seq[(String,String)]] =
+        val tname = cType.toString()
         var s = List[(String,String)]()
-        view(
-            (tx:Transaction) =>
-                for (name,tp) <- tx.allCollection() do 
-                    if tp == collectionType || collectionType == "" then
-                        s:+=(name,tp)
+        view ((tx:Transaction) =>
+            for (name,tp) <- tx.allCollection() do 
+                if tp == tname || tname == "" then
+                    s:+=(name,tp)
         ) match
             case Failure(e) => Failure(e)
             case Success(_) => Success(s)
@@ -543,18 +548,23 @@ class DB(val path:String)(using ops:Options):
       * @param ignoreExists if this parameter is true,will ignore collecction object already exists error.
       * @return
       */
-    def createCollection(name:String,collectionType:String,dimension:Int,ignoreExists:Boolean):Try[Unit] = 
-        update(
-            (tx:Transaction) =>
-                val res = collectionType match
-                    case DB.typeBucket => if !ignoreExists then tx.createBucket(name) else tx.createBucketIfNotExists(name)
-                    case DB.typeBSet => if !ignoreExists then tx.createBSet(name) else tx.createBSetIfNotExists(name)
-                    case DB.typeBList => if !ignoreExists then tx.createList(name) else tx.createListIfNotExists(name)
-                    case DB.typeRegion => if !ignoreExists then tx.createRegion(name,dimension) else tx.createRegionIfNotExists(name,dimension)
-                    case _ => Failure(new Exception(s"unknown collection type $collectionType"))
-                res match
-                    case Failure(exception) => throw exception
-                    case Success(_) => None 
+    def createCollection(name:String,cType:CollectionType,dimension:Int,ignoreExists:Boolean):Try[Unit] = 
+        update((tx:Transaction) =>
+            val res = cType match
+                case CollectionType.Bucket => 
+                    if !ignoreExists then tx.createBucket(name) else tx.createBucketIfNotExists(name)
+                case CollectionType.BSet | CollectionType.Set => 
+                    if !ignoreExists then tx.createBSet(name) else tx.createBSetIfNotExists(name)
+                case CollectionType.BList | CollectionType.List => 
+                    if !ignoreExists then tx.createList(name) else tx.createListIfNotExists(name)
+                case CollectionType.RawBucket => 
+                    if !ignoreExists then tx.createRawBucket(name) else tx.createRawBucketIfNotExists(name)
+                case CollectionType.Region => 
+                    if !ignoreExists then tx.createRegion(name,dimension) else tx.createRegionIfNotExists(name,dimension)
+                case _ => Failure(new Exception(s"unknown collection type $cType"))
+            res match
+                case Failure(ex) => throw ex
+                case Success(_) => None 
         )
     /**
       * 
@@ -564,20 +574,20 @@ class DB(val path:String)(using ops:Options):
       * @param ignoreNotExists
       * @return
       */
-    def deleteCollection(name:String,collectionType:String,ignoreNotExists:Boolean):Try[Unit] = 
-        update(
-            (tx:Transaction) =>
-                val res = collectionType match
-                    case DB.typeBucket => tx.deleteBucket(name) 
-                    case DB.typeBSet => tx.deleteBSet(name) 
-                    case DB.typeBList => tx.deleteList(name) 
-                    case DB.typeRegion => tx.deleteRegion(name)
-                    case _ => Failure(new Exception(s"unknown collection type $collectionType"))
-                res match
-                    case Failure(exception) => 
-                        if !(ignoreNotExists && DB.isNotExists(exception)) then 
-                            throw exception
-                    case Success(_) => None
+    def deleteCollection(name:String,cType:CollectionType,ignoreNotExists:Boolean):Try[Unit] = 
+        update((tx:Transaction) =>
+            val res = cType match
+                case CollectionType.Bucket => tx.deleteBucket(name) 
+                case CollectionType.BSet | CollectionType.Set => tx.deleteBSet(name) 
+                case CollectionType.BList | CollectionType.List => tx.deleteList(name) 
+                case CollectionType.Region => tx.deleteRegion(name)
+                case CollectionType.RawBucket => tx.deleteRawBucket(name)
+                case _ => Failure(new Exception(s"unknown collection type $cType"))
+            res match
+                case Failure(ex) => 
+                    if !(ignoreNotExists && DB.isNotExists(ex)) then 
+                        throw ex
+                case Success(_) => None
         )
     /**
       * Executes user functions in the context of a read-write transaction. 
@@ -586,7 +596,7 @@ class DB(val path:String)(using ops:Options):
       * @param op
       * @return
       */
-    def update(op:(Transaction)=>Unit):Try[Unit] =
+    def update(op:(Transaction) => Unit):Try[Unit] =
         beginRWTx() match
             case Failure(e) => Failure(e)
             case Success(tx) =>
@@ -598,10 +608,7 @@ class DB(val path:String)(using ops:Options):
                     tx.commit()
                     Success(None)
                 catch
-                    case e:Exception =>
-                        tx.sysCommit = false 
-                        tx.rollback()
-                        Failure(e)
+                    case e:Exception => Failure(e)
                 finally
                     tx.rollbackTx()
     /**
@@ -612,7 +619,7 @@ class DB(val path:String)(using ops:Options):
       * @param op
       * @return
       */
-    def view(op:(Transaction)=>Unit):Try[Unit] =
+    def view(op:(Transaction) => Unit):Try[Unit] =
         beginRTx() match
             case Failure(exception) => Failure(exception)
             case Success(tx) =>
@@ -623,10 +630,7 @@ class DB(val path:String)(using ops:Options):
                     tx.rollback()
                     Success(None)
                 catch
-                    case e:Exception =>
-                        tx.sysCommit = false
-                        tx.rollback()
-                        Failure(e)
+                    case e:Exception => Failure(e)
                 finally
                     tx.rollbackTx()
     /**
@@ -646,10 +650,7 @@ class DB(val path:String)(using ops:Options):
                     tx.rollback()
                     Success(n)
                 catch
-                    case e:Exception =>
-                        tx.sysCommit = false
-                        tx.rollback()
-                        Failure(e)
+                    case e:Exception => Failure(e)
                 finally
                     tx.rollbackTx()
 

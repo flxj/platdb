@@ -16,6 +16,7 @@
 
 package platdb
 
+import scala.util.control.Breaks._
 import java.nio.ByteBuffer
 
 private[platdb] object Util:
@@ -53,10 +54,6 @@ private[platdb] object Util:
         ((bs(5) & 0xFFL) << 16) |
         ((bs(6) & 0xFFL) << 8) |
         (bs(7) & 0xFFL)
-    //def floatToBytes(f: Float): Array[Byte] = ByteBuffer.allocate(4).putFloat(f).array()
-    //def bytesToFloat(bytes: Array[Byte]): Float = ByteBuffer.wrap(bytes).getFloat()
-    //def doubleToBytes(v:Double): Array[Byte] = ByteBuffer.allocate(8).putDouble(v).array()
-    //def bytesToDouble(bs: Array[Byte]): Double = ByteBuffer.wrap(bs).getDouble()
     def compareLong(a:Array[Byte],b:Array[Byte]):Int = ???
     def min(a:Int,b:Int):Int = if a < b then a else b 
     def floatToBytes(f: Float): Array[Byte] = 
@@ -95,3 +92,21 @@ private[platdb] object Util:
                 ((bytes(6) & 0xffL) << 8)  |
                 (bytes(7) & 0xffL)
         java.lang.Double.longBitsToDouble(bits)
+    def compare(a:Array[Byte],b:Array[Byte]):Int = 
+        if a == null then 
+            if b == null then 0 else -1
+        else
+            var r:Int = 0 
+            if b != null then 
+                breakable(
+                    for i <- 0 until min(a.length,b.length) do 
+                        if a(i) > b(i) then 
+                            r = 1
+                            break()
+                        else if a(i) < b(i) then
+                            r = -1
+                            break()
+                )
+                if r != 0 then r else a.length - b.length
+            else 
+                1

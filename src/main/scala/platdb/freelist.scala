@@ -42,7 +42,7 @@ private[platdb] object Meta:
                     read(bk)
     // convert block data to meta.
     def read(bk:Block):Try[Meta] =
-        if bk.header.flag != metaType then 
+        if bk.header.flag != Block.typeMeta then 
             Failure(new Exception(s"block type ${bk.header.flag} is not meta type"))
         else
             bk.getBytes() match
@@ -60,7 +60,7 @@ private[platdb] object Meta:
                     meta.pageId = arr(0)
                     meta.freelistId = arr(1)
                     meta.txid = arr(2)
-                    meta.root = new BucketValue(arr(3),arr(4),arr(5),bucketDataType)
+                    meta.root = new BucketValue(arr(3),arr(4),arr(5),Collection.typeBucket)
                     meta.pageSize = sz
                     meta.checkSum = chk
                     Success(meta)
@@ -72,7 +72,7 @@ private[platdb] object Meta:
   */
 private[platdb] class Meta(val id:Long) extends Persistence:
     var pageSize:Int = 0
-    var flag:Byte = metaType
+    var flag:Byte = Block.typeMeta
     var freelistId:Long = -1
     var pageId:Long = -1
     var txid:Long = -1
@@ -91,7 +91,7 @@ private[platdb] class Meta(val id:Long) extends Persistence:
         m.pageId = pageId
         m.txid = txid
         m.checkSum = checkSum
-        m.root = new BucketValue(root.root,root.count,root.sequence,bucketDataType)
+        m.root = new BucketValue(root.root,root.count,root.sequence,Collection.typeBucket)
         m
     def size():Int = Meta.size
     def writeTo(bk:Block):Int =
@@ -344,7 +344,7 @@ private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
         val ids = reform(true)
         val sz = BlockHeader.size+Freelist.headerSize+ids.length*Freelist.elementSize
 
-        bk.header.flag = freelistType
+        bk.header.flag = Block.typeFreelist
         bk.header.count = 1
         bk.header.size = sz
         bk.header.overflow =(sz+DB.pageSize)/DB.pageSize - 1
@@ -362,7 +362,7 @@ private[platdb] object Freelist:
     val hashType:Byte = 1
     
     def apply(bk:Block):Option[Freelist] = 
-        if bk.header.flag!=freelistType then
+        if bk.header.flag != Block.typeFreelist then
             throw new Exception(s"block type is not freelist ${bk.header.flag}") 
         bk.getBytes() match
             case None => None 

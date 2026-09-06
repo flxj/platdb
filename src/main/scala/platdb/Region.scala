@@ -459,7 +459,7 @@ private[platdb] object RNode:
                             case Some(ei) =>
                                 var child = -1L
                                 var key:String = ""
-                                if blk.header.flag == leafType then
+                                if blk.header.flag == Block.typeLeaf then
                                     val off = ei.offset - BlockHeader.size
                                     key = new String(data.slice(off,off+ei.keySize))
                                 else 
@@ -510,8 +510,8 @@ private[platdb] class RNode(var header:BlockHeader) extends Persistence:
 
     def id:Long = header.pgid
     def length:Int = entries.length
-    def isLeaf:Boolean = header.flag == leafType
-    def isBranch:Boolean = header.flag == branchType
+    def isLeaf:Boolean = header.flag == Block.typeLeaf
+    def isBranch:Boolean = header.flag == Block.typeBranch
     def isRoot:Boolean = parent match
         case Some(n) => false
         case None => true
@@ -590,9 +590,9 @@ private[platdb] class RNode(var header:BlockHeader) extends Persistence:
     //
     def writeTo(blk: Block): Int = 
         if isLeaf then
-            blk.header.flag = leafType
+            blk.header.flag = Block.typeLeaf
         else 
-            blk.header.flag = branchType
+            blk.header.flag = Block.typeBranch
         blk.header.count = entries.length
         blk.header.size = size()
         blk.header.overflow = (size()+DB.pageSize)/DB.pageSize - 1
@@ -1157,7 +1157,7 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                     nodeB.parent = Some(p)
                     p.children+=nodeB
                 case None =>
-                    var parent = new RNode(new BlockHeader(-1L,branchType,0,0,0))
+                    var parent = new RNode(new BlockHeader(-1L,Block.typeBranch,0,0,0))
                     parent.children+=node
                     parent.children+=nodeB
                     node.parent = Some(parent)
@@ -1299,12 +1299,12 @@ private[platdb] class RRecord(var node:Option[RNode],var block:Option[Block],var
         (node,block) match
             case (None,None) => false
             case (Some(n),_) => n.isLeaf
-            case (_,Some(b)) => b.header.flag == leafType
+            case (_,Some(b)) => b.header.flag == Block.typeLeaf
     def isBranch:Boolean =
         (node,block) match
             case (None,None) => false
             case (Some(n),_) => n.isBranch
-            case (_,Some(b)) => b.header.flag == branchType
+            case (_,Some(b)) => b.header.flag == Block.typeBranch
 
 //
 private[platdb] class RTreeBucketIter(val rbk:RTreeBucket) extends Iterator[SpatialObject]:
@@ -1374,7 +1374,7 @@ private[platdb] class RTreeBucketIter(val rbk:RTreeBucket) extends Iterator[Spat
                     case (None,None) => throw new Exception(s"not found node or block for id:$id")
                     case (Some(n),_) => r = new RRecord(Some(n),None,0)
                     case (_,Some(b)) =>
-                        if b.btype!= branchType && b.btype!=leafType then 
+                        if b.btype!= Block.typeBranch && b.btype != Block.typeLeaf then 
                             throw new Exception(s"page ${id} invalid page type:${b.btype}")
                         r = new RRecord(None,Some(b),0)
         stack:+=r

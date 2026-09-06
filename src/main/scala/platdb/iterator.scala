@@ -87,17 +87,17 @@ trait PlatDBIterable:
     def iterator:CollectionIterator
 
 
-private[platdb] class Record(var node:Option[Node],var block:Option[Block],var index:Int):
+private class Record(var node:Option[Node],var block:Option[Block],var index:Int):
     def isLeaf:Boolean =
         (node,block) match
             case (None,None) => false
             case (Some(n),_) => n.isLeaf
-            case (_,Some(b)) => b.header.flag == leafType
+            case (_,Some(b)) => b.header.flag == Block.typeLeaf
     def isBranch:Boolean =
         (node,block) match
             case (None,None) => false
             case (Some(n),_) => n.isBranch
-            case (_,Some(b)) => b.header.flag == branchType
+            case (_,Some(b)) => b.header.flag == Block.typeBranch
     def count:Int =
         (node,block) match
             case (None,None) => 0
@@ -108,7 +108,7 @@ private[platdb] class Record(var node:Option[Node],var block:Option[Block],var i
   *
   * @param bucket
   */
-private[platdb] class BTreeBucketIter(private var bucket:BTreeBucket) extends CollectionIterator:
+private class BTreeBucketIter(bucket:BTreeBucket) extends CollectionIterator:
     // use a stack to record serach path.
     private var stack:List[Record] = List[Record]()
     /**
@@ -126,10 +126,10 @@ private[platdb] class BTreeBucketIter(private var bucket:BTreeBucket) extends Co
         current() match 
             case None => None 
             case Some(e) =>
-                if e.flag == bucketType then 
-                    Some((e.key,DB.magicStr))
+                if e.flag == Node.flagBucket then 
+                    Some(e.key,DB.magicStr)
                 else
-                    Some((e.key,e.value))
+                    Some(e.key,e.value)
     /**
       * moves the iterator to the first item in the bucket and returns its key and value.
       * If the bucket is empty then a None key and None value are returned.
@@ -152,10 +152,10 @@ private[platdb] class BTreeBucketIter(private var bucket:BTreeBucket) extends Co
         current() match
             case None => None 
             case Some(e) =>
-                if e.flag == bucketType then 
-                    Some((e.key,DB.magicStr))
+                if e.flag == Node.flagBucket then 
+                    Some(e.key,DB.magicStr)
                 else
-                    Some((e.key,e.value))
+                    Some(e.key,e.value)
     /**
       * iterator move to next leaf node element, return the key and value.
       * if the element is a subbucket,then the value is None.
@@ -168,10 +168,10 @@ private[platdb] class BTreeBucketIter(private var bucket:BTreeBucket) extends Co
         current() match
             case None => None
             case Some(e) =>
-                if e.flag == bucketType then 
-                    Some((e.key,""))
+                if e.flag == Node.flagBucket then 
+                    Some(e.key,DB.magicStr)
                 else
-                    Some((e.key,e.value))
+                    Some(e.key,e.value)
     /**
       * check if has successor elements in current buckets.
       *
@@ -216,10 +216,10 @@ private[platdb] class BTreeBucketIter(private var bucket:BTreeBucket) extends Co
         current() match
             case None => None
             case Some(e) =>
-                if e.flag == bucketType then 
-                    Some((e.key,DB.magicStr))
+                if e.flag == Node.flagBucket then 
+                    Some(e.key,DB.magicStr)
                 else
-                    Some((e.key,e.value))
+                    Some(e.key,e.value)
     /**
       * iterator move to prev element, return the key and value.
       * if the element is a subbucket,then the value is None.
@@ -232,10 +232,10 @@ private[platdb] class BTreeBucketIter(private var bucket:BTreeBucket) extends Co
         current() match
             case None => None
             case Some(e) =>
-                if e.flag == bucketType then 
-                    Some((e.key,DB.magicStr))
+                if e.flag == Node.flagBucket then 
+                    Some(e.key,DB.magicStr)
                 else
-                    Some((e.key,e.value))
+                    Some(e.key,e.value)
     /**
       * 
       *
@@ -410,7 +410,7 @@ private[platdb] class BTreeBucketIter(private var bucket:BTreeBucket) extends Co
             case (None,None) => throw new Exception(s"not found node or block for id:$id")
             case (Some(n),_) => r = new Record(Some(n),None,0)
             case (_,Some(b)) =>
-                if b.btype != branchType && b.btype != leafType then 
+                if b.btype != Block.typeBranch && b.btype != Block.typeLeaf then 
                     throw new Exception(s"page ${id} invalid page type:${b.btype}")
                 r = new Record(None,Some(b),0)
         stack:+=r
@@ -481,19 +481,18 @@ private[platdb] class BTreeBucketIter(private var bucket:BTreeBucket) extends Co
                 stack :+= r
                 seek(key,elems(idx).child)
 /////////////////////////////////////////////////////////////////////////////////////////////////
-private[platdb] class BTreeBucketIter2(private var bucket:BTreeBucket) extends CollectionIterator:
+private class BTreeBucketIter2(bucket:BTreeBucket) extends CollectionIterator:
     // use a stack to record serach path.
     private var stack:ArrayBuffer[Record] = new ArrayBuffer[Record]()
     private var idx:Int = 0
     private def top:Option[Record] = if idx > 0 then Some(stack(idx-1)) else None
     private def empty:Boolean = idx == 0
     private def pop:Record = 
+        var r:Record = null
         if idx > 0 then 
-            val r = stack(idx-1)
+            r = stack(idx-1)
             idx -= 1
-            r 
-        else 
-            null 
+        r
     private def push(r:Record):Unit = 
         if idx == stack.length then 
             stack.append(r)
@@ -519,10 +518,10 @@ private[platdb] class BTreeBucketIter2(private var bucket:BTreeBucket) extends C
             seek(key,bucket.bkv.root)
             current() match 
                 case Some(e) =>
-                    if e.flag == bucketType then 
-                        Some((e.key,DB.magicStr))
-                    else
-                        Some((e.key,e.value))
+                    if e.flag != Node.flagBucket then 
+                        Some(e.key,e.value)
+                    else 
+                        None   
                 case None => None
     /**
       * moves the iterator to the first item in the bucket and returns its key and value.
@@ -544,10 +543,10 @@ private[platdb] class BTreeBucketIter2(private var bucket:BTreeBucket) extends C
                     moveToNext()
                 current() match
                     case Some(e) => 
-                        if e.flag == bucketType then 
-                            Some((e.key,DB.magicStr))
+                        if e.flag == Node.flagBucket then 
+                            Some(e.key,DB.magicStr)
                         else
-                            Some((e.key,e.value))
+                            Some(e.key,e.value)
                     case None => None
             case None => None
     /**
@@ -564,10 +563,10 @@ private[platdb] class BTreeBucketIter2(private var bucket:BTreeBucket) extends C
             current() match
                 case None => None
                 case Some(e) =>
-                    if e.flag == bucketType then 
-                        Some((e.key,DB.magicStr))
+                    if e.flag == Node.flagBucket then 
+                        Some(e.key,DB.magicStr)
                     else
-                        Some((e.key,e.value))
+                        Some(e.key,e.value)
     /**
       * check if has successor elements in current buckets.
       *
@@ -613,10 +612,10 @@ private[platdb] class BTreeBucketIter2(private var bucket:BTreeBucket) extends C
                 current() match
                     case None => None
                     case Some(e) =>
-                        if e.flag == bucketType then 
-                            Some((e.key,DB.magicStr))
+                        if e.flag == Node.flagBucket then 
+                            Some(e.key,DB.magicStr)
                         else
-                            Some((e.key,e.value))
+                            Some(e.key,e.value)
             case None => None
     /**
       * iterator move to prev element, return the key and value.
@@ -631,10 +630,10 @@ private[platdb] class BTreeBucketIter2(private var bucket:BTreeBucket) extends C
         current() match
             case None => None
             case Some(e) =>
-                if e.flag == bucketType then 
-                    Some((e.key,DB.magicStr))
+                if e.flag == Node.flagBucket then 
+                    Some(e.key,DB.magicStr)
                 else
-                    Some((e.key,e.value))
+                    Some(e.key,e.value)
     /**
       * 
       *
@@ -810,7 +809,7 @@ private[platdb] class BTreeBucketIter2(private var bucket:BTreeBucket) extends C
             case (None,None) => throw new Exception(s"not found node or block for id:$id")
             case (Some(n),_) => new Record(Some(n),None,0)
             case (_,Some(b)) =>
-                if b.btype != branchType && b.btype != leafType then 
+                if b.btype != Block.typeBranch && b.btype != Block.typeLeaf then 
                     throw new Exception(s"page ${id} invalid page type:${b.btype}")
                 new Record(None,Some(b),0)
         push(r)

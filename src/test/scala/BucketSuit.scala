@@ -403,3 +403,54 @@ class BucketSuit9 extends munit.FunSuite {
                     println("close success")
     }
 }
+
+
+class BucketSuit10 extends munit.FunSuite {
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
+    val bk1:String = "raw-bk1"
+    val count:Int = 50
+    
+    test("create raw bucket"){
+        var db = new DB(path)
+        try
+            db.open() match
+                case Failure(exception) => throw exception
+                case Success(value) => println("open db success")
+        
+            assertEquals(db.closed,false)
+            assertEquals(db.readonly,false)
+            db.update(
+                (tx:Transaction) =>
+                    tx.createRawBucketIfNotExists(bk1) match
+                        case None => throw new Exception("open bucket error")
+                        case Some(bk) => 
+                            for i <- 0 to count do
+                                val k = s"key$i".getBytes()
+                                val v = BigInt(500, scala.util.Random).toString(36).getBytes()
+                                bk.put(k,v)
+            ) match
+                case Success(_) => println(s"write bucket $bk1 success")
+                case Failure(e) => throw e
+            var cnt:Int = 0
+            db.view((tx:Transaction) => 
+                tx.openRawBucket(bk1) match
+                    case None => throw new Exception("open bucket error")
+                    case Some(bk) => 
+                        for e <- bk.iterator do
+                            e match
+                                case None => println(s"find None elements")
+                                case Some(key,value) => cnt += 1
+            ) match
+                case Success(_) => println("view success")
+                case Failure(e) => throw e
+            assertEquals(count == cnt,false)
+        catch
+            case e:Exception => throw e
+        finally
+            db.close() match
+                case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
+                case Success(value) => 
+                    assertEquals(db.closed,true)
+                    println("close success")
+    }
+}

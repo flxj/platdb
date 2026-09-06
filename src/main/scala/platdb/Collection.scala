@@ -20,41 +20,66 @@ import scala.collection.immutable.{Set}
 import scala.util.{Try,Success,Failure}
 
 enum CollectionType:
-    case Bucket
-    case BList
-    case BSet
-    case Region
-    case Unknown
-    case Nothing
-
-
-// collection data type.
-private[platdb] val bucketDataType:Byte = 1
-private[platdb] val bsetDataType:Byte = 2
-private[platdb] val blistDataType:Byte = 3
-private[platdb] val regionDataType:Byte = 4
-
-private[platdb] def dataTypeName(t:Byte):String = 
-    t match
-        case 1 => "Bucket"
-        case 2 => "BSet"
-        case 3 => "BList"
-        case 4 => "Region"
-        case _ => "Unknown"
-
-private[platdb] def collectionType(tp:String):CollectionType = 
-    tp.toLowerCase() match
-        case "bucket" => CollectionType.Bucket
-        case "bset" | "set" => CollectionType.BSet
-        case "blist" | "list" => CollectionType.BList
-        case "region" | "rtree" => CollectionType.Region
-        case "" => CollectionType.Nothing
-        case _ => CollectionType.Unknown
+    case Bucket,Region,RawBucket
+    case BSet,BList,Set,List
+    case Nothing,Unknown
+    override def toString(): String = this match
+        case Bucket => "bucket"
+        case Set => "set"
+        case List => "list"
+        case Region => "region"
+        case RawBucket => "rawBucket"
+        case BList => "blist"
+        case BSet => "bset"
+        case Nothing => ""
+        case _ => "unknown"
+    private[platdb] def toByte:Byte = ???
 
 /**
   * some collection methods with transaction parameter.
   */
 object Collection:
+    // collection data type.
+    private[platdb] val typeBucket:Byte = 1
+    private[platdb] val typeSet:Byte = 2
+    private[platdb] val typeList:Byte = 3
+    private[platdb] val typeRegion:Byte = 4
+    private[platdb] val typeRawBucket:Byte = 5
+    private[platdb] val typeBSet:Byte = 6
+    private[platdb] val typeBList:Byte = 7
+    //
+    private[platdb] def typeName(t:CollectionType):String = t match
+        case CollectionType.Bucket => "bucket"
+        case CollectionType.Set => "set"
+        case CollectionType.List => "list"
+        case CollectionType.Region => "region"
+        case CollectionType.RawBucket => "rawBucket"
+        case CollectionType.BList => "blist"
+        case CollectionType.BSet => "bset"
+        case CollectionType.Nothing => ""
+        case _ => "unknown"
+    //
+    private[platdb] def typeName(t:Byte):String = t match
+        case 1 => "bucket"
+        case 2 => "set"
+        case 3 => "list"
+        case 4 => "region"
+        case 5 => "rawBucket"
+        case 6 => "bset"
+        case 7 => "blist"
+        case _ => "unknown"
+
+    private[platdb] def getType(tp:String):CollectionType = 
+        tp.toLowerCase() match
+            case "bucket" => CollectionType.Bucket
+            case "set" => CollectionType.Set
+            case "list" => CollectionType.List
+            case "blist" => CollectionType.BList
+            case "bset" => CollectionType.BSet
+            case "region" | "rtree" => CollectionType.Region
+            case "rawBucket"| "raw-bucket" => CollectionType.RawBucket
+            case "" => CollectionType.Nothing
+            case _ => CollectionType.Unknown
     /**
       * This method has the same meaning as the openBucket method of the Transaction trait, 
       * but it may throw an exception.
@@ -247,3 +272,20 @@ object Collection:
       * @throws
       */
     def deleteRegion(name:String)(using tx:Transaction):Unit = tx.deleteRegion(name) 
+    
+    def openRawBucket(name:String)(using tx:Transaction):RawBucket =
+        tx.openRawBucket(name) match
+            case Some(r) => r
+            case None => throw new Exception(s"raw bucket ${name} not exists")
+    
+    def createRawBucket(name:String)(using tx:Transaction):RawBucket =
+        tx.createRawBucket(name) match
+            case Some(r) => r
+            case None => throw new Exception(s"create raw bucket ${name} failed")
+    
+    def createRawBucketIfNotExists(name:String)(using tx:Transaction):RawBucket =
+        tx.createRawBucketIfNotExists(name) match
+            case Some(r) => r
+            case None => throw new Exception(s"create raw bucket ${name} failed")
+
+    def deleteRawBucket(name:String)(using tx:Transaction):Unit = tx.deleteRawBucket(name) 

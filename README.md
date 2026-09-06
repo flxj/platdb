@@ -12,6 +12,7 @@ It has the following characteristics：
 - ✅ Supports concurrent execution of read and write transactions (mvcc) 👌
 - ✅ Supports multiple commonly used data structures (Map/Set/List/RTree) 👌
 - ✅ Supports both embedded usage and independent deployment as a service, providing an HTTP interface for accessing data👌
+- ✅ Supports sql 👌
 
 The implementation of Platdb refers to projects such as [boltdb](https://github.com/boltdb/bolt), and one of my main purposes in developing Platdb is to learn database related knowledge.
 
