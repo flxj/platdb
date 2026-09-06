@@ -18,40 +18,46 @@ package platdb
 
 import scala.util.{Try,Success}
 
-private[platdb] class MemDB(val name:String,val path:String):
+private class MemDB(val name:String,val path:String):
     var store:DB = null
 
-private[platdb] class MemTx(val id:Long):
-    def size:Long = ???
-    def closed: Boolean = ???
-    def commit(): Try[Unit] = ???
-    def createBucket(name: String): Try[Bucket] = ???
-    def createBucketIfNotExists(name: String): Try[Bucket] = ???
-    def deleteBucket(name: String): Try[Unit] = ???
-    def openBucket(name: String): Try[Bucket] = ???
-    def rollback(): Try[Unit] = ???
-    def writable: Boolean = ???
-    // BSet methods
-    def openBSet(name:String):Try[BSet] = ???
-    def createBSet(name:String):Try[BSet] = ???
-    def createBSetIfNotExists(name:String):Try[BSet] = ???
-    def deleteBSet(name:String):Try[Unit] = ???
-
-    // list methods.
-    def openList(name:String):Try[BList] = ???
-    def createList(name:String):Try[BList] = ???
-    def createListIfNotExists(name:String):Try[BList] = ???
-    def deleteList(name:String):Try[Unit] = ???
-    def allCollection():Try[Seq[(String,String)]] = ???
-
+private class memTx(txid:Long) extends Transaction:
+    override def id: Long = txid
+    override def size:Long = ???
+    override def writable: Boolean = ???
+    override def closed: Boolean = ???
+    override def commit(): Unit = ???
+    override def rollback(): Unit = ???
+    override def openBucket(name: String): Option[Bucket] = ???
+    override def createBucket(name: String): Option[Bucket] = ???
+    override def createBucketIfNotExists(name: String): Option[Bucket] = ???
+    override def deleteBucket(name: String): Unit = ???
+    def allCollection(): Seq[(String, String)] = ???
+    def openBSet(name:String):Option[BSet] = ???
+    def createBSet(name:String):Option[BSet] = ???
+    def createBSetIfNotExists(name:String):Option[BSet] = ???
+    def deleteBSet(name:String):Unit = ???
+    def openList(name:String):Option[BList] = ???
+    def createList(name:String):Option[BList] = ???
+    def createListIfNotExists(name:String):Option[BList] = ???
+    def deleteList(name:String):Unit = ???
+    def openRegion(name:String):Option[Region] = ???
+    def createRegion(name:String,dimension:Int):Option[Region] = ???
+    def createRegionIfNotExists(name:String,dimension:Int):Option[Region] = ???
+    def deleteRegion(name:String):Unit = ???
+    def copyToFile(path:String):Long = ???
+    def openRawBucket(name:String):Option[RawBucket] = ???
+    def createRawBucket(name:String):Option[RawBucket] = ???
+    def createRawBucketIfNotExists(name:String):Option[RawBucket] = ???
+    def deleteRawBucket(name:String):Unit = ???
 /**
   * 
   *
   * @param path
   */
-private[platdb] class MemBucket(val path:String) extends Bucket:
+private class MemBucket() extends Bucket:
     var db:MemDB = null
-    var tx:MemTx = null
+    var tx:memTx = null
     def +=(key: String, value: String): Unit = ???
     def +=(elems: Seq[(String, String)]): Unit = ???
     def -=(key: String): Unit = ???
@@ -71,18 +77,6 @@ private[platdb] class MemBucket(val path:String) extends Bucket:
     def name: String = ???
     def getOrElse(key:String,defalutValue:String):String = ???
     def update(key: String, value: String): Unit = ???
-
     def clean():Unit = ???
-
-
     def writeTo(path:String):Unit = None 
     def appendTo(path:String):Unit = None 
-
-private[platdb] class MemSet[K]:
-    var bk:MemBucket = null 
-
-private[platdb] class PriorityQueue[K,O]:
-    var tx:MemTx = null 
-
-private[platdb] class FIFO[K,O]:
-    var pq:PriorityQueue[K,O] = null

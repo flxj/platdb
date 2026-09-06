@@ -228,7 +228,7 @@ trait BList extends PlatDBIterable:
       */
     def update(index:Int,elem:String):Unit
 
-private[platdb] object KList:
+private object KList:
     val indexHeaderSize = 4
     val indexElementSize = 12
     val indexKey = "index"
@@ -288,7 +288,7 @@ private[platdb] case class IndexSlice(idx:Int,start:Long,end:Long)
   *
   * @param bk
   */
-private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
+private class KList(val bk:Bucket,val readonly:Boolean) extends BList:
     var len:Long = 0L
     var index:ArrayBuffer[(Long,Long,Int)] = null
     private def copyIndex():ArrayBuffer[(Long,Long,Int)] = 

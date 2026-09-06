@@ -19,7 +19,7 @@ package platdb
 import scala.util.control.Breaks._
 import java.nio.ByteBuffer
 
-private[platdb] object Util:
+private object Util:
     def intToBytes(v: Long): Array[Byte] = 
         Array(
             ((v >> 24) & 0xFF).toByte,

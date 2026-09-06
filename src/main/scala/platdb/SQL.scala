@@ -365,8 +365,6 @@ class SQLEngine(ops:SQLEngineOptions):
     private val indexTb:String = "platdb_info_index"
     private val charRgx:Regex = """char\((\d*)\)""".r
     private val varcharRgx:Regex = """varchar\((\d*)\)""".r
-    private val valueEncode = Base64.getEncoder()
-    private val valueDecode = Base64.getDecoder()
     private var openFlag:Boolean = false
     private var db:DB = null
     // Cache table information.
@@ -395,7 +393,7 @@ class SQLEngine(ops:SQLEngineOptions):
             //  platdb_info_tables bucket --> key:table_name, value:table_info
             //  platdb_info_index bucket  --> key:table_name, value:index_info
             
-            // table(bucket) --> bucket_name:table_name, 
+            // table(raw bucket) --> bucket_name:table_name, 
             //                   key: tablePrefix_{TableID}_recordPrefixSep_{RowID}
             //                   value: record_head + column_value
             db.update (
@@ -517,7 +515,7 @@ class SQLEngine(ops:SQLEngineOptions):
                 // 4.create a tables bucket with table_name. 
                 // reate a table_info record, save it to tableTb
                 val tbInfo:String = tb.toJson.compactPrint
-                tx.createBucket(tb.name) 
+                tx.createRawBucket(tb.name) 
                 tx.openBucket(tableTb) match 
                     case None => throw SQLEngine.errInnerTable
                     case Some(bk) => 
@@ -529,7 +527,7 @@ class SQLEngine(ops:SQLEngineOptions):
                 if !contains(tx,name) then
                     return SQLResult(0,0)
                 // 2. delete table bucket, delete table_info
-                tx.deleteBucket(name)
+                tx.deleteRawBucket(name)
                 tx.openBucket(tableTb) match 
                     case None => throw SQLEngine.errInnerTable
                     case Some(bk) =>
@@ -539,7 +537,7 @@ class SQLEngine(ops:SQLEngineOptions):
             case ins:Insert => 
                 val (table,data) = parseInsert(ins,tx)
                 // insert the data to db
-                tx.openBucket(table) match
+                tx.openRawBucket(table) match
                     case None => throw SQLEngine.errNoTable
                     case Some(bk) =>
                         for (k,v) <- data do 
@@ -610,7 +608,7 @@ class SQLEngine(ops:SQLEngineOptions):
                         throw new SQLException("not support such columns")
 
                     if cntFlag then 
-                        tx.openBucket(name) match
+                        tx.openRawBucket(name) match
                             case Some(bk) => 
                                 val data = Array[Array[Any]](Array[Any](bk.length))
                                 return SQLRows(Array[String]("count(*)"),Array[String]("int"),data)
@@ -638,7 +636,7 @@ class SQLEngine(ops:SQLEngineOptions):
                     // 3.filter row by where 
                     val rd = new ArrayBuffer[Array[Any]]()
                     ps.getWhere() match
-                        case null => tx.openBucket(name) match
+                        case null => tx.openRawBucket(name) match
                             case None => None 
                             case Some(bk) => 
                                 for kv <- bk.iterator do 
@@ -649,7 +647,7 @@ class SQLEngine(ops:SQLEngineOptions):
                                         case None => None 
                         case exp:Expression => 
                             val eva = new SQLEvaluator(tbi,null)
-                            tx.openBucket(name) match
+                            tx.openRawBucket(name) match
                                 case None => None 
                                 case Some(bk) =>
                                     for kv <- bk.iterator do kv match 
@@ -783,7 +781,7 @@ class SQLEngine(ops:SQLEngineOptions):
         )
         tb 
     // Resolve the 'insert into...' statement.
-    private def parseInsert(ins:Insert,tx:Transaction):(String,ArrayBuffer[(String,String)]) = 
+    private def parseInsert(ins:Insert,tx:Transaction):(String,ArrayBuffer[(Array[Byte],Array[Byte])]) = 
         val table = ins.getTable().getName().toLowerCase()
         if !contains(tx,table) then 
             throw new SQLException(s"table '${table}' not exists")
@@ -815,7 +813,7 @@ class SQLEngine(ops:SQLEngineOptions):
                     cidx = new Array[Int](tbi.cols.length)
                     for i <- 0 until cidx.length do cidx(i) = i 
                 // process values. check data type.
-                val data = ArrayBuffer[(String,String)]() // (key,row_record)
+                val data = ArrayBuffer[(Array[Byte],Array[Byte])]() // (key,row_record)
                 Option(ins.getValues()) match
                     case None => throw new SQLException("insert values is empty")
                     case Some(vals:Values) => 
@@ -835,9 +833,9 @@ class SQLEngine(ops:SQLEngineOptions):
                             data.append(encode(tbi,cidx,rows))
                 (table,data)
     // Encode the data rows of the table into a key value pair. The value format is the column offset+data format.
-    private def encode(tbi:tableInfo,cidx:Array[Int],row:Array[Expression]):(String,String) =
+    private def encode(tbi:tableInfo,cidx:Array[Int],row:Array[Expression]):(Array[Byte],Array[Byte]) =
         // head: offset array
-        var key:String = ""
+        var key:Array[Byte] = null
         val data = new Array[Array[Byte]](tbi.cols.length)
         for (j,i) <- cidx.zipWithIndex do 
             val col = tbi.cols(j)
@@ -861,26 +859,24 @@ class SQLEngine(ops:SQLEngineOptions):
             
             if col.name == tbi.pk then 
                 if col.auto then // TODO: if exp not null,return a error 
-                    key = s"${col.autoNext}"
+                    key = Util.longToBytes(col.autoNext)
                     tbi.cols(j).autoNext += 1
                 else
-                    key = row(i).toString 
+                    key = row(i).toString().getBytes(defaultCharset)
             
         for (col,i) <- tbi.cols.zipWithIndex do  // TODO process default value
             if col.auto then 
-                if col.name == tbi.pk then
-                    key = col.autoNext.toString()
                 data(i) = Util.longToBytes(col.autoNext)
                 tbi.cols(i).autoNext += 1
-            
+                if col.name == tbi.pk then key = data(i)
         // default primary key.
-        if key == "" && tbi.pk == "" then 
-            key = s"${tbi.rowId}"
+        if key == null && tbi.pk == "" then 
+            key = Util.longToBytes(tbi.rowId)
             tbi.rowId += 1
 
         (key,makeRow(tbi.cols.length*4,data))
     //
-    private def makeRow(base:Int,data:Array[Array[Byte]]):String = 
+    private def makeRowStr(base:Int,data:Array[Array[Byte]]):String = 
         var size:Int = base
         for d <- data do size += (if d != null then d.length else 0)
         var buf:ByteBuffer = ByteBuffer.allocate(size)
@@ -889,10 +885,29 @@ class SQLEngine(ops:SQLEngineOptions):
             size += (if d != null then d.length else 0)
             buf.putInt(size)
         for d <- data if (d != null && d.length > 0) do buf.put(d)
-        valueEncode.encodeToString(buf.array())
+        Base64.getEncoder().encodeToString(buf.array())
+    //
+    private def makeRow(base:Int,data:Array[Array[Byte]]):Array[Byte] = 
+        var size:Int = base
+        for d <- data do size += (if d != null then d.length else 0)
+        var buf:ByteBuffer = ByteBuffer.allocate(size)
+        size = base
+        for d <- data do 
+            size += (if d != null then d.length else 0)
+            buf.putInt(size)
+        for d <- data if (d != null && d.length > 0) do buf.put(d)
+        buf.array()
     // Decoding a string formatted row data into a table with a record row.
     private def decode(row:String,tbi:tableInfo):Array[Array[Byte]] = 
-        val arr = valueDecode.decode(row)
+        val arr = Base64.getDecoder().decode(row)
+        val res = new Array[Array[Byte]](tbi.cols.length)
+        var l:Int = tbi.cols.length*4
+        for i <- 0 until tbi.cols.length do 
+            val r = Util.bytesToInt(arr.slice(4*i,4*i+4))
+            if r > l  then res(i) = arr.slice(l,r)
+            l = r 
+        res
+    private def decode(arr:Array[Byte],tbi:tableInfo):Array[Array[Byte]] = 
         val res = new Array[Array[Byte]](tbi.cols.length)
         var l:Int = tbi.cols.length*4
         for i <- 0 until tbi.cols.length do 
@@ -901,7 +916,7 @@ class SQLEngine(ops:SQLEngineOptions):
             l = r 
         res
     // Analyze the delete statement and filter the keys that need to be deleted.
-    private def parseDelete(del:Delete,tx:Transaction):(String,ArrayBuffer[String],Boolean) = 
+    private def parseDelete(del:Delete,tx:Transaction):(String,ArrayBuffer[Array[Byte]],Boolean) = 
         val table = del.getTable().getName().toLowerCase()
         if !contains(tx,table) then throw SQLEngine.errNoTable
         tbs.get(table) match
@@ -910,8 +925,8 @@ class SQLEngine(ops:SQLEngineOptions):
                 case null => (table,null,true)
                 case exp:Expression => 
                     val eva = new SQLEvaluator(tbi,null)
-                    val arr = ArrayBuffer[String]()
-                    tx.openBucket(table) match
+                    val arr = ArrayBuffer[Array[Byte]]()
+                    tx.openRawBucket(table) match
                         case None => None 
                         case Some(bk) =>
                             for kv <- bk.iterator do kv match
@@ -961,9 +976,9 @@ class SQLEngine(ops:SQLEngineOptions):
                     throw new SQLException(s"found ${cidx.length} columns but new value ${newVal.length}")
                 // filter table rows,generate new row
                 val w = Option(up.getWhere())
-                val keys = new ArrayBuffer[String]()
+                val keys = new ArrayBuffer[Array[Byte]]()
                 val rows = new ArrayBuffer[Array[Array[Byte]]]()
-                tx.openBucket(table) match
+                tx.openRawBucket(table) match
                     case None => throw SQLEngine.errNoTable
                     case Some(bk) =>
                         for kv <- bk.iterator do kv match
@@ -1000,8 +1015,8 @@ class SQLEngine(ops:SQLEngineOptions):
                 case null => (null,true)
                 case exp:Expression => 
                     val eva = new SQLEvaluator(tbi,null)
-                    val arr = ArrayBuffer[String]()
-                    tx.openBucket(table) match
+                    val arr = ArrayBuffer[Array[Byte]]()
+                    tx.openRawBucket(table) match
                         case None => throw SQLEngine.errInnerTable
                         case Some(bk) =>
                             for kv <- bk.iterator do kv match
@@ -1012,7 +1027,7 @@ class SQLEngine(ops:SQLEngineOptions):
                                     if res.length > 0 && (res(0).toInt & 1) != 0 then 
                                         arr.append(k)
                             (arr,false)
-        tx.openBucket(table) match
+        tx.openRawBucket(table) match
             case None => throw SQLEngine.errInnerTable
             case Some(bk) => 
                 if all then 

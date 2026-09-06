@@ -329,7 +329,7 @@ private[platdb] class BTreeSet(var bk:BTreeBucket) extends BSet:
   *
   * @param iter
   */
-private[platdb] class BTreeSetIter(val iter:BTreeBucketIter) extends CollectionIterator:
+private class BTreeSetIter(val iter:BTreeBucketIter) extends CollectionIterator:
     def find(key:String):Option[(String,String)] = iter.find(key)
     def first():Option[(String,String)]  = iter.first()
     def last():Option[(String,String)] = iter.last()
@@ -342,7 +342,7 @@ private[platdb] class BTreeSetIter(val iter:BTreeBucketIter) extends CollectionI
   *
   * @param name
   */
-private[platdb] class TempBSet(val name:String) extends BSet:
+private class TempBSet(val name:String) extends BSet:
     var map = new TreeMap[String,Boolean]()
     def length:Long = map.size
     def contains(key:String):Boolean = map.contains(key)
@@ -428,7 +428,7 @@ private[platdb] class TempBSet(val name:String) extends BSet:
   *
   * @param tempSet
   */
-private[platdb] class TempBSetIter(val tempSet:TempBSet) extends CollectionIterator:
+private class TempBSetIter(val tempSet:TempBSet) extends CollectionIterator:
     private var iter = tempSet.map.keysIterator
     def find(key:String):Option[(String,String)] = 
         if tempSet.map.contains(key) then Some((key,"")) else None

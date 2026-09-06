@@ -23,7 +23,7 @@ import com.typesafe.config.ConfigFactory
 
 implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
 
-private[platdb] def parseConfig(args:Seq[String]):ServerOptions =
+private def parseConfig(args:Seq[String]):ServerOptions =
     if args.length == 0 || args(0) == "" then
         throw new Exception("not found config file path parameter")
         
