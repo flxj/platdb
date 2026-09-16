@@ -52,7 +52,7 @@ private case class NodeIndex(offset:Int,keySize:Int,valSize:Long,flag:Byte)
   * @param key
   * @param value
   */
-private class NodeElement(var flag:Byte,var child:Long,var key:String,var value:String): // TODO: use Array[Byte] as key,value type
+private[platdb] class NodeElement(var flag:Byte,var child:Long,var key:String,var value:String): // TODO: use Array[Byte] as key,value type
     def keySize(cs:Charset):Int = key.getBytes(cs).length
     def keyBytes(cs:Charset):Array[Byte] = key.getBytes(cs)
     def valueSize(cs:Charset):Int = value.getBytes(cs).length
@@ -73,7 +73,7 @@ extension (arr:ArrayBuffer[NodeElement])
                 low = mid+1
         idx
 
-private object Node:
+private[platdb] object Node:
     val flagBucket:Byte = 5 
     val flagRegion:Byte = 6 
     val indexSize:Int = 17
@@ -209,7 +209,7 @@ The leaf node internally maintains an ordered list of elements with key and valu
 
 Vi represents the value corresponding to the Ki element, and Fi is the flag information used to indicate the type of Vi (ordinary value or subbucket).
 */
-private class Node(var header:BlockHeader) extends Persistence:
+private[platdb] class Node(var header:BlockHeader) extends Persistence:
     var unbalanced:Boolean = false
     var spilled:Boolean = false
     var minKey:String = ""

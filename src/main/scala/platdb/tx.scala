@@ -304,7 +304,7 @@ private class Tx(val readonly:Boolean) extends Transaction:
         meta.root = root.bkv
         // free the old freelist and write the new list to db file.
         if meta.freelistId != 0 then
-            db.freelist.free(id,db.freelist.header.pgid,db.freelist.header.overflow)
+            db.freelist.reclaim(id,db.freelist.pageId,db.freelist.overflow)
         // write dirty page to disk file.
         try 
             writeFreelist() 
@@ -391,7 +391,7 @@ private class Tx(val readonly:Boolean) extends Transaction:
                 if !flag then
                     throw new Exception(s"tx ${id} write freelist to db file failed")
                 meta.freelistId = bk.id
-                db.freelist.setId(bk.id,bk.header.overflow)
+                db.freelist.set(bk.id,bk.header.overflow)
                 db.blockBuffer.revert(bk.id)
     // write all dirty blocks to db file
     private def writeBlock():Unit =
@@ -460,7 +460,7 @@ private class Tx(val readonly:Boolean) extends Transaction:
         block(pgid) match
             case Failure(e) => None 
             case Success(bk) => 
-                db.freelist.free(id,bk.header.pgid,bk.header.overflow)
+                db.freelist.reclaim(id,bk.header.pgid,bk.header.overflow)
                 db.blockBuffer.revert(pgid)
                 blocks.remove(pgid)
 

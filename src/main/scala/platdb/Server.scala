@@ -785,6 +785,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                                     for kv <- bk.iterator do
                                         kv match
                                             case Some(key,value) if value != DB.magicStr => list:+=KVPair(key,value)
+                                            case Some(_) => None
                                             case None => None
                             ) match
                                 case Failure(e) => Failure(e)

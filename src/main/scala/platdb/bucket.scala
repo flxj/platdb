@@ -154,7 +154,7 @@ trait Bucket extends PlatDBIterable:
 
 // count is the number of keys in current bucket
 // dataType means collection type.
-private class BucketValue(var root:Long,var count:Long,var sequence:Long,val dataType:Byte):
+private[platdb] class BucketValue(var root:Long,var count:Long,var sequence:Long,val dataType:Byte):
     // convert bucket value to byte array.
     def getBytes:Array[Byte] = 
         var r = root
@@ -174,7 +174,7 @@ private class BucketValue(var root:Long,var count:Long,var sequence:Long,val dat
     override def clone:BucketValue = new BucketValue(root,count,sequence,dataType)
 
 //
-private object BTreeBucket:
+private[platdb] object BTreeBucket:
     // bucket value size when convert byte array.
     val valueSize:Int = 25
     def getValue(value:String):Option[BucketValue] = getValue(Base64.getDecoder().decode(value))
@@ -193,7 +193,7 @@ private object BTreeBucket:
   * @param bkname
   * @param tx
   */
-private class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
+private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
     var bkv:BucketValue = null
     var root:Option[Node] = None
     /** cache nodes about writeable tx. */

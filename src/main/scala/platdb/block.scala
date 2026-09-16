@@ -46,7 +46,7 @@ private[platdb] trait Persistence:
     def writeTo(block:Block):Int
 
 
-private object Block:
+private[platdb] object Block:
     // block flag.
     val typeMeta:Byte = 1 
     val typeBranch:Byte = 2
@@ -62,7 +62,7 @@ private object Block:
   * @param overflow
   * @param size
   */
-private class BlockHeader(var pgid:Long,var flag:Byte,var count:Int,var overflow:Int,var size:Int):
+private[platdb] class BlockHeader(var pgid:Long,var flag:Byte,var count:Int,var overflow:Int,var size:Int):
     override def clone:BlockHeader = new BlockHeader(pgid,flag,count,overflow,size)
     def getBytes():Array[Byte] =
         var buf:ByteBuffer = ByteBuffer.allocate(BlockHeader.size)
@@ -73,7 +73,7 @@ private class BlockHeader(var pgid:Long,var flag:Byte,var count:Int,var overflow
         buf.put(flag)
         buf.array()
 
-private object BlockHeader:
+private[platdb] object BlockHeader:
     val size = 21
     def apply(bs:Array[Byte]):Option[BlockHeader] =
         if bs.length != size then 
@@ -89,7 +89,7 @@ private object BlockHeader:
   *
   * @param cap
   */
-private class Block(val cap:Int):
+private[platdb] class Block(val cap:Int):
     var header:BlockHeader = new BlockHeader(-1L,0,0,0,0)
     //
     private var data:Array[Byte] = new Array[Byte](cap)
@@ -139,7 +139,7 @@ private class Block(val cap:Int):
   * @param maxsize
   * @param fm
   */
-private class BlockBuffer(val maxsize:Int,var fm:FileManager):
+private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
     // Save some useless blocks that have been kicked out of the cache queue to speed up the creation of block structures.
     val poolsize:Int = 16
     var idleLock:ReentrantReadWriteLock = new ReentrantReadWriteLock()
@@ -322,7 +322,7 @@ private class BlockBuffer(val maxsize:Int,var fm:FileManager):
         idle.clear()
 
 // 
-private class FileManager(val path:String,val readonly:Boolean):
+private[platdb] class FileManager(val path:String,val readonly:Boolean):
     var opend:Boolean = false
     var lockpath:String = ""
     var lockfile:File = null
@@ -330,7 +330,18 @@ private class FileManager(val path:String,val readonly:Boolean):
 
     var file:File = null
     var writer:Option[RandomAccessFile] = None // writer
-    
+
+    def sync():Unit = 
+        if readonly then
+            throw new Exception("readonly mode not allow sync file.")
+        val w:RandomAccessFile = writer match
+            case Some(wr) => wr
+            case None => 
+                val ra = new RandomAccessFile(file,"rw")
+                writer = Some(ra)
+                ra
+        var channel = w.getChannel()
+        channel.force(true)
     /**
       * file size.
       *

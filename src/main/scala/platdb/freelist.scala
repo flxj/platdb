@@ -20,139 +20,308 @@ import java.nio.ByteBuffer
 import scala.collection.mutable.{ArrayBuffer,Map}
 import scala.util.control.Breaks._
 import scala.util.{Try,Success,Failure}
+import scala.compiletime.ops.double
 
-/**
-  * 
-  */
-private[platdb] object Meta:
-    val elementSize = 56
-    val checkSumSize = 4
-    def size:Int = BlockHeader.size+elementSize
-    //
-    def apply(data:Array[Byte]):Try[Meta] =
-        if data.length < BlockHeader.size+ elementSize then
-            Failure(throw new Exception("illegal meta data"))
-        else
-            BlockHeader(data.slice(0,BlockHeader.size)) match
-                case None => Failure(throw new Exception("parse block header data failed"))
-                case Some(hd) =>
-                    var bk = new Block(data.length)
-                    bk.header = hd
-                    bk.write(0,data)
-                    read(bk)
-    // convert block data to meta.
-    def read(bk:Block):Try[Meta] =
-        if bk.header.flag != Block.typeMeta then 
-            Failure(new Exception(s"block type ${bk.header.flag} is not meta type"))
-        else
-            bk.getBytes() match
-                case None => Failure(new Exception("block data is empty")) 
-                case Some(data) => 
-                    var meta = new Meta(bk.id)
-                    if data.length != elementSize then
-                        return Failure(new Exception(s"block data length is not equel ${elementSize}"))
-                    val arr = for i <- 0 to 5 yield
-                        val a = (data(8*i) & 0xff) << 24 | (data(8*i+1) & 0xff) << 16 | (data(8*i+2) & 0xff) << 8 | (data(8*i+3) & 0xff)
-                        val b = (data(8*i+4) & 0xff) << 24 | (data(8*i+5) & 0xff) << 16 | (data(8*i+6) & 0xff) << 8 | (data(8*i+7) & 0xff)
-                        (a & 0x00000000ffffffffL) << 32 | (b & 0x00000000ffffffffL)
-                    val sz =  (data(48) & 0xff) << 24 | (data(49) & 0xff) << 16 | (data(50) & 0xff) << 8 | (data(51) & 0xff)
-                    val chk = (data(52) & 0xff) << 24 | (data(53) & 0xff) << 16 | (data(54) & 0xff) << 8 | (data(55) & 0xff)
-                    meta.pageId = arr(0)
-                    meta.freelistId = arr(1)
-                    meta.txid = arr(2)
-                    meta.root = new BucketValue(arr(3),arr(4),arr(5),Collection.typeBucket)
-                    meta.pageSize = sz
-                    meta.checkSum = chk
-                    Success(meta)
+private[platdb] trait FreeManager extends Persistence:
+    def pageId:Long 
+    def overflow:Int 
+    // Update the basic information of the freelist.
+    def set(pgid:Long,overflow:Int):Unit
+    // Allocate a continuous storage space of length
+    // n * pagesize for transaction txid.
+    def allocate(txid:Long,n:Int):Long
+    /*
+      The transaction declaration releases the continuous 
+      (tailLen+1) page space starting from 'start', 
+      and these pages will enter a queued state waiting for recycling
+    */
+    def reclaim(txid:Long,start:Long,tailLen:Int):Unit
+    /*  
+      Release the pages reclaimed from transactions with txid within 
+      the closed interval [startTx, endTx] to the idle list.
+    */
+    def release(startTx:Long,endTx:Long):Unit  
+    // Rollback the allocation or recycling operation of a transaction.
+    def rollback(txid:Long):Unit
 
-/**
-  * database meta info.
-  *
-  * @param id
-  */
-private[platdb] class Meta(val id:Long) extends Persistence:
-    var pageSize:Int = 0
-    var flag:Byte = Block.typeMeta
-    var freelistId:Long = -1
-    var pageId:Long = -1
-    var txid:Long = -1
-    var root:BucketValue = null
-    var checkSum:Int = 0
-    /**
-      * 
-      *
-      * @return
-      */
-    override def clone:Meta =
-        var m = new Meta(id)
-        m.pageSize = pageSize
-        m.flag = flag
-        m.freelistId = freelistId
-        m.pageId = pageId
-        m.txid = txid
-        m.checkSum = checkSum
-        m.root = new BucketValue(root.root,root.count,root.sequence,Collection.typeBucket)
-        m
-    def size():Int = Meta.size
+// record a file pages free claim about a version txid.
+private case class ReleaseClaim(txid:Long, pages:ArrayBuffer[(Long,Long)])
+
+// default freelist implement.
+private[platdb] class FreeArray(var header:BlockHeader) extends FreeManager:
+    var oldHeader:Option[BlockHeader] = None
+    // idle pages list, that can be allocated for read-write transaction. sorted by pageid.
+    var idle:ArrayBuffer[(Long,Long)] = new ArrayBuffer[(Long,Long)]()
+    // Record space release requests for transactions.(sorted by txid)
+    var pending:ArrayBuffer[ReleaseClaim] = new ArrayBuffer[ReleaseClaim]() 
+    // trace allocated pages for tx.
+    var allocated:Map[Long,ArrayBuffer[(Long,Long)]] = Map[Long,ArrayBuffer[(Long,Long)]]() 
+
+    override def toString(): String =
+        (for f <- idle yield f.toString()).mkString(",")
+    def pageId: Long = header.pgid
+    def overflow: Int = header.overflow
+    def size():Int = 
+        var sz = BlockHeader.size + FreeArray.headerSize + idle.length*FreeArray.elementSize
+        for p <- pending do
+            sz += p.pages.length*FreeArray.elementSize
+        sz 
+    
     def writeTo(bk:Block):Int =
-        bk.header.flag = flag
-        bk.header.overflow = 0
-        bk.header.count = 1
-        bk.header.size = size() 
-        bk.append(bk.header.getBytes())
-        bk.append(getBytes())
-        size()
+        val pids = merge()
+        val sz = BlockHeader.size+FreeArray.headerSize+pids.length*FreeArray.elementSize
 
-    /**
-      * 
-      *
-      * @return
-      */
-    def getBytes():Array[Byte] =
-        var buf:ByteBuffer = ByteBuffer.allocate(Meta.elementSize)
-        buf.putLong(pageId)
-        buf.putLong(freelistId)
-        buf.putLong(txid)
-        buf.putLong(root.root)
-        buf.putLong(root.count)
-        buf.putLong(root.sequence)
-        buf.putInt(pageSize)
-        buf.putInt(checkSum)
-        buf.array()
-    //
-    def getMetaBytes():Array[Byte] = getBytes().take(Meta.elementSize-Meta.checkSumSize)
-    //
-    def writeHeader(bk:Block):Unit =
-        bk.header.flag = flag
-        bk.header.overflow = 0
+        bk.header.flag = Block.typeFreelist
         bk.header.count = 1
-        bk.header.size = size()
-/**
- * 
- *
- * @return
- */
-private[platdb] val MOD_ADLER = 65521
-private[platdb] def getCheckSum32(data:Array[Byte]):Int = 
-    var a = 1
-    var b = 0
-    for d <- data do
-        a = (d + a) % MOD_ADLER
-        b = (b + a) % MOD_ADLER
-    b * 65536 + a 
+        bk.header.size = sz
+        bk.header.overflow =(sz+DB.pageSize)/DB.pageSize - 1
+        
+        bk.append(bk.header.getBytes())
+        bk.append(FreeArray.headerToBytes(FreelistHeader(pids.length,FreeArray.listType)))
+        for (s,e) <- pids do
+            bk.append(FreeArray.elemToBytes(s,e))
+        size()
+    def set(pgid:Long,overflow:Int):Unit = 
+        oldHeader = Some(header.clone)
+        header.pgid = pgid
+        header.overflow = overflow
+    def release(startTx:Long,endTx:Long):Unit =
+        if startTx > endTx then 
+            None
+        else
+            val i = find((txid:Long) => txid >= startTx )
+            if i >= pending.length then
+                return None
+            var j = find((txid:Long) => txid > endTx)
+            for k <- i until j do 
+                insert(pending(k).pages.toArray)
+                allocated.remove(pending(k).txid)
+            pending.remove(i,j-i)
+    def reclaim(txid:Long,start:Long,tailLen:Int):Unit =
+        val ed = start+tailLen
+        // check idle list overleap
+        for (l,r) <- idle do if !(ed < l || r < start) then
+            throw new Exception(s"release repeatedly,tx $txid try to release [$start,$ed], but already released [${l},${r}]")
+        // check pending list.
+        var idx = -1
+        for i <- 0 until pending.length do
+            for (s,e) <- pending(i).pages do if !(ed < s || e < start) then
+                throw new Exception(s"release repeatedly,tx $txid try to release [$start,$ed], but tx ${pending(i).txid} already released [${s},${e}]")
+            if pending(i).txid == txid then
+                idx = i
+        if idx >= 0 then 
+            pending(idx).pages += ((start,ed))
+        else
+            var fc = ReleaseClaim(txid, new ArrayBuffer[(Long,Long)]())
+            fc.pages += ((start,ed))
+            pend(fc)
+    def allocate(txid:Long,n:Int):Long = 
+        val (idx,equ) = scan(n)
+        if idx < 0 then
+            return idx
+        // cut the pages segment.
+        var pages = idle(idx)
+        if equ then
+            idle.remove(idx)
+        else
+            val start = pages(0) + n.toLong
+            idle(idx) = (start,pages(1))
+            pages = (pages(0),start-1)
+        
+        if !allocated.contains(txid) then
+            allocated(txid) = new ArrayBuffer[(Long,Long)]()
+        else
+            for (s,e) <- allocated(txid) do
+                if !(pages(1) < s || e < pages(0)) then
+                    throw new Exception(s"allocate repeatedly,tx $txid try to allocate [${pages(0)},${pages(1)}], but tx $txid already allocated [${s},${e}]")
+        allocated(txid) += pages
+        pages(0)
+    def rollback(txid:Long):Unit =
+        // return the assigned pages to the idle list.
+        allocated.remove(txid) match
+            case None => None
+            case Some(pages) => insert(pages.toArray)
+        
+        // retract the statement about the release of pages.
+        val idx = find((id:Long) => id >= txid )
+        if idx < pending.length && pending(idx).txid == txid then
+            pending.remove(idx)
+
+        // rollback header.
+        oldHeader match
+            case None => None
+            case Some(hd) => header = hd
+    // add pages to idle list.
+    private def insert(start:Long,ed:Long):Unit = 
+        val (i,ok) = search(start)
+        if ok then
+            idle(i) = ((start,ed))
+        else
+            if i >= idle.length then
+                idle.append((start,ed))
+            else
+                idle.insert(i,(start,ed))
+    private def insert(pages:Seq[(Long,Long)]):Unit = 
+        for (s,e) <- pages do insert(s,e)
+        idle = reduce(idle)
+    // search pages segment in idle list
+    private def search(id:Long):(Int,Boolean) = 
+        var l = 0 
+        var r = idle.length
+        while l < r do 
+            val m = (l+r)/2
+            if idle(m)(0) == id then
+                return (m,true)
+            else if idle(m)(0) > id then
+                r = m 
+            else
+                l = m+1
+        (r,false)
+    // scan idle list,finding pages space large or equels sz.
+    private def scan(sz:Int):(Int,Boolean) = 
+        var idx = -1
+        var ok = false
+        breakable(
+            for (pg,i) <- idle.zipWithIndex do 
+                if (pg(1)-pg(0)+1) >= sz.toLong then
+                    idx = i 
+                    ok = (pg(1)-pg(0)+1) == sz.toLong
+                    break()
+        )
+        (idx,ok)
+    // insert a new rc to pending lsit.
+    private def pend(rc:ReleaseClaim):Unit = 
+        val i = find((id:Long) => id >= rc.txid)
+        if i >= pending.length then
+            pending.append(rc)
+        else
+            pending.insert(i,rc)
+    // search element in pending list by txid.
+    private def find(fn:(Long) => Boolean):Int = 
+        var l = 0
+        var r = pending.length
+        while l < r do 
+            val m = (l+r)/2
+            if fn(pending(m).txid) then
+                r = m
+            else
+                l = m+1
+        r
+    //
+    private def reduce(arr:ArrayBuffer[(Long,Long)]):ArrayBuffer[(Long,Long)] = 
+        var mg = new ArrayBuffer[(Long,Long)]()
+        var i = 0
+        while i < arr.length do
+            var j = i+1
+            while j < arr.length && arr(j-1)(1) == arr(j)(0)-1 do
+                j += 1
+            if j != i+1 then
+                mg.append((arr(i)(0),arr(j-1)(1)))
+            else
+                mg += arr(i)
+            i = j 
+        mg
+    // merge pending and idle lists.
+    private def merge():ArrayBuffer[(Long,Long)] =
+        var arr = new ArrayBuffer[(Long,Long)](idle.length)
+        idle.copyToBuffer(arr)
+        for fc <- pending do arr ++= fc.pages
+        arr.sortInPlaceWith((p1:(Long,_),p2:(Long,_)) => p1(0) < p2(0)) // TODO: use insert,not sort
+        reduce(arr)
+        
+private object FreeArray:
+    val headerSize = 9
+    val elementSize = 12
+    val listType:Byte = 0
+    val hashType:Byte = 1
+    def apply(bk:Block):Option[FreeArray] = 
+        if bk.header.flag != Block.typeFreelist then
+            throw new Exception(s"block type is not freelist ${bk.header.flag}") 
+        bk.getBytes() match
+            case None => None 
+            case Some(data) => 
+                var freelist = new FreeArray(bk.header)
+                if data.length < headerSize then
+                    throw new Exception(s"illegal freelist header data length ${data.length}") 
+                bytesToHeader(data.slice(0,headerSize)) match
+                    case None => throw new Exception("illegal freelist header data")
+                    case Some(hd) =>
+                        if data.length != headerSize+(hd.count*elementSize) then
+                            throw new Exception(s"illegal freelist data length ${data.length}") 
+                        
+                        var idx = headerSize+elementSize
+                        while idx <= data.length do
+                            bytesToElem(data.slice(idx-elementSize,idx)) match
+                                case None => throw new Exception("illegal freelist element data")
+                                case Some(pg) =>
+                                    freelist.idle += pg
+                                    idx += elementSize
+                        return Some(freelist)
+        None 
+    // parse freelist from raw bytes data.
+    def apply(data:Array[Byte]):Option[FreeArray] =
+        if data.length < BlockHeader.size + headerSize then
+            throw new Exception(s"illegal freelist data length ${data.length}")
+        BlockHeader(data.slice(0,BlockHeader.size)) match
+            case None => throw new Exception("parse freelist block header data failed")
+            case Some(hd) =>
+                var bk = new Block(data.length)
+                bk.header = hd
+                bk.write(0,data)
+                apply(bk)
+    //
+    def bytesToHeader(data:Array[Byte]):Option[FreelistHeader] =
+        if data.length != headerSize then
+            throw new Exception("illegal freelist header data")
+        val a = (data(0) & 0xff) << 24 | (data(1) & 0xff) << 16 | (data(2) & 0xff) << 8 | (data(3) & 0xff)
+        val b = (data(4) & 0xff) << 24 | (data(5) & 0xff) << 16 | (data(6) & 0xff) << 8 | (data(7) & 0xff)
+        Some(FreelistHeader((a & 0x00000000ffffffffL) << 32 | (b & 0x00000000ffffffffL),data(headerSize-1)))
+    // 
+    def headerToBytes(hd:FreelistHeader):Array[Byte] = 
+        var c = hd.count
+        var arr = new Array[Byte](headerSize)
+        for i <- 0 to 7 do
+            arr(7-i) = (c & 0xff).toByte
+            c = c >> 8
+        arr(headerSize-1) = hd.ftype
+        arr
+    //
+    def bytesToElem(data:Array[Byte]):Option[(Long,Long)] =
+        if data.length != elementSize then
+            throw new Exception("illegal freelist element data")
+        val a = (data(0) & 0xff) << 24 | (data(1) & 0xff) << 16 | (data(2) & 0xff) << 8 | (data(3) & 0xff)
+        val b = (data(4) & 0xff) << 24 | (data(5) & 0xff) << 16 | (data(6) & 0xff) << 8 | (data(7) & 0xff) 
+        val s = (a & 0x00000000ffffffffL) << 32 | (b & 0x00000000ffffffffL)
+        val l = (data(8) & 0xff) << 24 | (data(9) & 0xff) << 16 | (data(10) & 0xff) << 8 | (data(11) & 0xff)
+        Some((s,s+l-1))
+    //
+    def elemToBytes(start:Long,ed:Long):Array[Byte] = 
+        var a = start>>32
+        var b = start
+        var c = (ed-start+1).toInt
+        var arr = new Array[Byte](elementSize)
+        for i <- 0 to 3 do
+            arr(3-i) = (a & 0xff).toByte
+            arr(7-i) = (b & 0xff).toByte
+            arr(11-i) = (c & 0xff).toByte
+            a = a >> 8
+            b = b >> 8
+            c = c >> 8
+        arr
+
+
 
 // record freelist basic info, for example, count | type
-private[platdb] case class FreelistHeader(count:Long,ftype:Byte)
+private case class FreelistHeader(count:Long,ftype:Byte)
 // record a file free page fragement.
-private[platdb] case class FreeFragment(start:Long,end:Long,length:Int):
+private case class FreeFragment(start:Long,end:Long,length:Int):
     override def toString(): String = s"($start,$end,$length)"
 // record a file pages free claim about a version txid.
-private[platdb] case class FreeClaim(txid:Long, ids:ArrayBuffer[FreeFragment])
-//
-var prevHeader:Option[BlockHeader] = None
+private case class FreeClaim(txid:Long, ids:ArrayBuffer[FreeFragment])
 
-// freelist implement.
-private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
+// An Inefficient Freelist Implementation.
+private[platdb] class Freelist(var header:BlockHeader) extends FreeManager:
+    private var prevHeader:Option[BlockHeader] = None
     // idle pages list, that can be allocated for read-write transaction.
     var idle:ArrayBuffer[FreeFragment] = new ArrayBuffer[FreeFragment]()
     //
@@ -163,12 +332,13 @@ private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
     override def toString(): String =
         val list = for f <- idle yield f.toString()
         list.mkString(",")
-    
+    def pageId: Long = header.pgid
+    def overflow: Int = header.overflow
     /**
      * reset the freelist header id,when writable transaction commit the freelist content.
      * 
      */
-    def setId(pgid:Long,overflow:Int):Unit = 
+    def set(pgid:Long,overflow:Int):Unit = 
         prevHeader = Some(header.clone)
         header.pgid = pgid
         header.overflow = overflow
@@ -185,7 +355,7 @@ private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
       * @param start
       * @param end
       */
-    def unleash(start:Long,end:Long):Unit =
+    def release(start:Long,end:Long):Unit =
         if start > end then return None
         unleashing.sortWith((c1:FreeClaim,c2:FreeClaim) => c1.txid < c2.txid)
         var i = 0
@@ -214,7 +384,7 @@ private[platdb] class Freelist(var header:BlockHeader) extends Persistence:
       * @param startid
       * @param tail
       */
-    def free(txid:Long,start:Long,tail:Int):Unit =
+    def reclaim(txid:Long,start:Long,tail:Int):Unit =
         val end = start+tail
         for f <- idle do
             if !(end < f.start || f.end < start) then

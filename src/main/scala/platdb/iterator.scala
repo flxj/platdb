@@ -108,7 +108,7 @@ private class Record(var node:Option[Node],var block:Option[Block],var index:Int
   *
   * @param bucket
   */
-private class BTreeBucketIter(bucket:BTreeBucket) extends CollectionIterator:
+private[platdb] class BTreeBucketIter(bucket:BTreeBucket) extends CollectionIterator:
     // use a stack to record serach path.
     private var stack:List[Record] = List[Record]()
     /**
@@ -481,7 +481,7 @@ private class BTreeBucketIter(bucket:BTreeBucket) extends CollectionIterator:
                 stack :+= r
                 seek(key,elems(idx).child)
 /////////////////////////////////////////////////////////////////////////////////////////////////
-private class BTreeBucketIter2(bucket:BTreeBucket) extends CollectionIterator:
+private[platdb] class BTreeBucketIter2(bucket:BTreeBucket) extends CollectionIterator:
     // use a stack to record serach path.
     private var stack:ArrayBuffer[Record] = new ArrayBuffer[Record]()
     private var idx:Int = 0

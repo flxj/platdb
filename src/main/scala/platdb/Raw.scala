@@ -303,7 +303,7 @@ private class RawNode(var header:BlockHeader) extends Persistence:
   * @param bkname
   * @param tx
   */
-private class BTreeRawBucket(val bkname:Array[Byte],var tx:Tx) extends RawBucket:
+private[platdb] class BTreeRawBucket(val bkname:Array[Byte],var tx:Tx) extends RawBucket:
     var bkv:BucketValue = null
     var root:Option[RawNode] = None
     /** cache nodes about writeable tx. */

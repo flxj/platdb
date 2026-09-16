@@ -288,7 +288,7 @@ private[platdb] case class IndexSlice(idx:Int,start:Long,end:Long)
   *
   * @param bk
   */
-private class KList(val bk:Bucket,val readonly:Boolean) extends BList:
+private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
     var len:Long = 0L
     var index:ArrayBuffer[(Long,Long,Int)] = null
     private def copyIndex():ArrayBuffer[(Long,Long,Int)] = 

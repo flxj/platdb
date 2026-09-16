@@ -31,7 +31,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.charset.Charset
 
 /**
-  * 
+  * Database Configuration.
   *
   * @param timeout
   * @param bufSize
@@ -44,32 +44,24 @@ case class Options(timeout:Int,bufSize:Int,readonly:Boolean,fillPercent:Double,t
   * The DB object contains some default constant information as well as exception information.
   */
 object DB:
-    //
+    // The maximum length of the key.
     val maxKeySize = 32768 // 32k
-    //
+    // The maximum length of Value
     val maxValueSize = (1 << 31) - 2
-    //
+    // Default buffer pool size
     val defaultBufSize = 128
-    //
+    // Default page size, 4kb
     val defaultPageSize = 4096 // 4k
-    //
+    // Default timeout period,2s
     val defaultTimeout = 2000 // 2s
-    //
+    // fefaultFillPercent is the percentage that split pages are filled.
     val defaultFillPercent = 0.5
-    //
     val minFillPercent = 0.1
-    //
     val maxFillPercent = 1.0
-    //
+    // The maximum number of elements allowed in a btree branch node.
     val maxEntries = 64
-    //
     val minEntries = 32
-    //
-    val typeNameBucket = "bucket"
-    val typeNameRawBucket = "rawBucket"
-    val typeNameSet = "set"
-    val typeNameList = "list"
-    val typeNameRegion = "region"
+    
     private[platdb] var pageSize = defaultPageSize
     private[platdb] var fillPercent = defaultFillPercent
     private[platdb] val meta0Page = 0
@@ -135,7 +127,7 @@ class DB(val path:String)(using ops:Options):
     // fileManager provides operations for reading and writing DB files.
     private[platdb] var fileManager:FileManager = null
     // freeList provides the ability to manage db file pages.
-    private[platdb] var freelist:Freelist = null
+    private[platdb] var freelist:FreeManager = null
     // blockBuffer provides the function of caching the page of db files.
     private[platdb] var blockBuffer:BlockBuffer = null
     // the latest meta information for the current DB.
@@ -149,36 +141,44 @@ class DB(val path:String)(using ops:Options):
     // Used to protect meta information.
     private var metaLock:ReentrantLock = new ReentrantLock()
     private var openFlag:Boolean = false
-
+    /**
+      * Default encoding character set for database.
+      *
+      * @return
+      */
     def charset:Charset = StandardCharsets.UTF_8
-
+    /**
+      * Data file path.
+      *
+      * @return
+      */
     def name:String = path
     /**
-      * 
+      * Is it in read-only mode.
       *
       * @return
       */
     def readonly:Boolean = ops.readonly
     /**
-      * 
+      * Is it in a closed state.
       *
       * @return
       */
     def closed:Boolean = !openFlag
     /**
-      * 
+      * pagesize value.
       *
       * @return
       */
     def pageSize:Int = DB.pageSize
     /**
-      * 
+      * fillpercent value.
       *
       * @return
       */
     def fillPercent:Double = DB.fillPercent
     /**
-      * 
+      * temporary directory.
       *
       * @return
       */
@@ -203,7 +203,7 @@ class DB(val path:String)(using ops:Options):
             blockBuffer = new BlockBuffer(ops.bufSize,fileManager)
 
             // if is the first time opened db, need init db file.
-            if fileManager.size ==0 then
+            if fileManager.size == 0 then
                 init()
             // read meta info.
             val meta0 = loadMeta(0)
@@ -256,7 +256,7 @@ class DB(val path:String)(using ops:Options):
                 case Failure(e) => throw e 
 
         // 2.create a null freelist and write to file.
-        var fl = new Freelist(new BlockHeader(2L,Block.typeFreelist,0,0,0))
+        var fl = new FreeArray(new BlockHeader(2L,Block.typeFreelist,0,0,0))
         var fbk = blockBuffer.get(DB.defaultPageSize)
         fbk.setid(2)
         val n = fl.writeTo(fbk) 
@@ -294,7 +294,7 @@ class DB(val path:String)(using ops:Options):
       * @param id
       * @return
       */
-    private def loadFreelist(id:Long):Freelist =
+    private def loadFreelist(id:Long):FreeManager =
         val hd = fileManager.readAt(id,BlockHeader.size)
         BlockHeader(hd) match
             case None => throw new Exception(s"not found freelist header from page ${id}")
@@ -303,7 +303,7 @@ class DB(val path:String)(using ops:Options):
                 var bk = new Block(data.length)
                 bk.header = h
                 bk.append(data)
-                Freelist(bk) match
+                FreeArray(bk) match
                     case None => throw new Exception(s"not found freelist data from page ${id}")
                     case Some(fl) => fl
     /**
@@ -328,7 +328,7 @@ class DB(val path:String)(using ops:Options):
             metaLock.unlock()
             rwLock.writeLock().unlock()
 
-    def sync():Try[Unit] = Failure(new Exception("not implement now"))
+    def sync():Try[Unit] = Success(fileManager.sync())
 
     /**
       * Opens and returns a transactional object, or exception information if the opening fails.
@@ -495,7 +495,7 @@ class DB(val path:String)(using ops:Options):
                 finally
                     tx.rollbackTx()
     /**
-      * 
+      * Delete several elements from a bucket.
       *
       * @param bucket
       * @param ignoreNotExists
@@ -540,7 +540,7 @@ class DB(val path:String)(using ops:Options):
             case Failure(e) => Failure(e)
             case Success(_) => Success(s)
     /**
-      * 
+      * Create a collection object of a specified type.
       *
       * @param name
       * @param collectionType
@@ -567,7 +567,7 @@ class DB(val path:String)(using ops:Options):
                 case Success(_) => None 
         )
     /**
-      * 
+      * Delete a collection object of a specified type.
       *
       * @param name
       * @param collectionType
@@ -703,12 +703,12 @@ class DB(val path:String)(using ops:Options):
             minid = rTx(0).id
       
         if minid >0 then
-            freelist.unleash(0,minid-1)
+            freelist.release(0,minid-1)
       
         for tx <- rTx do
-            freelist.unleash(minid,tx.id-1)
+            freelist.release(minid,tx.id-1)
             minid = tx.id+1
-        freelist.unleash(minid,Long.MaxValue)
+        freelist.release(minid,Long.MaxValue)
     /**
       * read-write transaction will update the meta info at the end of commit process.
       *
