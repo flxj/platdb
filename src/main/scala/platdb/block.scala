@@ -26,7 +26,7 @@ import java.nio.channels.FileLock
 import java.nio.channels.FileChannel
 import java.util.Timer
 import java.util.Date
-import java.util.concurrent.locks.ReentrantReadWriteLock
+import java.util.concurrent.locks.ReentrantLock
 import scala.util.control.Breaks._
 import scala.collection.mutable.Map
 import scala.collection.mutable.ArrayDeque
@@ -133,20 +133,15 @@ private[platdb] class Block(val cap:Int):
     def tail:Option[Array[Byte]] = 
         if capacity > BlockHeader.size then Some(data.slice(BlockHeader.size,data.length)) else None 
 
-/**
-  * 
-  *
-  * @param maxsize
-  * @param fm
-  */
-private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
+// (obsolete)
+private[platdb] class BlockManager(val maxsize:Int,var fm:FileManager) extends CacheManager:
     // Save some useless blocks that have been kicked out of the cache queue to speed up the creation of block structures.
     val poolsize:Int = 16
-    var idleLock:ReentrantReadWriteLock = new ReentrantReadWriteLock()
+    var idleLock:ReentrantLock = new ReentrantLock()
     var idle:ArrayBuffer[Block] = new ArrayBuffer[Block]() // TODO: add some statistic
     
     // Records the blocks that are currently in use and maintains a reference count of them.
-    var lock:ReentrantReadWriteLock = new ReentrantReadWriteLock()
+    var lock:ReentrantLock = new ReentrantLock()
     var count:Int = 0
     var blocks:Map[Long,Block] = Map[Long,Block]()
     var pinned:Map[Long,Int] = Map[Long,Int]() 
@@ -160,26 +155,26 @@ private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
       *
       * @param bk
       */
-    private def drop(bk:Block):Unit=
-        if idle.length < poolsize then
-            try 
-                idleLock.writeLock().lock()
-                idle+=bk
-            finally
-                idleLock.writeLock().unlock()
+    private def drop(bk:Block):Unit =
+        idleLock.lock()
+        try 
+            if idle.length < poolsize then
+                idle += bk
+        finally
+            idleLock.unlock()
     /**
       * 
       *
       * @param size
       * @return
       */
-    def get(size:Int):Block =
+    def getIdleBlock(size:Int):Block =
+        idleLock.lock()
         try 
-            idleLock.writeLock().lock()
             var idx:Int = -1
             breakable(
-                for i <- 0 until idle.length do
-                    if idle(i).capacity >= size then
+                for (bk,i) <- idle.zipWithIndex do
+                    if bk.capacity >= size then
                         idx = i
                         break()
             )
@@ -191,33 +186,31 @@ private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
             bk.reset()
             bk
         finally
-            idleLock.writeLock().unlock()
+            idleLock.unlock()
     /**
       * 
       *
       * @param id
       */
-    def revert(id:Long):Unit = 
+    def putBlock(id:Long):Unit = 
+        lock.lock()
         try 
-            lock.writeLock().lock()
-
             val n = pinned.getOrElse(id,0)
-            if n>1 then
+            if n > 1 then
                 pinned(id) = n-1
             else
                 pinned.remove(id)
         finally
-            lock.writeLock().unlock()
+            lock.unlock()
     /**
       * 
       *
       * @param pgid
       * @return
       */
-    def read(pgid:Long):Try[Block] = 
+    def readBlock(pgid:Long):Try[Block] = 
+        lock.lock()
         try 
-            lock.writeLock().lock()
-           
             var block:Option[Block] = None
             var cached:Boolean = false
             // query cache.
@@ -233,7 +226,7 @@ private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
                         case (Some(hd),None) => 
                             throw new Exception(s"not found block data for pgid ${pgid}")
                         case (Some(hd),Some(data)) =>
-                            var bk = get(hd.size)  // get a block from idle.
+                            var bk = getIdleBlock(hd.size)  // get a block from idle.
                             bk.header = hd 
                             bk.append(data)
                             block = Some(bk)
@@ -286,18 +279,18 @@ private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
         catch
             case e:Exception => Failure(e)
         finally
-            lock.writeLock().unlock()
+            lock.unlock()
     /**
       * 
       *
       * @param bk
       * @return
       */
-    def write(bk:Block):Try[Boolean] = 
+    def writeBlock(bk:Block):Try[Boolean] = 
         var writed:Boolean = false 
         try 
             fm.write(bk)
-            lock.writeLock().lock()
+            lock.lock()
             writed = true
             if !full then
                 if !blocks.contains(bk.id) then
@@ -311,17 +304,20 @@ private[platdb] class BlockBuffer(val maxsize:Int,var fm:FileManager):
             case e:Exception => return Failure(e)
         finally
             if writed then
-                lock.writeLock().unlock()
+                lock.unlock()
     //
     def sync():Unit = None
     //
     def close():Unit = 
-        link.clear()
-        pinned.clear()
-        blocks.clear()
-        idle.clear()
+        lock.lock()
+        try
+            link.clear()
+            pinned.clear()
+            blocks.clear()
+            idle.clear()
+        finally
+            lock.unlock()
 
-// 
 private[platdb] class FileManager(val path:String,val readonly:Boolean):
     var opend:Boolean = false
     var lockpath:String = ""

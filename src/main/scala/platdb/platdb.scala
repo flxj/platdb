@@ -129,7 +129,7 @@ class DB(val path:String)(using ops:Options):
     // freeList provides the ability to manage db file pages.
     private[platdb] var freelist:FreeManager = null
     // blockBuffer provides the function of caching the page of db files.
-    private[platdb] var blockBuffer:BlockBuffer = null
+    private[platdb] var blockBuffer:CacheManager = null
     // the latest meta information for the current DB.
     private[platdb] var meta:Meta = null
     // records read-only, read-write transaction objects that are currently open.
@@ -242,7 +242,7 @@ class DB(val path:String)(using ops:Options):
             m.pageId = 4
             m.root = new BucketValue(3L,0L,0L,Collection.typeBucket)
 
-            var bk = blockBuffer.get(DB.defaultPageSize)
+            var bk = blockBuffer.getIdleBlock(DB.defaultPageSize)
             bk.setid(m.id)
             //
             m.writeHeader(bk)
@@ -251,25 +251,25 @@ class DB(val path:String)(using ops:Options):
             m.checkSum = getCheckSum32(Array.concat(bkdata,metadata))
             //
             m.writeTo(bk)
-            blockBuffer.write(bk) match
+            blockBuffer.writeBlock(bk) match
                 case Success(_) => None
                 case Failure(e) => throw e 
 
         // 2.create a null freelist and write to file.
         var fl = new FreeArray(new BlockHeader(2L,Block.typeFreelist,0,0,0))
-        var fbk = blockBuffer.get(DB.defaultPageSize)
+        var fbk = blockBuffer.getIdleBlock(DB.defaultPageSize)
         fbk.setid(2)
         val n = fl.writeTo(fbk) 
-        blockBuffer.write(fbk) match
+        blockBuffer.writeBlock(fbk) match
             case Success(_) => None
             case Failure(e) => throw e 
 
         // 3.craete null root bucket.
         var root = new Node(new BlockHeader(3L,Block.typeLeaf,0,0,0))
-        var rbk = blockBuffer.get(DB.defaultPageSize)
+        var rbk = blockBuffer.getIdleBlock(DB.defaultPageSize)
         rbk.setid(3)
         root.writeTo(rbk)
-        blockBuffer.write(rbk) match
+        blockBuffer.writeBlock(rbk) match
             case Success(_) => None
             case Failure(e) => throw e
     
@@ -312,9 +312,9 @@ class DB(val path:String)(using ops:Options):
       * @return
       */
     def close(): Try[Unit] =
+        rwLock.writeLock().lock()
+        metaLock.lock()
         try 
-            rwLock.writeLock().lock()
-            metaLock.lock()
             if !closed then
                 openFlag = false
                 blockBuffer.close()
@@ -332,8 +332,10 @@ class DB(val path:String)(using ops:Options):
 
     /**
       * Opens and returns a transactional object, or exception information if the opening fails.
-      * If the writable parameter is true, the method creates a read-write transaction, and if false, it creates a read-only transaction. 
-      * Note that due to the transaction concurrency control mechanism, if a user wants to open a read-write transaction, 
+      * If the writable parameter is true, the method creates a read-write transaction, and 
+      * if false, it creates a read-only transaction. 
+      * Note that due to the transaction concurrency control mechanism, 
+      * if a user wants to open a read-write transaction, 
       * the method blocks until the previous read-write transaction is closed.
       *
       * @param writable
@@ -342,7 +344,8 @@ class DB(val path:String)(using ops:Options):
     def begin(writable:Boolean):Try[Transaction] = if writable then beginRWTx() else beginRTx()
     /**
       * This method is the same as the begin method, 
-      * except that a timeout parameter is provided to prevent constant blocking when opening a read-write transaction.
+      * except that a timeout parameter is provided to
+      *  prevent constant blocking when opening a read-write transaction.
       *
       * @param writable
       * @param timeout The unit is milliseconds
@@ -379,7 +382,8 @@ class DB(val path:String)(using ops:Options):
         
     /**
       * Retrieves the element of the specified key from the specified bucket.
-      * returns a key-value pair if the element exists; If the element is a child bucket, an exception is returned.
+      * returns a key-value pair if the element exists; If the element is a 
+      * child bucket, an exception is returned.
       *
       * @param bucket
       * @param key
@@ -409,7 +413,8 @@ class DB(val path:String)(using ops:Options):
                     tx.rollbackTx()
     /**
       * Retrieves multiple elements of the specified key from the specified bucket. 
-      * Returns a key-value pair sequence if the element exists; If the element contains subbuckets, an exception is returned.
+      * Returns a key-value pair sequence if the element exists; If the element contains 
+      * subbuckets, an exception is returned.
       *
       * @param bucket
       * @param keys
@@ -591,7 +596,8 @@ class DB(val path:String)(using ops:Options):
         )
     /**
       * Executes user functions in the context of a read-write transaction. 
-      * If the function does not produce any exceptions, the transaction is automatically committed; Otherwise, automatic rollback.
+      * If the function does not produce any exceptions, the transaction is 
+      * automatically committed; Otherwise, automatic rollback.
       *
       * @param op
       * @return
@@ -613,8 +619,10 @@ class DB(val path:String)(using ops:Options):
                     tx.rollbackTx()
     /**
       * Executes user functions in a read-only transaction context.
-      * If the function does not produce any exceptions, the transaction is automatically committed; Otherwise, automatic rollback.
-      * Performing a change database operation in a read-only transaction results in an exception.
+      * If the function does not produce any exceptions, the transaction 
+      * is automatically committed; Otherwise, automatic rollback.
+      * Performing a change database operation in a read-only transaction 
+      * results in an exception.
       *
       * @param op
       * @return
@@ -662,9 +670,9 @@ class DB(val path:String)(using ops:Options):
     private def beginRWTx():Try[Tx] =
         if ops.readonly then
             return Failure(DB.exNotAllowRWTx)
-        try 
-            rwLock.writeLock().lock()
-            metaLock.lock()
+        rwLock.writeLock().lock()
+        metaLock.lock()
+        try
             if closed then
                 throw DB.exDBClosed
             var tx = Tx(false,this)
@@ -681,8 +689,8 @@ class DB(val path:String)(using ops:Options):
       * @return
       */
     private def beginRTx():Try[Tx] =
+        metaLock.lock()
         try 
-            metaLock.lock()
             if closed then
                 throw DB.exDBClosed
             var tx = Tx(true,this)
@@ -715,8 +723,8 @@ class DB(val path:String)(using ops:Options):
       * @param m
       */
     private[platdb] def updateMeta(m:Meta):Unit =
+        metaLock.lock()
         try 
-            metaLock.lock()
             meta = m
         finally
             metaLock.unlock()

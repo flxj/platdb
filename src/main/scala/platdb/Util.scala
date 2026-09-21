@@ -110,3 +110,107 @@ private object Util:
                 if r != 0 then r else a.length - b.length
             else 
                 1
+
+//
+
+private[platdb] trait DoubleLinkedNode[A <: DoubleLinkedNode[A]]:
+    var prev: Option[A] = None
+    var next: Option[A] = None
+
+private[platdb] class DoubleLinkedList[A <: DoubleLinkedNode[A]]:
+    private var head: Option[A] = None
+    private var tail: Option[A] = None
+    private var count: Int = 0
+
+    def size: Int = count
+    def isEmpty: Boolean = head == None
+    def headNode: Option[A] = head
+    def tailNode: Option[A] = tail
+
+    def pushTail(node: A): Unit =
+        node.prev = tail
+        node.next = None
+        tail match
+            case Some(n) => n.next = Some(node)
+            case None => head = Some(node)
+        tail = Some(node)
+        count += 1
+
+    def pushHead(node: A): Unit =
+        node.prev = None
+        node.next = head
+        head match
+            case Some(n) => n.prev = Some(node)
+            case None => tail = Some(node)
+        head = Some(node)
+        count += 1
+
+    def remove(node: A): Unit =
+        node.prev match
+            case Some(n) => n.next = node.next
+            case None => head = node.next
+        node.next match
+            case Some(n) => n.prev = node.prev
+            case None => tail = node.prev
+
+        node.prev = None
+        node.next = None
+        count -= 1
+
+    def moveToTail(node: A): Unit =
+        val eq = tail match
+            case Some(n) => node == n 
+            case None => false
+
+        if !eq then
+            remove(node)
+            pushTail(node)
+
+    def moveToHead(node: A): Unit =
+        val eq = head match
+            case Some(n) => node == n 
+            case None => false
+        
+        if !eq then
+            remove(node)
+            pushHead(node)
+
+    def popHead(): Option[A] =
+        val h = head
+        h match
+            case Some(n) => remove(n)
+            case None => None
+        h
+
+    def popTail(): Option[A] =
+        val t = tail
+        t match
+            case Some(n) => remove(n)
+            case None => None
+        t
+
+    def clear(): Unit =
+        var cur = head
+        while cur != None do
+            cur = cur match
+                case Some(n) => 
+                    val nxt = n.next
+                    n.prev = None 
+                    n.next = None
+                    nxt
+                case None => None
+            
+        head = None
+        tail = None
+        count = 0
+
+    def iterator: Iterator[A] = new Iterator[A]:
+        private var cur = head
+        def hasNext: Boolean = cur != None
+        def next(): A =
+            cur match 
+                case Some(n) => 
+                    cur = n.next
+                    n
+                case None => null.asInstanceOf[A]
+    

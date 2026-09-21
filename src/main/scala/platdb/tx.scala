@@ -16,7 +16,7 @@
 
 package platdb
 
-import scala.collection.mutable.{Map,ArrayBuffer}
+import scala.collection.mutable.{SortedMap,ArrayBuffer}
 import scala.util.Failure
 import scala.util.Success
 import scala.util.Try
@@ -260,7 +260,7 @@ private class Tx(val readonly:Boolean) extends Transaction:
     var meta:Meta = null
     var root:BTreeBucket = null
     // cache dirty blocks,rebalance(merge/split) bucket maybe product them.
-    var blocks:Map[Long,Block] = Map[Long,Block]()
+    var blocks:SortedMap[Long,Block] = SortedMap[Long,Block]()
 
     def id:Long = meta.txid
     def closed:Boolean = db == null
@@ -361,7 +361,7 @@ private class Tx(val readonly:Boolean) extends Transaction:
             db.removeRTx()
 
         for (id,bk)<- blocks do
-            db.blockBuffer.revert(bk.id)
+            db.blockBuffer.putBlock(bk.id)
         val txid = id
         db = null
         meta = null
@@ -377,7 +377,7 @@ private class Tx(val readonly:Boolean) extends Transaction:
         val sz = db.freelist.size()
         val pgid = allocate(sz)
         
-        var bk = db.blockBuffer.get(sz)
+        var bk = db.blockBuffer.getIdleBlock(sz)
         bk.setid(pgid)
         db.freelist.writeTo(bk)
         if meta.pageId > tailId then
@@ -385,23 +385,19 @@ private class Tx(val readonly:Boolean) extends Transaction:
                 case Success(_) => None
                 case Failure(e) => throw new Exception(s"write freelist failed:${e.getMessage()}")
         // write new freelsit to file
-        db.blockBuffer.write(bk) match
+        db.blockBuffer.writeBlock(bk) match
             case Failure(e) => throw e
             case Success(flag) =>
                 if !flag then
                     throw new Exception(s"tx ${id} write freelist to db file failed")
                 meta.freelistId = bk.id
                 db.freelist.set(bk.id,bk.header.overflow)
-                db.blockBuffer.revert(bk.id)
+                db.blockBuffer.putBlock(bk.id)
     // write all dirty blocks to db file
     private def writeBlock():Unit =
-        var arr = new ArrayBuffer[Block]()
-        for (id,bk) <- blocks do
-            arr+=bk 
-        arr = arr.sortWith((b1:Block,b2:Block) => b1.id < b2.id)
         try
-            for bk <- arr do
-                db.blockBuffer.write(bk) match
+            for (_,bk) <- blocks do
+                db.blockBuffer.writeBlock(bk) match
                     case Failure(e) => throw e
                     case Success(flag) =>
                         if !flag then
@@ -409,14 +405,14 @@ private class Tx(val readonly:Boolean) extends Transaction:
         catch
             case e:Exception => throw e
         finally
-            for bk <- arr do
-                db.blockBuffer.revert(bk.id)
+            for (_,bk) <- blocks do
+                db.blockBuffer.putBlock(bk.id)
  
     /**
       * write meta blocks to db file.
       */
     private def writeMeta():Unit  =
-        var bk = db.blockBuffer.get(meta.size())
+        var bk = db.blockBuffer.getIdleBlock(meta.size())
         bk.setid(meta.id)
         meta.writeHeader(bk)
         val bkdata = bk.header.getBytes()
@@ -424,7 +420,7 @@ private class Tx(val readonly:Boolean) extends Transaction:
         meta.checkSum = getCheckSum32(Array.concat(bkdata,metadata))
         meta.writeTo(bk)
         try
-            db.blockBuffer.write(bk) match
+            db.blockBuffer.writeBlock(bk) match
                 case Failure(e) => throw e
                 case Success(flag) =>
                     if !flag then
@@ -433,7 +429,7 @@ private class Tx(val readonly:Boolean) extends Transaction:
         catch
             case e:Exception => throw e
         finally
-            db.blockBuffer.revert(bk.id)
+            db.blockBuffer.putBlock(bk.id)
     /**
       * get block by bid
       *
@@ -445,7 +441,7 @@ private class Tx(val readonly:Boolean) extends Transaction:
             blocks.get(pgid) match
                 case Some(bk) =>  return Success(bk)
                 case None => return Failure(new Exception(s"null block cache $pgid"))
-        db.blockBuffer.read(pgid) match
+        db.blockBuffer.readBlock(pgid) match
             case Success(bk) => 
                 blocks(pgid) = bk 
                 Success(bk)
@@ -461,7 +457,7 @@ private class Tx(val readonly:Boolean) extends Transaction:
             case Failure(e) => None 
             case Success(bk) => 
                 db.freelist.reclaim(id,bk.header.pgid,bk.header.overflow)
-                db.blockBuffer.revert(pgid)
+                db.blockBuffer.putBlock(pgid)
                 blocks.remove(pgid)
 
     /**
@@ -472,13 +468,13 @@ private class Tx(val readonly:Boolean) extends Transaction:
       */
     def allocate(size:Int):Long =
         var n = size/DB.pageSize
-        if size%DB.pageSize!=0 then n+=1
+        if size%DB.pageSize != 0 then n+=1
         // try to allocate space from frreelist
         var pgid = db.freelist.allocate(id,n)
         // if freelist not have space,we need allocate from db tail and grow the db file.
         if pgid < 0 then
             pgid = meta.pageId
-            meta.pageId+=n
+            meta.pageId += n
         pgid
     
     /**
@@ -489,7 +485,7 @@ private class Tx(val readonly:Boolean) extends Transaction:
       * @return
       */
     def makeBlock(pgid:Long,size:Int):Block = 
-        var bk = db.blockBuffer.get(size)
+        var bk = db.blockBuffer.getIdleBlock(size)
         bk.reset()
         bk.setid(pgid)
         blocks(pgid) = bk
@@ -514,7 +510,7 @@ private class Tx(val readonly:Boolean) extends Transaction:
             f.setWritable(true)
             // 1. copy meta page
             writer = new RandomAccessFile(f,"rw")
-            var bk = db.blockBuffer.get(meta.size())
+            var bk = db.blockBuffer.getIdleBlock(meta.size())
             var buf = new Array[Byte](DB.pageSize)
             // meta0
             bk.setid(0L)
