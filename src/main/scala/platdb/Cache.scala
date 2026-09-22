@@ -167,16 +167,11 @@ private[platdb] class BlockBuffer(val poolSize: Int,val fm:FileManager) extends 
                 cached = true
                 block = bf.block
             else
-                fm.read(pgid) match
-                    case (None,_) => 
-                        throw new Exception(s"not found block header for pgid ${pgid}")
-                    case (Some(hd),None) => 
-                        throw new Exception(s"not found block data for pgid ${pgid}")
-                    case (Some(hd),Some(data)) =>
-                        var bk = getIdleBlock(hd.size)  // get a block from idle.
-                        bk.header = hd 
-                        bk.append(data)
-                        block = bk
+                val (hd,data) = fm.readBlock(pgid) 
+                val bk = getIdleBlock(hd.size)  // get a block from idle.
+                bk.header = hd 
+                bk.append(data)
+                block = bk
             if block == null then
                 Failure(new Exception(s"not found block for paid $pgid"))
             else
@@ -211,7 +206,7 @@ private[platdb] class BlockBuffer(val poolSize: Int,val fm:FileManager) extends 
     def writeBlock(bk:Block):Try[Boolean] = 
         var writed:Boolean = false 
         try 
-            fm.write(bk)
+            fm.writeBlock(bk)
             lruLock.lock()
             writed = true
             if !full then
