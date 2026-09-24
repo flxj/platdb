@@ -199,16 +199,18 @@ Additionally, it should be noted that the results of querying data objects in a 
 Platdb supports some common data structures:
 
 
-`Bucket`: An ordered set of key-values (similar to TreeMap in scala/Java), where both key and value are string type data (using platform default encoding), and buckets also support nesting.
+`Bucket`: An ordered set of key-values (similar to TreeMap in scala/Java), where both key and value are string type data (note: platdb using utf8 as default encoding), and buckets also support nesting.
 
 
 `BSet`: An ordered set of strings (similar to TreeSet in scala/Java).
 
 
-`KList`: A string list that can be used to retrieve elements using subscripts, similar to Scala's ArrayBuffer and List.
+`BList`: A string list that can be used to retrieve elements using subscripts, similar to Scala's ArrayBuffer and List.
 
 
 `Region`: A spatial index based on RTree, where each Region object can be used to represent an n-dimensional spatial region, providing the ability to add, delete, modify, and query spatial objects.
+
+`RawBucket`: Ordered key value collection, where both key and value are Byte array data, suitable for scenarios that require direct access to the original byte array.
 
 
 The common operations for buckets are as follows
@@ -681,8 +683,6 @@ docker run --name xxxxx -p 8080:8080 -v /data:/var/lib/platdb image-name
 
 ### 👇 TODO
 
-❎ Add some test cases
+❎ Add some test cases, improve testing coverage
 
-❎ Implement some memory data structures
-
-❎ Implement a distributed version of platdb cluster
+❎ Add statistical indicators

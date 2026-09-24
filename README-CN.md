@@ -179,14 +179,15 @@ finally
 
 platdb支持一些常见的数据结构:
 
-`Bucket`:有序的key-value集合（可类比scala/java的TreeMap）其中key,value均为string类型数据(使用平台默认编码)，Bucket也支持嵌套。
+`Bucket`:有序的key-value集合（可类比scala/java的TreeMap）其中key,value均为string类型数据(使用utf8编码)，Bucket也支持嵌套。
 
-`BSet`：有序的字符串集合(可类比scala/java的TreeSet)。
+`BSet`：有序的字符串集合(可类比scala/java的TreeSet),底层基于Bucket实现。
 
-`KList`: 字符串列表，可使用下标检索元素，类比scala的ArrayBuffer和List。
+`BList`: 字符串列表，可使用下标检索元素，类比scala的ArrayBuffer和List，底层基于Bucket实现。
 
 `Region`：基于RTree的空间索引，每个Region对象可用来表示一个n维空间区域，提供对空间对象的增删改查操作能力。
 
+`RawBucket`:有序的key-value集合，其中key,value均为Byte数组类型数据，适用于需要直接存取原始比特串的场景。
 
 Bucket常见操作如下
 ```scala
@@ -284,7 +285,7 @@ db.update(
 更多关于set的方法介绍，参考[xxxxxxxxxx]
 
 
-KList常见操作如下所示
+BList常见操作如下所示
 ```scala
 import platdb._
 import platdb.Collection._
