@@ -1121,7 +1121,7 @@ trait RawIterator extends Iterator[Option[(Array[Byte],Array[Byte])]]:
     def hasPrev():Boolean 
     def prev():Option[(Array[Byte],Array[Byte])]
 
-private class RawRecord(var node:Option[RawNode],var block:Option[Block],var index:Int):
+private class RawRoadmap(var node:Option[RawNode],var block:Option[Block],var index:Int):
     def isLeaf:Boolean =(node,block) match
         case (None,None) => false
         case (Some(n),_) => n.isLeaf
@@ -1137,18 +1137,18 @@ private class RawRecord(var node:Option[RawNode],var block:Option[Block],var ind
 
 private class BTreeRawBucketIter(private var bucket:BTreeRawBucket) extends RawIterator:
     // use a stack to record serach path.
-    private var stack:ArrayBuffer[RawRecord] = new ArrayBuffer[RawRecord]()
+    private var stack:ArrayBuffer[RawRoadmap] = new ArrayBuffer[RawRoadmap]()
     private var idx:Int = 0
-    private def top:Option[RawRecord] = if idx > 0 then Some(stack(idx-1)) else None
+    private def top:Option[RawRoadmap] = if idx > 0 then Some(stack(idx-1)) else None
     private def empty:Boolean = idx == 0
-    private def pop:RawRecord = 
+    private def pop:RawRoadmap = 
         if idx > 0 then 
             val r = stack(idx-1)
             idx -= 1
             r 
         else 
             null 
-    private def push(r:RawRecord):Unit = 
+    private def push(r:RawRoadmap):Unit = 
         if idx == stack.length then 
             stack.append(r)
         else 
@@ -1177,7 +1177,7 @@ private class BTreeRawBucketIter(private var bucket:BTreeRawBucket) extends RawI
             return None
         clear()
         val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
-        push(new RawRecord(n,b,0))
+        push(new RawRoadmap(n,b,0))
         moveToFirst()
         top match
             case Some(r) => 
@@ -1211,7 +1211,7 @@ private class BTreeRawBucketIter(private var bucket:BTreeRawBucket) extends RawI
         else
             if empty then 
                 val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
-                push(new RawRecord(n,b,-1))
+                push(new RawRoadmap(n,b,-1))
             var i = idx-1
             while i >= 0 do 
                 val r = stack(i)
@@ -1227,7 +1227,7 @@ private class BTreeRawBucketIter(private var bucket:BTreeRawBucket) extends RawI
             return None
         clear()
         val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
-        var r = new RawRecord(n,b,0)
+        var r = new RawRoadmap(n,b,0)
         r.index = r.count-1
         push(r)
         moveToLast()
@@ -1263,7 +1263,7 @@ private class BTreeRawBucketIter(private var bucket:BTreeRawBucket) extends RawI
         else
             if empty then
                 val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
-                var r = new RawRecord(n,b,0)
+                var r = new RawRoadmap(n,b,0)
                 r.index = r.count
                 push(r)
             var i = idx-1
@@ -1331,7 +1331,7 @@ private class BTreeRawBucketIter(private var bucket:BTreeRawBucket) extends RawI
                             case None => return 
                 if child > DB.meta1Page then 
                     val (n,b) = bucket.nodeOrBlock(child) 
-                    push(new RawRecord(n,b,0))
+                    push(new RawRoadmap(n,b,0))
                     r = stack(idx-1)
                 else
                     throw new Exception(s"moveToFirst visit reversed page $child")
@@ -1352,7 +1352,7 @@ private class BTreeRawBucketIter(private var bucket:BTreeRawBucket) extends RawI
                             case None => return 
                 if child > DB.meta1Page then 
                     val (n,b) = bucket.nodeOrBlock(child)  // page id 0 or 1 reserved for meta.
-                    val p = new RawRecord(n,b,0)
+                    val p = new RawRoadmap(n,b,0)
                     p.index = p.count-1 
                     push(p)
                     r = stack(idx-1)
@@ -1400,11 +1400,11 @@ private class BTreeRawBucketIter(private var bucket:BTreeRawBucket) extends RawI
     private def seek(key:Array[Byte],id:Long):Unit =
         val r = bucket.nodeOrBlock(id) match
             case (None,None) => throw new Exception(s"not found node or block for id:$id")
-            case (Some(n),_) => new RawRecord(Some(n),None,0)
+            case (Some(n),_) => new RawRoadmap(Some(n),None,0)
             case (_,Some(b)) =>
                 if b.btype != Block.typeBranch && b.btype != Block.typeLeaf then 
                     throw new Exception(s"page ${id} invalid page type:${b.btype}")
-                new RawRecord(None,Some(b),0)
+                new RawRoadmap(None,Some(b),0)
         push(r)
         if r.isLeaf then 
             seekOnLeaf(key)

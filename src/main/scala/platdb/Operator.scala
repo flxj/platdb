@@ -16,8 +16,20 @@
 
 package platdb
 
-
+private[platdb] class Record(val offset:Array[Int],val row:Array[Byte]):
+    def get(i:Int):Array[Byte] = ???
+    def columns:Array[Array[Byte]] = ???
+    
 private[platdb] trait Operator:
     def open():Unit
-    def next():Array[Byte]
+    def next():Record
     def close():Unit
+
+private[platdb] class SeqScanOperator(val table:RawBucket) extends Operator:
+    var iter:RawIterator = null
+    def open():Unit = iter = table.iterator
+    def next():Record = 
+        iter.next() match
+            case None => null 
+            case Some(k,v) => new Record(null,v)
+    def close():Unit = iter = null

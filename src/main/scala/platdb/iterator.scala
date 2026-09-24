@@ -85,9 +85,8 @@ trait PlatDBIterable:
       * @return
       */
     def iterator:CollectionIterator
-
-
-private class Record(var node:Option[Node],var block:Option[Block],var index:Int):
+  
+private class Roadmap(var node:Option[Node],var block:Option[Block],var index:Int):
     def isLeaf:Boolean =
         (node,block) match
             case (None,None) => false
@@ -109,8 +108,8 @@ private class Record(var node:Option[Node],var block:Option[Block],var index:Int
   * @param bucket
   */
 private[platdb] class BTreeBucketIter(bucket:BTreeBucket) extends CollectionIterator:
-    // use a stack to record serach path.
-    private var stack:List[Record] = List[Record]()
+    // use a stack to Roadmap serach path.
+    private var stack:List[Roadmap] = List[Roadmap]()
     /**
       * moves the iterator to a given key and returns it.
       * If the key does not exist then the next key is used. If no keys follow, a None key is returned.
@@ -121,7 +120,7 @@ private[platdb] class BTreeBucketIter(bucket:BTreeBucket) extends CollectionIter
       */
     def find(key:String):Option[(String,String)] = 
         if bucket.closed then return None
-        stack = List[Record]()
+        stack = List[Roadmap]()
         seek(key,bucket.bkv.root)
         current() match 
             case None => None 
@@ -139,10 +138,10 @@ private[platdb] class BTreeBucketIter(bucket:BTreeBucket) extends CollectionIter
       */
     def first():Option[(String,String)] = 
         if bucket.closed then return None
-        stack = List[Record]()
+        stack = List[Roadmap]()
         
         val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
-        stack:+=new Record(n,b,0)
+        stack:+=new Roadmap(n,b,0)
         moveToFirst()
         
         val r = stack.last
@@ -182,9 +181,9 @@ private[platdb] class BTreeBucketIter(bucket:BTreeBucket) extends CollectionIter
             return false
         if stack.length == 0 then
             val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
-            stack:+=new Record(n,b,-1)
+            stack:+=new Roadmap(n,b,-1)
 
-        var tmpStack = List[Record]()
+        var tmpStack = List[Roadmap]()
         tmpStack ++= stack
         while tmpStack.length > 0 do 
             val r = tmpStack.last
@@ -203,9 +202,9 @@ private[platdb] class BTreeBucketIter(bucket:BTreeBucket) extends CollectionIter
       */
     def last():Option[(String,String)]  = 
         if bucket.closed then return None
-        stack = List[Record]()
+        stack = List[Roadmap]()
         val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
-        var r = new Record(n,b,0)
+        var r = new Roadmap(n,b,0)
         r.index = r.count-1
         moveToLast()
 
@@ -246,10 +245,10 @@ private[platdb] class BTreeBucketIter(bucket:BTreeBucket) extends CollectionIter
             return false 
         if stack.length == 0 then
             val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
-            var r = new Record(n,b,0)
+            var r = new Roadmap(n,b,0)
             r.index = r.count
             stack:+=r
-        var tmpStack = List[Record]()
+        var tmpStack = List[Roadmap]()
         tmpStack++=stack
         while tmpStack.length > 0 do 
             val r = tmpStack.last
@@ -267,7 +266,7 @@ private[platdb] class BTreeBucketIter(bucket:BTreeBucket) extends CollectionIter
       */
     private[platdb] def search(key:String):(Option[(String,String)],Byte) =
         if bucket.closed then return (None,0)
-        stack = List[Record]()
+        stack = List[Roadmap]()
         seek(key,bucket.bkv.root)
         current() match
             case None => (None,0)
@@ -328,7 +327,7 @@ private[platdb] class BTreeBucketIter(bucket:BTreeBucket) extends CollectionIter
                         case None => return 
             if child>DB.meta1Page then 
                 val (n,b) = bucket.nodeOrBlock(child) 
-                stack :+= new Record(n,b,0)
+                stack :+= new Roadmap(n,b,0)
                 r = stack.last
             else
                 throw new Exception(s"moveToFirst visit reversed page $child")
@@ -351,7 +350,7 @@ private[platdb] class BTreeBucketIter(bucket:BTreeBucket) extends CollectionIter
                         case None => return 
             if child>DB.meta1Page then 
                 val (n,b) = bucket.nodeOrBlock(child)  // page id 0 or 1 reserved for meta.
-                r = new Record(n,b,0)
+                r = new Roadmap(n,b,0)
                 r.index = r.count-1 
                 stack :+= r
             else
@@ -405,14 +404,14 @@ private[platdb] class BTreeBucketIter(bucket:BTreeBucket) extends CollectionIter
       * @param id
       */
     private def seek(key:String,id:Long):Unit =
-        var r:Record = null
+        var r:Roadmap = null
         bucket.nodeOrBlock(id) match
             case (None,None) => throw new Exception(s"not found node or block for id:$id")
-            case (Some(n),_) => r = new Record(Some(n),None,0)
+            case (Some(n),_) => r = new Roadmap(Some(n),None,0)
             case (_,Some(b)) =>
                 if b.btype != Block.typeBranch && b.btype != Block.typeLeaf then 
                     throw new Exception(s"page ${id} invalid page type:${b.btype}")
-                r = new Record(None,Some(b),0)
+                r = new Roadmap(None,Some(b),0)
         stack:+=r
         if r.isLeaf then 
             seekOnLeaf(key)
@@ -480,20 +479,20 @@ private[platdb] class BTreeBucketIter(bucket:BTreeBucket) extends CollectionIter
                 stack = stack.init
                 stack :+= r
                 seek(key,elems(idx).child)
-/////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////
 private[platdb] class BTreeBucketIter2(bucket:BTreeBucket) extends CollectionIterator:
-    // use a stack to record serach path.
-    private var stack:ArrayBuffer[Record] = new ArrayBuffer[Record]()
+    // use a stack to Roadmap serach path.
+    private var stack:ArrayBuffer[Roadmap] = new ArrayBuffer[Roadmap]()
     private var idx:Int = 0
-    private def top:Option[Record] = if idx > 0 then Some(stack(idx-1)) else None
+    private def top:Option[Roadmap] = if idx > 0 then Some(stack(idx-1)) else None
     private def empty:Boolean = idx == 0
-    private def pop:Record = 
-        var r:Record = null
+    private def pop:Roadmap = 
+        var r:Roadmap = null
         if idx > 0 then 
             r = stack(idx-1)
             idx -= 1
         r
-    private def push(r:Record):Unit = 
+    private def push(r:Roadmap):Unit = 
         if idx == stack.length then 
             stack.append(r)
         else 
@@ -535,7 +534,7 @@ private[platdb] class BTreeBucketIter2(bucket:BTreeBucket) extends CollectionIte
             return None
         clear()
         val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
-        push(new Record(n,b,0))
+        push(new Roadmap(n,b,0))
         moveToFirst()
         top match
             case Some(r) => 
@@ -578,7 +577,7 @@ private[platdb] class BTreeBucketIter2(bucket:BTreeBucket) extends CollectionIte
         else
             if empty then 
                 val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
-                push(new Record(n,b,-1))
+                push(new Roadmap(n,b,-1))
             var i = idx-1
             while i >= 0 do 
                 val r = stack(i)
@@ -600,7 +599,7 @@ private[platdb] class BTreeBucketIter2(bucket:BTreeBucket) extends CollectionIte
             return None
         clear()
         val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
-        var r = new Record(n,b,0)
+        var r = new Roadmap(n,b,0)
         r.index = r.count-1
         push(r)
         moveToLast()
@@ -645,7 +644,7 @@ private[platdb] class BTreeBucketIter2(bucket:BTreeBucket) extends CollectionIte
         else
             if empty then
                 val (n,b) = bucket.nodeOrBlock(bucket.bkv.root)
-                var r = new Record(n,b,0)
+                var r = new Roadmap(n,b,0)
                 r.index = r.count
                 push(r)
             var i = idx-1
@@ -725,7 +724,7 @@ private[platdb] class BTreeBucketIter2(bucket:BTreeBucket) extends CollectionIte
                             case None => return 
                 if child > DB.meta1Page then 
                     val (n,b) = bucket.nodeOrBlock(child) 
-                    push(new Record(n,b,0))
+                    push(new Roadmap(n,b,0))
                     r = stack(idx-1)
                 else
                     throw new Exception(s"moveToFirst visit reversed page $child")
@@ -748,7 +747,7 @@ private[platdb] class BTreeBucketIter2(bucket:BTreeBucket) extends CollectionIte
                             case None => return 
                 if child > DB.meta1Page then 
                     val (n,b) = bucket.nodeOrBlock(child)  // page id 0 or 1 reserved for meta.
-                    val p = new Record(n,b,0)
+                    val p = new Roadmap(n,b,0)
                     p.index = p.count-1 
                     push(p)
                     r = stack(idx-1)
@@ -807,11 +806,11 @@ private[platdb] class BTreeBucketIter2(bucket:BTreeBucket) extends CollectionIte
     private def seek(key:String,id:Long):Unit =
         val r = bucket.nodeOrBlock(id) match
             case (None,None) => throw new Exception(s"not found node or block for id:$id")
-            case (Some(n),_) => new Record(Some(n),None,0)
+            case (Some(n),_) => new Roadmap(Some(n),None,0)
             case (_,Some(b)) =>
                 if b.btype != Block.typeBranch && b.btype != Block.typeLeaf then 
                     throw new Exception(s"page ${id} invalid page type:${b.btype}")
-                new Record(None,Some(b),0)
+                new Roadmap(None,Some(b),0)
         push(r)
         if r.isLeaf then 
             seekOnLeaf(key)
