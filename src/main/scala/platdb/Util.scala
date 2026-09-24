@@ -16,6 +16,8 @@
 
 package platdb
 
+import scala.util.Random
+import scala.compiletime.ops.double
 import scala.util.control.Breaks._
 import java.nio.ByteBuffer
 
@@ -112,7 +114,6 @@ private object Util:
                 1
 
 //
-
 private[platdb] trait DoubleLinkedNode[A <: DoubleLinkedNode[A]]:
     var prev: Option[A] = None
     var next: Option[A] = None
@@ -122,7 +123,7 @@ private[platdb] class DoubleLinkedList[A <: DoubleLinkedNode[A]]:
     private var tail: Option[A] = None
     private var count: Int = 0
 
-    def size: Int = count
+    def length: Int = count
     def isEmpty: Boolean = head == None
     def headNode: Option[A] = head
     def tailNode: Option[A] = tail
@@ -213,4 +214,185 @@ private[platdb] class DoubleLinkedList[A <: DoubleLinkedNode[A]]:
                     cur = n.next
                     n
                 case None => null.asInstanceOf[A]
-    
+
+private[platdb] class SkipListNode[K, V](var level: Int,val key: K,var value: V):
+    var next: Array[Option[SkipListNode[K, V]]] = Array.fill(level + 1)(None)
+
+private[platdb] class SkipList[K, V](maxLevel: Int = 16,probability: Double = 0.5)(using ord: Ordering[K]):
+    private val head: SkipListNode[K, V] =
+        new SkipListNode[K, V](maxLevel,null.asInstanceOf[K], null.asInstanceOf[V])
+
+    private val rand = new Random()
+    private var curLevel: Int = 0
+    private var size: Int = 0
+
+    def contains(key: K): Boolean = get(key).isDefined
+    def length: Int = size
+
+    private def randomLevel(): Int =
+        var level = 0
+        while level < maxLevel && rand.nextDouble() < probability do
+            level += 1
+        level
+
+    private def findPrev(key: K): Array[Option[SkipListNode[K, V]]] =
+        val preds:Array[Option[SkipListNode[K, V]]] = Array.fill(maxLevel + 1)(None)
+        var cur: SkipListNode[K, V] = head
+        var i = curLevel
+        while i >= 0 do
+            breakable(
+                while true do cur.next(i) match
+                    case None => break()
+                    case Some(node) => 
+                        if ord.lt(node.key,key) then
+                            cur = node 
+                        else
+                            break()
+            )
+            preds(i) = Some(cur)
+            i -= 1
+        preds
+
+    def put(key: K, value: V): Unit =
+        val preds = findPrev(key)
+        val node = preds(0) match
+            case None => None
+            case Some(n) => n.next(0)
+        
+        node match
+            case None => None 
+            case Some(n) => 
+                if ord.equiv(n.key,key) then
+                    n.value = value
+                    return
+
+        val newLevel = randomLevel()
+        if newLevel > curLevel then
+            var i = curLevel + 1
+            while i <= newLevel do
+                preds(i) = Some(head)
+                i += 1
+            curLevel = newLevel
+
+        val newNode = new SkipListNode[K, V](newLevel,key, value)
+        var i = 0
+        while i <= newLevel do
+            preds(i) match
+                case None => None 
+                case Some(node) => 
+                    newNode.next(i) = node.next(i)
+                    node.next(i) = Some(newNode)
+            i += 1
+        size += 1
+
+    def get(key: K): Option[V] =
+        var cur: SkipListNode[K, V] = head
+        var i = curLevel
+        while i >= 0 do
+            breakable(
+                while true do cur.next(i) match
+                    case None => break()
+                    case Some(node) => 
+                        if ord.lt(node.key,key) then 
+                            cur = node 
+                        else
+                            break()
+            )
+            i -= 1
+
+        cur.next(0) match
+            case None => None 
+            case Some(node) =>
+                if ord.equiv(node.key, key) then
+                    Some(node.value)
+                else
+                    None
+
+    def remove(key: K): Boolean =
+        val preds = findPrev(key)
+        val target = preds(0) match
+            case None => None
+            case Some(node) => node.next(0)
+        
+        target match
+            case None => return false 
+            case Some(node) => 
+                if !ord.equiv(node.key, key) then
+                    false
+                else
+                    var i = 0 
+                    while i <= curLevel do preds(i) match
+                        case None => None
+                        case Some(n) => n.next(i) match
+                            case None => None
+                            case Some(nxt) => 
+                                if nxt eq node then 
+                                    n.next(i) = node.next(i)
+
+                    while curLevel > 0 && head.next(curLevel) == None do
+                        curLevel -= 1
+
+                    size -= 1
+                    true
+    //
+    def getPrevNode(key:K):Option[SkipListNode[K,V]] = findPrev(key)(0)
+    //
+    def getNode(key:K):Option[SkipListNode[K,V]] = 
+        val preds = findPrev(key)
+        preds(0) match
+            case None => None
+            case Some(node) => node.next(0)
+    //
+    def putNode(newNode:SkipListNode[K,V]):Unit = 
+        val preds = findPrev(newNode.key)
+        val node = preds(0) match
+            case None => None
+            case Some(n) => n.next(0)
+        
+        node match
+            case None => None 
+            case Some(n) => 
+                if ord.equiv(n.key,newNode.key) then
+                    n.value = newNode.value
+                    return
+
+        val newLevel = randomLevel()
+        if newLevel > curLevel then
+            var i = curLevel + 1
+            while i <= newLevel do
+                preds(i) = Some(head)
+                i += 1
+            curLevel = newLevel
+        
+        newNode.level = newLevel
+        newNode.next = Array.fill(newLevel + 1)(None)
+
+        var i = 0
+        while i <= newLevel do
+            preds(i) match
+                case None => None 
+                case Some(node) => 
+                    newNode.next(i) = node.next(i)
+                    node.next(i) = Some(newNode)
+            i += 1
+        size += 1
+    //
+    def iterator: Iterator[V] = new Iterator[V]:
+        private var cur = head.next(0)
+        def hasNext: Boolean = cur != None
+        def next(): V =
+            cur match 
+                case Some(node) => 
+                    cur = node.next(0)
+                    node.value
+                case None => null.asInstanceOf[V]
+    //
+    def nodeIterator: Iterator[SkipListNode[K,V]] = new Iterator[SkipListNode[K,V]]:
+        private var cur = head.next(0)
+        def hasNext: Boolean = cur != None
+        def next(): SkipListNode[K,V] =
+            cur match 
+                case Some(node) => 
+                    cur = node.next(0)
+                    node
+                case None => null.asInstanceOf[SkipListNode[K,V]]

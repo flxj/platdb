@@ -127,7 +127,7 @@ class LRU[K, V](val capacity: Int,var onEvict: (K, V) => Unit = (_:K, _:V) => ()
             lock.unlock()
 
     private def evictIfNeeded(): Unit =
-        while list.size > capacity do
+        while list.length > capacity do
             list.popHead() match
                 case None => None
                 case Some(victim) => 

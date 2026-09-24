@@ -117,11 +117,11 @@ private[platdb] class BlockBuffer(val poolSize: Int,val fm:FileManager) extends 
     private def full:Boolean = index.size() >= poolSize
     
     private def drop(bf:BlockFrame):Unit=
-        if idle.size >= idleSize then
+        if idle.length >= idleSize then
             return None
         idleLock.lock()
         try
-            if idle.size < idleSize then
+            if idle.length < idleSize then
                 idle.pushHead(bf)
         finally
             idleLock.unlock()

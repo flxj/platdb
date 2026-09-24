@@ -17,10 +17,12 @@
 package platdb
 
 import java.nio.ByteBuffer
-import scala.collection.mutable.{ArrayBuffer,Map}
+import scala.collection.mutable.{ArrayBuffer,Map,SortedMap}
+import scala.jdk.CollectionConverters.*
 import scala.util.control.Breaks._
 import scala.util.{Try,Success,Failure}
 import scala.compiletime.ops.double
+import java.util.Comparator
 
 private[platdb] trait FreeManager extends Persistence:
     def pageId:Long 
@@ -44,6 +46,141 @@ private[platdb] trait FreeManager extends Persistence:
     // Rollback the allocation or recycling operation of a transaction.
     def rollback(txid:Long):Unit
 
+// record freelist basic info, for example, count | type
+private case class FreelistHeader(count:Long,ftype:Byte)
+// record a file free page fragement.
+private class FreeFragment(var start:Long,var end:Long,var length:Int) extends DoubleLinkedNode[FreeFragment]:
+    override def toString(): String = s"($start,$end,$length)"
+    def reset(s:Long,e:Long):Unit =
+        start = s 
+        end = e 
+        length = (e-s+1).toInt
+    def overlap(f:FreeFragment):Boolean = !(end < f.start || f.end < start)
+
+private object FreeList:
+    val headSize = 9
+    val elemSize = 12
+    val listType:Byte = 0
+    val hashType:Byte = 1
+    // parse freelist from block data.
+    def apply(bk:Block):Option[FreeList] = 
+        if bk.header.flag != Block.typeFreelist then
+            throw new Exception(s"block type is not freelist ${bk.header.flag}") 
+        bk.getBytes() match
+            case None => None 
+            case Some(data) => 
+                var freelist = new FreeList(bk.header)
+                if data.length < headSize then
+                    throw new Exception(s"illegal freelist header data length ${data.length}") 
+                FreeList.bytesToHeader(data.slice(0,headSize)) match
+                    case None => throw new Exception("illegal freelist header data")
+                    case Some(hd) =>
+                        if data.length != headSize+(hd.count*elemSize) then
+                            throw new Exception(s"illegal freelist data length ${data.length},except ${headSize+(hd.count*elemSize)}") 
+                        
+                        var idx = headSize+elemSize
+                        while idx <= data.length do
+                            FreeList.bytesToElem(data.slice(idx-elemSize,idx)) match
+                                case None => throw new Exception("illegal freelist element data")
+                                case Some(st,ed) =>
+                                    val ff = new FreeFragment(st,ed,(ed-st).toInt)
+                                    freelist.idle.pushTail(ff)
+                                    idx += elemSize
+                        freelist.reorder(false)
+                        Some(freelist)
+    // parse freelist from raw bytes data.
+    def apply(data:Array[Byte]):Option[FreeList] =
+        if data.length < BlockHeader.size + FreeList.headSize then
+            throw new Exception(s"illegal freelist data length ${data.length}")
+        BlockHeader(data.slice(0,BlockHeader.size)) match
+            case None => throw new Exception("parse freelist block header data failed")
+            case Some(hd) =>
+                var bk = new Block(data.length)
+                bk.header = hd
+                bk.write(0,data)
+                apply(bk)
+    //
+    def bytesToHeader(data:Array[Byte]):Option[FreelistHeader] =
+        if data.length != headSize then
+            throw new Exception("illegal freelist header data")
+        val a = (data(0) & 0xff) << 24 | (data(1) & 0xff) << 16 | (data(2) & 0xff) << 8 | (data(3) & 0xff)
+        val b = (data(4) & 0xff) << 24 | (data(5) & 0xff) << 16 | (data(6) & 0xff) << 8 | (data(7) & 0xff)
+        Some(FreelistHeader((a & 0x00000000ffffffffL) << 32 | (b & 0x00000000ffffffffL),data(headSize-1)))
+    // 
+    def headerToBytes(hd:FreelistHeader):Array[Byte] = 
+        var c = hd.count
+        var arr = new Array[Byte](headSize)
+        for i <- 0 to 7 do
+            arr(7-i) = (c & 0xff).toByte
+            c = c >> 8
+        arr(headSize-1) = hd.ftype
+        arr
+    //
+    def bytesToElem(data:Array[Byte]):Option[(Long,Long)] =
+        if data.length != elemSize then
+            throw new Exception("illegal freelist element data")
+        val a = (data(0) & 0xff) << 24 | (data(1) & 0xff) << 16 | (data(2) & 0xff) << 8 | (data(3) & 0xff)
+        val b = (data(4) & 0xff) << 24 | (data(5) & 0xff) << 16 | (data(6) & 0xff) << 8 | (data(7) & 0xff) 
+        val s = (a & 0x00000000ffffffffL) << 32 | (b & 0x00000000ffffffffL)
+        val l = (data(8) & 0xff) << 24 | (data(9) & 0xff) << 16 | (data(10) & 0xff) << 8 | (data(11) & 0xff)
+        Some((s,s+l-1))
+    
+    def elemToBytes(start:Long,ed:Long):Array[Byte] = elemToBytes(start,(ed-start+1).toInt)
+    
+    def elemToBytes(start:Long,len:Int):Array[Byte] = 
+        var a = start>>32
+        var b = start
+        var c = len
+        var arr = new Array[Byte](elemSize)
+        for i <- 0 to 3 do
+            arr(3-i) = (a & 0xff).toByte
+            arr(7-i) = (b & 0xff).toByte
+            arr(11-i) = (c & 0xff).toByte
+            a = a >> 8
+            b = b >> 8
+            c = c >> 8
+        arr
+
+private object FreeArray:
+    def apply(bk:Block):Option[FreeArray] = 
+        val hSize = FreeList.headSize
+        val eSize = FreeList.elemSize
+        //
+        if bk.header.flag != Block.typeFreelist then
+            throw new Exception(s"block type is not freelist ${bk.header.flag}") 
+        bk.getBytes() match
+            case None => None 
+            case Some(data) => 
+                var freelist = new FreeArray(bk.header)
+                if data.length < hSize then
+                    throw new Exception(s"illegal freelist header data length ${data.length}") 
+                FreeList.bytesToHeader(data.slice(0,hSize)) match
+                    case None => throw new Exception("illegal freelist header data")
+                    case Some(hd) =>
+                        if data.length != hSize+(hd.count*eSize) then
+                            throw new Exception(s"illegal freelist data length ${data.length}") 
+                        
+                        var idx = hSize+eSize
+                        while idx <= data.length do
+                            FreeList.bytesToElem(data.slice(idx-eSize,idx)) match
+                                case None => throw new Exception("illegal freelist element data")
+                                case Some(pg) =>
+                                    freelist.idle += pg
+                                    idx += eSize
+                        return Some(freelist)
+        None 
+    // parse freelist from raw bytes data.
+    def apply(data:Array[Byte]):Option[FreeArray] =
+        if data.length < BlockHeader.size + FreeList.headSize then
+            throw new Exception(s"illegal freelist data length ${data.length}")
+        BlockHeader(data.slice(0,BlockHeader.size)) match
+            case None => throw new Exception("parse freelist block header data failed")
+            case Some(hd) =>
+                var bk = new Block(data.length)
+                bk.header = hd
+                bk.write(0,data)
+                apply(bk)
+
 // record a file pages free claim about a version txid.
 private case class ReleaseClaim(txid:Long, pages:ArrayBuffer[(Long,Long)])
 
@@ -62,14 +199,14 @@ private[platdb] class FreeArray(var header:BlockHeader) extends FreeManager:
     def pageId: Long = header.pgid
     def overflow: Int = header.overflow
     def size():Int = 
-        var sz = BlockHeader.size + FreeArray.headerSize + idle.length*FreeArray.elementSize
+        var sz = BlockHeader.size + FreeList.headSize + idle.length*FreeList.elemSize
         for p <- pending do
-            sz += p.pages.length*FreeArray.elementSize
+            sz += p.pages.length*FreeList.elemSize
         sz 
     
     def writeTo(bk:Block):Int =
-        val pids = merge()
-        val sz = BlockHeader.size+FreeArray.headerSize+pids.length*FreeArray.elementSize
+        val pgids = merge()
+        val sz = BlockHeader.size+FreeList.headSize+pgids.length*FreeList.elemSize
 
         bk.header.flag = Block.typeFreelist
         bk.header.count = 1
@@ -77,10 +214,10 @@ private[platdb] class FreeArray(var header:BlockHeader) extends FreeManager:
         bk.header.overflow =(sz+DB.pageSize)/DB.pageSize - 1
         
         bk.append(bk.header.getBytes())
-        bk.append(FreeArray.headerToBytes(FreelistHeader(pids.length,FreeArray.listType)))
-        for (s,e) <- pids do
-            bk.append(FreeArray.elemToBytes(s,e))
-        size()
+        bk.append(FreeList.headerToBytes(FreelistHeader(pgids.length,FreeList.listType)))
+        for (s,e) <- pgids do
+            bk.append(FreeList.elemToBytes(s,e))
+        sz
     def set(pgid:Long,overflow:Int):Unit = 
         oldHeader = Some(header.clone)
         header.pgid = pgid
@@ -116,6 +253,8 @@ private[platdb] class FreeArray(var header:BlockHeader) extends FreeManager:
             fc.pages += ((start,ed))
             pend(fc)
     def allocate(txid:Long,n:Int):Long = 
+        if n <= 0 then
+            throw new Exception(s"allocate negative page n:${n}")
         val (idx,equ) = scan(n)
         if idx < 0 then
             return idx
@@ -226,112 +365,25 @@ private[platdb] class FreeArray(var header:BlockHeader) extends FreeManager:
         var arr = new ArrayBuffer[(Long,Long)](idle.length)
         idle.copyToBuffer(arr)
         for fc <- pending do arr ++= fc.pages
-        arr.sortInPlaceWith((p1:(Long,_),p2:(Long,_)) => p1(0) < p2(0)) // TODO: use insert,not sort
+        arr.asJava.sort(new Comparator[(Long,Long)]{
+            override def compare(o1: (Long, Long), o2: (Long, Long)): Int = (o1(0)-o2(0)).toInt
+        })
+        //arr.sortInPlaceWith((p1:(Long,_),p2:(Long,_)) => p1(0) < p2(0)) // TODO: use insert,not sort
         reduce(arr)
-        
-private object FreeArray:
-    val headerSize = 9
-    val elementSize = 12
-    val listType:Byte = 0
-    val hashType:Byte = 1
-    def apply(bk:Block):Option[FreeArray] = 
-        if bk.header.flag != Block.typeFreelist then
-            throw new Exception(s"block type is not freelist ${bk.header.flag}") 
-        bk.getBytes() match
-            case None => None 
-            case Some(data) => 
-                var freelist = new FreeArray(bk.header)
-                if data.length < headerSize then
-                    throw new Exception(s"illegal freelist header data length ${data.length}") 
-                bytesToHeader(data.slice(0,headerSize)) match
-                    case None => throw new Exception("illegal freelist header data")
-                    case Some(hd) =>
-                        if data.length != headerSize+(hd.count*elementSize) then
-                            throw new Exception(s"illegal freelist data length ${data.length}") 
-                        
-                        var idx = headerSize+elementSize
-                        while idx <= data.length do
-                            bytesToElem(data.slice(idx-elementSize,idx)) match
-                                case None => throw new Exception("illegal freelist element data")
-                                case Some(pg) =>
-                                    freelist.idle += pg
-                                    idx += elementSize
-                        return Some(freelist)
-        None 
-    // parse freelist from raw bytes data.
-    def apply(data:Array[Byte]):Option[FreeArray] =
-        if data.length < BlockHeader.size + headerSize then
-            throw new Exception(s"illegal freelist data length ${data.length}")
-        BlockHeader(data.slice(0,BlockHeader.size)) match
-            case None => throw new Exception("parse freelist block header data failed")
-            case Some(hd) =>
-                var bk = new Block(data.length)
-                bk.header = hd
-                bk.write(0,data)
-                apply(bk)
-    //
-    def bytesToHeader(data:Array[Byte]):Option[FreelistHeader] =
-        if data.length != headerSize then
-            throw new Exception("illegal freelist header data")
-        val a = (data(0) & 0xff) << 24 | (data(1) & 0xff) << 16 | (data(2) & 0xff) << 8 | (data(3) & 0xff)
-        val b = (data(4) & 0xff) << 24 | (data(5) & 0xff) << 16 | (data(6) & 0xff) << 8 | (data(7) & 0xff)
-        Some(FreelistHeader((a & 0x00000000ffffffffL) << 32 | (b & 0x00000000ffffffffL),data(headerSize-1)))
-    // 
-    def headerToBytes(hd:FreelistHeader):Array[Byte] = 
-        var c = hd.count
-        var arr = new Array[Byte](headerSize)
-        for i <- 0 to 7 do
-            arr(7-i) = (c & 0xff).toByte
-            c = c >> 8
-        arr(headerSize-1) = hd.ftype
-        arr
-    //
-    def bytesToElem(data:Array[Byte]):Option[(Long,Long)] =
-        if data.length != elementSize then
-            throw new Exception("illegal freelist element data")
-        val a = (data(0) & 0xff) << 24 | (data(1) & 0xff) << 16 | (data(2) & 0xff) << 8 | (data(3) & 0xff)
-        val b = (data(4) & 0xff) << 24 | (data(5) & 0xff) << 16 | (data(6) & 0xff) << 8 | (data(7) & 0xff) 
-        val s = (a & 0x00000000ffffffffL) << 32 | (b & 0x00000000ffffffffL)
-        val l = (data(8) & 0xff) << 24 | (data(9) & 0xff) << 16 | (data(10) & 0xff) << 8 | (data(11) & 0xff)
-        Some((s,s+l-1))
-    //
-    def elemToBytes(start:Long,ed:Long):Array[Byte] = 
-        var a = start>>32
-        var b = start
-        var c = (ed-start+1).toInt
-        var arr = new Array[Byte](elementSize)
-        for i <- 0 to 3 do
-            arr(3-i) = (a & 0xff).toByte
-            arr(7-i) = (b & 0xff).toByte
-            arr(11-i) = (c & 0xff).toByte
-            a = a >> 8
-            b = b >> 8
-            c = c >> 8
-        arr
 
-
-
-// record freelist basic info, for example, count | type
-private case class FreelistHeader(count:Long,ftype:Byte)
-// record a file free page fragement.
-private case class FreeFragment(start:Long,end:Long,length:Int):
-    override def toString(): String = s"($start,$end,$length)"
-// record a file pages free claim about a version txid.
-private case class FreeClaim(txid:Long, ids:ArrayBuffer[FreeFragment])
-
-// An Inefficient Freelist Implementation.
-private[platdb] class Freelist(var header:BlockHeader) extends FreeManager:
+// An double linked list Implementation.
+private[platdb] class FreeList(var header:BlockHeader) extends FreeManager:
     private var prevHeader:Option[BlockHeader] = None
     // idle pages list, that can be allocated for read-write transaction.
-    var idle:ArrayBuffer[FreeFragment] = new ArrayBuffer[FreeFragment]()
-    //
-    var unleashing:ArrayBuffer[FreeClaim] = new ArrayBuffer[FreeClaim]()
+    var num:Long = 0
+    var idle:DoubleLinkedList[FreeFragment] = new DoubleLinkedList[FreeFragment]()
+    // record a file data pages freeclaim about a version txid.
+    var pending:SortedMap[Long,ArrayBuffer[FreeFragment]] = SortedMap[Long,ArrayBuffer[FreeFragment]]()
     // trace allocated pages for tx.
     var allocated:Map[Long,ArrayBuffer[FreeFragment]] = Map[Long,ArrayBuffer[FreeFragment]]() 
 
     override def toString(): String =
-        val list = for f <- idle yield f.toString()
-        list.mkString(",")
+        (for f <- idle.iterator yield f.toString()).mkString(",")
     def pageId: Long = header.pgid
     def overflow: Int = header.overflow
     /**
@@ -346,34 +398,33 @@ private[platdb] class Freelist(var header:BlockHeader) extends FreeManager:
     /**
       * Release page: move all pages about txid from pending queue to idle queue.
       * 
-      * the next write transaction will try to call the Freelist Unleash method to free the pages in the pending before starting execution, 
-      * and as long as the version to be released in the pending is less than the minimum version held by the currently open read-only transaction, 
-      * then the pending elements can be released (indicating that there are definitely no read-only transactions holding the pending pages anymore)
-      * at the same time, the version held by the currently open read-only transaction may span a large span, so for pages between two adjacent versions, 
+      * the next write transaction will try to call the Freelist Unleash method to 
+      * free the pages in the pending before starting execution, 
+      * and as long as the version to be released in the pending is less than the 
+      * minimum version held by the currently open read-only transaction, 
+      * then the pending elements can be released (indicating that there are definitely 
+      * no read-only transactions holding the pending pages anymore)
+      * at the same time, the version held by the currently open read-only transaction 
+      * may span a large span, so for pages between two adjacent versions, 
       * if no transaction is already holding it, then it can also be released
       *
       * @param start
       * @param end
       */
     def release(start:Long,end:Long):Unit =
-        if start > end then return None
-        unleashing.sortWith((c1:FreeClaim,c2:FreeClaim) => c1.txid < c2.txid)
-        var i = 0
-        var j = unleashing.length-1
-        while i<unleashing.length && unleashing(i).txid<start do 
-            i+=1
-        if i >= unleashing.length then
+        if start > end then 
             return None
-        while j>=0 && unleashing(j).txid>end do
-            j-=1
-        if j < 0 then
-            return None
-        for k <- i to j do
-            idle++=unleashing(k).ids
-            allocated.remove(unleashing(k).txid)
-        unleashing.remove(i,j-i+1)
-        idle = reform(false)
+        
+        for (id,ff) <- pending.range(start,end+1) do
+            pending.remove(id) match
+                case None => None
+                case Some(ff) => 
+                    for f <- ff do idle.pushHead(f)
+                    num += ff.length
+            allocated.remove(id)
 
+        if num > 0 && 2*num > idle.length then
+            reorder(false)
     /**
       * Free up (tail+1) consecutive page spaces starting with startid.
       * Some pages may be released after a write transaction commited, 
@@ -385,66 +436,59 @@ private[platdb] class Freelist(var header:BlockHeader) extends FreeManager:
       * @param tail
       */
     def reclaim(txid:Long,start:Long,tail:Int):Unit =
-        val end = start+tail
-        for f <- idle do
-            if !(end < f.start || f.end < start) then
-                throw new Exception(s"release repeatedly,tx $txid try to release [$start,$end], but already released [${f.start},${f.end}]")
-        var idx = -1
-        for i <- 0 until unleashing.length do
-            // check
-            for f <- unleashing(i).ids do
-                if !(end < f.start || f.end < start) then
-                    throw new Exception(s"release repeatedly,tx $txid try to release [$start,$end], but tx ${unleashing(i).txid} already released [${f.start},${f.end}]")
-            if unleashing(i).txid == txid then
-                idx = i
-        if idx >=0 then 
-            unleashing(idx).ids+= FreeFragment(start,end,tail+1)
-        else
-            var fc = FreeClaim(txid, new ArrayBuffer[FreeFragment]())
-            fc.ids += FreeFragment(start,end,tail+1)
-            unleashing += fc
+        val ed = start+tail
+        for f <- idle.iterator do
+            if !(ed < f.start || f.end < start) then
+                throw new Exception(s"release repeatedly,tx $txid try to release [$start,$ed], but already released [${f.start},${f.end}]")
+        for (id,ffs) <- pending do 
+            for f <- ffs do if !(ed < f.start || f.end < start) then
+                throw new Exception(s"release repeatedly,tx $txid try to release [$start,$ed], but tx ${id} already released [${f.start},${f.end}]")
+        //
+        val f = FreeFragment(start,ed,tail+1)
+        pending.get(txid) match
+            case Some(ffs) => ffs.append(f)
+            case None => pending.put(txid,ArrayBuffer[FreeFragment](f))
 
     /**
-      * Allocate contiguous space of size n*osPageSize and return the id of the first page, 
-      * if there is no space in the current idle list that meets the conditions, it will return -1
-      * (in this case, you need to allocate space from the end of the file and grow the file)
+      * Allocate contiguous space of size n*osPageSize and return the 
+      * id of the first page, if there is no space in the current idle 
+      * list that meets the conditions, it will return -1(in this case, 
+      * you need to allocate space from the end of the file and grow the file).
       *
       * @param txid
       * @param n
       * @return pgid
       */
     def allocate(txid:Long,n:Int):Long = 
-        var idx = -1
+        if n <= 0 then
+            throw new Exception(s"allocate negative page n:${n}")
+        var f:FreeFragment = null
         breakable(
-            for i <- 0 until idle.length do
-                if idle(i).length >= n then
-                    idx = i
+            for ff <- idle.iterator do 
+                if ff.length >= n then
+                    f = ff 
                     break()
         )
-        if idx < 0 then
-            return idx
-
-        var ff = idle(idx)
-        var fr:FreeFragment = null
-        if n == ff.length then
-            fr = ff
-            idle.remove(idx)
+        if f == null then
+            return -1
         else
-            val start = ff.start + n
-            idle(idx) = FreeFragment(start,ff.end,(ff.end-start+1).toInt)
-            fr = FreeFragment(ff.start,start-1,n)
-        
-        if !allocated.contains(txid) then
-            allocated(txid) = new ArrayBuffer[FreeFragment]()
-        else
-            // check
-            for f <- allocated(txid) do
-                if !( fr.end < f.start || f.end < fr.start) then
-                    throw new Exception(s"allocate repeatedly,tx $txid try to allocate [${fr.start},${fr.end}], but tx $txid already allocated [${f.start},${f.end}]")
-        
-        allocated(txid) += fr
-        ff.start 
-
+            var fr:FreeFragment = null
+            if f.length == n then
+                idle.remove(f)
+                fr = f 
+            else
+                f.start += n
+                f.length = (f.end-f.start+1).toInt
+                fr = new FreeFragment(f.start-n,f.start-1,n)
+            // move the fragment to allocated set.
+            allocated.get(txid) match
+                case None => allocated.put(txid,ArrayBuffer[FreeFragment](fr))
+                case Some(ffs) => 
+                    // check
+                    for f <- ffs do if !( fr.end < f.start || f.end < fr.start) then
+                        throw new Exception(s"allocate repeatedly,tx $txid try to allocate [${fr.start},${fr.end}], but tx $txid already allocated [${f.start},${f.end}]")
+                    ffs.append(fr)
+            fr.start
     /**
       * rollback pages release/allocate operations about txid.
       *
@@ -454,110 +498,108 @@ private[platdb] class Freelist(var header:BlockHeader) extends FreeManager:
         // return the assigned pages to the idle list.
         allocated.remove(txid) match
             case None => None
-            case Some(fs) =>
-                idle++=fs
-                idle = reform(false)
+            case Some(ffs) =>
+                for f <- ffs do idle.pushHead(f)
+                num += ffs.length
         
         // retract the statement about the release of pages.
-        var idx = -1
-        breakable(
-            for i <- 0 until unleashing.length do
-                if unleashing(i).txid == txid then
-                    idx = i 
-                    break()
-        )
-        if idx >=0 then
-            unleashing.remove(idx)
+        pending.remove(txid)
+        
         // rollback header.
         prevHeader match
             case None => None
             case Some(hd) => header = hd
-    
+        
+        if num > 0 && 2*num > idle.length then
+            reorder(false)
     /**
       * merge FreeFragment array elements and sort it by pgid.
       *
       * @param arr
       * @return
       */
-    private def reform(merge:Boolean):ArrayBuffer[FreeFragment] =
-        var arr = new Array[FreeFragment](idle.length)
-        idle.copyToArray(arr)
+    private def reorder(merge:Boolean):Unit =
+        var arr = new ArrayBuffer[FreeFragment]()
+        for f <- idle.iterator do arr.append(f)
         if merge then
-            for fc <- unleashing do
-                arr++=fc.ids 
-        arr = arr.sortWith((f1:FreeFragment,f2:FreeFragment) => f1.start < f2.start)
+            for (_,ffs) <- pending do
+                for f <- ffs do arr.append(f)
+        // sort by pgid
+        arr.asJava.sort(new Comparator[FreeFragment] {
+            override def compare(o1: FreeFragment, o2: FreeFragment): Int = (o1.start - o2.start).toInt
+        })
         // merge
-        var mg = new ArrayBuffer[FreeFragment]()
+        val list = new DoubleLinkedList[FreeFragment]()
         var i = 0
-        while i<arr.length do
+        while i < arr.length do
             var j = i+1
-            while j<arr.length && arr(j-1).end == arr(j).start-1 do
-                j+=1
-            if j!=i+1 then
-                mg+=FreeFragment(arr(i).start,arr(j-1).end,(arr(j-1).end-arr(i).start+1).toInt)
+            while j < arr.length && arr(j-1).end == arr(j).start-1 do
+                j += 1
+            if j != i+1 then
+                val f = new FreeFragment(arr(i).start,arr(j-1).end,(arr(j-1).end-arr(i).start+1).toInt)
+                list.pushTail(f)
             else
-                mg+=arr(i)
+                list.pushTail(arr(i))
             i = j 
-        mg = mg.sortWith((f1:FreeFragment,f2:FreeFragment) => f1.length < f2.length || (f1.length == f2.length && f1.start < f2.start))
-        mg
-    /**
-      * 
-      *
-      * @return
-      */
+        idle = list
+        num = 0
+    //
+    private def count():Int = 
+        var cnt = idle.length
+        for (_,ffs) <- pending do cnt += ffs.length
+        cnt
     def size():Int = 
-        var sz = BlockHeader.size + Freelist.headerSize + idle.length*Freelist.elementSize
-        for fc <- unleashing do
-            sz+= fc.ids.length*Freelist.elementSize
+        var sz = BlockHeader.size + FreeList.headSize + idle.length*FreeList.elemSize
+        for (_,ffs) <- pending do
+            sz += ffs.length*FreeList.elemSize
         sz 
     def writeTo(bk:Block):Int =
-        val ids = reform(true)
-        val sz = BlockHeader.size+Freelist.headerSize+ids.length*Freelist.elementSize
-
+        val sz = size()
+        val cnt = count()
         bk.header.flag = Block.typeFreelist
         bk.header.count = 1
         bk.header.size = sz
-        bk.header.overflow =(sz+DB.pageSize)/DB.pageSize - 1
+        bk.header.overflow = (sz+DB.pageSize)/DB.pageSize - 1
         
         bk.append(bk.header.getBytes())
-        bk.append(Freelist.marshalHeader(FreelistHeader(ids.length,Freelist.listType)))
-        for ff <- ids do
-            bk.append(Freelist.marshalElement(ff))
-        size()
+        bk.append(FreeList.headerToBytes(FreelistHeader(cnt,FreeList.listType)))
+        for ff <- idle.iterator do
+            bk.append(FreeList.elemToBytes(ff.start,ff.end))
+        for (_,ffs) <- pending do 
+            for ff <- ffs do 
+                bk.append(FreeList.elemToBytes(ff.start,ff.end))
+        sz
 
-private[platdb] object Freelist:
-    val headerSize = 9
-    val elementSize = 12
-    val listType:Byte = 0
-    val hashType:Byte = 1
-    
-    def apply(bk:Block):Option[Freelist] = 
+private object FreeTree:
+    def apply(bk:Block):Option[FreeTree] = 
+        val hSize = FreeList.headSize
+        val eSize = FreeList.elemSize
         if bk.header.flag != Block.typeFreelist then
             throw new Exception(s"block type is not freelist ${bk.header.flag}") 
         bk.getBytes() match
             case None => None 
             case Some(data) => 
-                var freelist = new Freelist(bk.header)
-                if data.length < headerSize then
+                var freetree = new FreeTree(bk.header)
+                if data.length < hSize then
                     throw new Exception(s"illegal freelist header data length ${data.length}") 
-                unmarshalHeader(data.slice(0,headerSize)) match
+                FreeList.bytesToHeader(data.slice(0,hSize)) match
                     case None => throw new Exception("illegal freelist header data")
                     case Some(hd) =>
-                        if data.length != headerSize+(hd.count*elementSize) then
-                            throw new Exception(s"illegal freelist data length ${data.length},except ${headerSize+(hd.count*elementSize)}") 
+                        if data.length != hSize+(hd.count*eSize) then
+                            throw new Exception(s"illegal freelist data length ${data.length},except ${hSize+(hd.count*eSize)}") 
                         
-                        var idx = headerSize+elementSize
+                        var idx = hSize+eSize
                         while idx <= data.length do
-                            unmarshalElement(data.slice(idx-elementSize,idx)) match
+                            FreeList.bytesToElem(data.slice(idx-eSize,idx)) match
                                 case None => throw new Exception("illegal freelist element data")
-                                case Some(ff) =>
-                                    freelist.idle+=ff 
-                                    idx+=elementSize
-                        return Some(freelist)
-        None 
+                                case Some(st,ed) =>
+                                    val ff = new FreeFragment(st,ed,(ed-st).toInt)
+                                    freetree.idle.put(ff.start,ff)
+                                    idx += eSize
+                        Some(freetree)
     // parse freelist from raw bytes data.
-    def getFromBytes(data:Array[Byte]):Option[Freelist] =
-        if data.length < BlockHeader.size + headerSize then
+    def apply(data:Array[Byte]):Option[FreeTree] =
+        if data.length < BlockHeader.size + FreeList.headSize then
             throw new Exception(s"illegal freelist data length ${data.length}")
         BlockHeader(data.slice(0,BlockHeader.size)) match
             case None => throw new Exception("parse freelist block header data failed")
@@ -566,42 +608,178 @@ private[platdb] object Freelist:
                 bk.header = hd
                 bk.write(0,data)
                 apply(bk)
+
+private[platdb] class FreeTree(var header:BlockHeader) extends FreeManager:
+    private var prevHeader:Option[BlockHeader] = None
+    // idle pages list, that can be allocated for read-write transaction.
+    var idle:SkipList[Long,FreeFragment] = new SkipList[Long,FreeFragment](8)
+    // record a file data pages freeclaim about a version txid.
+    var pending:SortedMap[Long,ArrayBuffer[FreeFragment]] = SortedMap[Long,ArrayBuffer[FreeFragment]]()
+    // trace allocated pages for tx.
+    var allocated:Map[Long,ArrayBuffer[FreeFragment]] = Map[Long,ArrayBuffer[FreeFragment]]() 
+
+    override def toString(): String =
+        (for f <- idle.iterator yield f.toString()).mkString(",")
+    def pageId: Long = header.pgid
+    def overflow: Int = header.overflow
+    def set(pgid:Long,overflow:Int):Unit = 
+        prevHeader = Some(header.clone)
+        header.pgid = pgid
+        header.overflow = overflow
+    def release(start:Long,end:Long):Unit =
+        if start > end then 
+            return None
+        
+        for (id,ff) <- pending.range(start,end+1) do
+            pending.remove(id) match
+                case None => None
+                case Some(ff) => 
+                    for f <- ff do 
+                        val node = new SkipListNode[Long,FreeFragment](0,f.start,f)
+                        idle.putNode(node)
+                        merge(node)
+            allocated.remove(id)
+    def reclaim(txid:Long,start:Long,tail:Int):Unit = 
+        val ed = start + tail
+        val f = FreeFragment(start,ed,tail+1)
+        var node:SkipListNode[Long,FreeFragment] = null
+        idle.getPrevNode(start) match
+            case None => None
+            case Some(n) => 
+                node = n 
+                breakable(
+                    while node != null do 
+                        if f.overlap(node.value) then
+                            throw new Exception(s"release repeatedly,tx $txid try to release [$start,$ed],but its overlap with already released")
+                        else
+                            if node.value.start > f.end then
+                                break()
+                            node.next(0) match
+                                case None => break()
+                                case Some(n) => node = n 
+                )
+        for (id,ffs) <- pending do 
+            for ff <- ffs do if ff.overlap(f) then
+                throw new Exception(s"release repeatedly,tx $txid try to release [$start,$ed], but tx ${id} already released [${ff.start},${ff.end}]")
+        //
+        pending.get(txid) match
+            case Some(ffs) => ffs.append(f)
+            case None => pending.put(txid,ArrayBuffer[FreeFragment](f))
+
+    def allocate(txid:Long,n:Int):Long = 
+        if n <= 0 then
+            throw new Exception(s"allocate negative page n:${n}")
+        var node:SkipListNode[Long,FreeFragment] = null
+        breakable(
+            for ff <- idle.nodeIterator do 
+                if ff.value.length >= n then
+                    node = ff 
+                    break()
+        )
+        if node == null then
+            return -1
+        else
+            var fr:FreeFragment = null
+            if node.value.length == n then
+                idle.remove(node.key)
+                fr = node.value 
+            else
+                node.value.reset(node.value.start+n,node.value.end)
+                fr = new FreeFragment(node.value.start-n,node.value.start-1,n)
+            // move the fragment to allocated set.
+            allocated.get(txid) match
+                case None => allocated.put(txid,ArrayBuffer[FreeFragment](fr))
+                case Some(ffs) => 
+                    // check
+                    for f <- ffs do if f.overlap(fr) then
+                        throw new Exception(s"allocate repeatedly,tx $txid try to allocate [${fr.start},${fr.end}], but tx $txid already allocated [${f.start},${f.end}]")
+                    ffs.append(fr)
+            fr.start
+    def rollback(txid:Long):Unit =
+        // return the assigned pages to the idle list.
+        allocated.remove(txid) match
+            case None => None
+            case Some(ffs) =>
+                for f <- ffs do 
+                    val node = new SkipListNode[Long,FreeFragment](0,f.start,f)
+                    idle.putNode(node)
+                    merge(node)
+        
+        // retract the statement about the release of pages.
+        pending.remove(txid)
+        
+        // rollback header.
+        prevHeader match
+            case None => None
+            case Some(hd) => header = hd
     //
-    def unmarshalHeader(data:Array[Byte]):Option[FreelistHeader] =
-        if data.length != headerSize then
-            throw new Exception("illegal freelist header data")
-        val a = (data(0) & 0xff) << 24 | (data(1) & 0xff) << 16 | (data(2) & 0xff) << 8 | (data(3) & 0xff)
-        val b = (data(4) & 0xff) << 24 | (data(5) & 0xff) << 16 | (data(6) & 0xff) << 8 | (data(7) & 0xff)
-        Some(FreelistHeader((a & 0x00000000ffffffffL) << 32 | (b & 0x00000000ffffffffL),data(headerSize-1)))
-    // 
-    def marshalHeader(hd:FreelistHeader):Array[Byte] = 
-        var c = hd.count
-        var arr = new Array[Byte](headerSize)
-        for i <- 0 to 7 do
-            arr(7-i) = (c & 0xff).toByte
-            c = c >> 8
-        arr(headerSize-1) = hd.ftype
-        arr
+    private def merge(node:SkipListNode[Long,FreeFragment]):Unit = 
+        val keys = new ArrayBuffer[Long]()
+        var ed = node.value.end
+        var nxt = node.next(0)
+        breakable(
+            while true do 
+                nxt match
+                    case None => break()
+                    case Some(n) =>
+                        if n.value.start == ed+1 then
+                            ed = n.value.end
+                            keys.append(n.key)
+                            nxt = n.next(0)
+                        else
+                            break()
+        )
+        if keys.length > 0 then
+            node.value.reset(node.key,ed)
+            for k <- keys do idle.remove(k)
     //
-    def unmarshalElement(data:Array[Byte]):Option[FreeFragment] =
-        if data.length != elementSize then
-            throw new Exception("illegal freelist element data")
-        val a = (data(0) & 0xff) << 24 | (data(1) & 0xff) << 16 | (data(2) & 0xff) << 8 | (data(3) & 0xff)
-        val b = (data(4) & 0xff) << 24 | (data(5) & 0xff) << 16 | (data(6) & 0xff) << 8 | (data(7) & 0xff) 
-        val s = (a & 0x00000000ffffffffL) << 32 | (b & 0x00000000ffffffffL)
-        val l = (data(8) & 0xff) << 24 | (data(9) & 0xff) << 16 | (data(10) & 0xff) << 8 | (data(11) & 0xff)
-        Some(FreeFragment(s,s+l-1,l))
+    private def reform(merge:Boolean):Unit =
+        var arr = new ArrayBuffer[FreeFragment]()
+        for f <- idle.iterator do arr.append(f)
+        if merge then
+            for (_,ffs) <- pending do
+                for f <- ffs do arr.append(f)
+        // sort by pgid
+        arr.asJava.sort(new Comparator[FreeFragment] {
+            override def compare(o1: FreeFragment, o2: FreeFragment): Int = (o1.start - o2.start).toInt
+        })
+        // merge
+        val list = new SkipList[Long,FreeFragment]()
+        var i = 0
+        while i < arr.length do
+            var j = i+1
+            while j < arr.length && arr(j-1).end == arr(j).start-1 do
+                j += 1
+            if j != i+1 then
+                val f = new FreeFragment(arr(i).start,arr(j-1).end,(arr(j-1).end-arr(i).start+1).toInt)
+                list.put(f.start,f)
+            else
+                list.put(arr(i).start,arr(i))
+            i = j 
+        idle = list
     //
-    def marshalElement(ff:FreeFragment):Array[Byte] = 
-        var s1 = (ff.start>>32).toInt
-        var s2 = ff.start
-        var l = ff.length
-        var arr = new Array[Byte](elementSize)
-        for i <- 0 to 3 do
-            arr(3-i) = (s1 & 0xff).toByte
-            arr(7-i) = (s2 & 0xff).toByte
-            arr(11-i) = (l & 0xff).toByte
-            s1 = s1 >> 8
-            s2 = s2 >> 8
-            l = l >> 8
-        arr
+    private def count():Int = 
+        var cnt = idle.length
+        for (_,ffs) <- pending do cnt += ffs.length
+        cnt
+    def size():Int = 
+        var sz = BlockHeader.size + FreeList.headSize + idle.length*FreeList.elemSize
+        for (_,ffs) <- pending do
+            sz += ffs.length*FreeList.elemSize
+        sz 
+    def writeTo(bk:Block):Int =
+        val sz = size()
+        val cnt = count()
+        bk.header.flag = Block.typeFreelist
+        bk.header.count = 1
+        bk.header.size = sz
+        bk.header.overflow = (sz+DB.pageSize)/DB.pageSize - 1
+        
+        bk.append(bk.header.getBytes())
+        bk.append(FreeList.headerToBytes(FreelistHeader(cnt,FreeList.listType)))
+        for ff <- idle.iterator do
+            bk.append(FreeList.elemToBytes(ff.start,ff.end))
+        for (_,ffs) <- pending do 
+            for ff <- ffs do 
+                bk.append(FreeList.elemToBytes(ff.start,ff.end))
+        sz
