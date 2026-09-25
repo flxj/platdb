@@ -1,11 +1,13 @@
 import platdb._
 import platdb.defaultOptions
 import scala.jdk.CollectionConverters._
+import scala.util.control.Breaks._
 import scala.collection.mutable.{Map,ArrayBuffer}
 import java.io.File
 import java.lang.Exception
 import scala.util.Failure
 import scala.util.Success
+import scala.compiletime.ops.double
 
 val dbPath:String= s"C:${File.separator}platdb${File.separator}db.test" 
 
@@ -109,7 +111,7 @@ class SQLSuit2 extends munit.FunSuite {
                 case Failure(e) => throw e 
                 case Success(_) => println("open db success")
 
-            db.query("SHOW COLUMNS FROM t1") match
+            db.query("SHOW COLUMNS FROM t3") match
                 case Failure(e) => throw e 
                 case Success(res) => 
                     val p = Tabulator.format(res.columns,res.data)
@@ -318,3 +320,73 @@ class SQLSuit8 extends munit.FunSuite {
 }
 
 
+class SQLSuit9 extends munit.FunSuite {
+    val sql0:String = """create table IF NOT EXISTS t3 (
+    c1 int NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    c2 bigint,
+    c3 double,
+    c4 char(100),
+    c5 varchar(100)
+    );"""
+    val sql1 = """insert into t3 values 
+    (1,123,1.2,'aaa','qqqqq'),
+    (2,234,3.4,'bbb','aaaaa'),
+    (3,345,4.5,'ccc','zzzzz'),
+    (4,456,6.7,'ddd','wwwww'),
+    (5,567,8.9,'eee','sssss'),
+    (6,678,10.0,'fff','xxxxx');"""
+    val sql2 = """select c1 as C1,c3 as C3,c5 as C5 from t3"""
+    val sql3 = """select * from t3 where c1>=3"""
+    test("rows") {
+        var db = SQLEngine(dbPath)
+        try 
+            db.open() match
+                case Failure(e) => throw e 
+                case Success(_) => println("open db success")
+            /*
+            db.exec("drop table t3") match
+                case Failure(e) => throw e 
+                case Success(_) => println("drop t3 success")
+            */
+            db.beginTx(false) match
+                case Failure(e) => throw e 
+                case Success(tx) =>
+                    try
+                        tx.exec(sql0)
+                        tx.exec(sql1)
+                        tx.commit()
+                    catch
+                        case e:Exception => throw e 
+                    finally
+                        tx.rollback()
+            println("create table success")
+
+            db.query(sql2) match
+                case Failure(e) => throw e 
+                case Success(res) => 
+                    val p = Tabulator.format(res.columns,res.data)
+                    println(p) 
+            
+            db.queryIter(sql3) match
+                case Failure(e) => throw e 
+                case Success(rows) => 
+                    val cols = rows.getColumn.mkString(" ,")
+                    println(cols)
+                    breakable(
+                        while true do
+                            rows.next() match
+                                case None => break()
+                                case Some(row) => 
+                                    val r = row.map( v => if v != null then v.toString() else "null").mkString(" ,")
+                                    println(r)
+                    )
+                    rows.close()
+        catch
+            case e:Exception => throw e 
+        finally
+            if db != null then 
+                db.close() match
+                    case Failure(e) => println(e.getMessage())
+                    case Success(_) => println("close db success")
+    }
+}

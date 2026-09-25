@@ -1273,8 +1273,6 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
             case Some(n) =>
                 if !n.put(name,name,bk.bkv.toString(),Node.flagBucket,0) then
                     bkv.count += 1
-                println(s"root create raw bucket ${name} success")
-                println(rawBuckets.contains(name))
                 Some(bk)
             case None => 
                 throw new Exception("raw bucket create failed: not found create node")
