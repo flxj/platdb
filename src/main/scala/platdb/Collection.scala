@@ -20,19 +20,17 @@ import scala.collection.immutable.{Set}
 import scala.util.{Try,Success,Failure}
 
 enum CollectionType:
-    case Bucket,Region,RawBucket
-    case BSet,BList,Set,List
-    case Nothing,Unknown
+    case Bucket,RawBucket
+    case BSet,BList
+    case Region
+    case Unknown
     override def toString(): String = this match
         case Bucket => "bucket"
-        case Set => "set"
-        case List => "list"
         case Region => "region"
         case RawBucket => "rawBucket"
         case BList => "blist"
         case BSet => "bset"
-        case Nothing => ""
-        case _ => "unknown"
+        case Unknown => "unknown"
     private[platdb] def toByte:Byte = ???
 
 /**
@@ -41,44 +39,34 @@ enum CollectionType:
 object Collection:
     // collection data type.
     private[platdb] val typeBucket:Byte = 1
-    private[platdb] val typeSet:Byte = 2
-    private[platdb] val typeList:Byte = 3
+    private[platdb] val typeBSet:Byte = 2
+    private[platdb] val typeBList:Byte = 3
     private[platdb] val typeRegion:Byte = 4
     private[platdb] val typeRawBucket:Byte = 5
-    private[platdb] val typeBSet:Byte = 6
-    private[platdb] val typeBList:Byte = 7
     //
     private[platdb] def typeName(t:CollectionType):String = t match
         case CollectionType.Bucket => "bucket"
-        case CollectionType.Set => "set"
-        case CollectionType.List => "list"
         case CollectionType.Region => "region"
         case CollectionType.RawBucket => "rawBucket"
         case CollectionType.BList => "blist"
         case CollectionType.BSet => "bset"
-        case CollectionType.Nothing => ""
-        case _ => "unknown"
+        case CollectionType.Unknown => "unknown"
     //
     private[platdb] def typeName(t:Byte):String = t match
         case 1 => "bucket"
-        case 2 => "set"
-        case 3 => "list"
+        case 2 => "bset"
+        case 3 => "blist"
         case 4 => "region"
         case 5 => "rawBucket"
-        case 6 => "bset"
-        case 7 => "blist"
         case _ => "unknown"
 
     private[platdb] def getType(tp:String):CollectionType = 
         tp.toLowerCase() match
             case "bucket" => CollectionType.Bucket
-            case "set" => CollectionType.Set
-            case "list" => CollectionType.List
             case "blist" => CollectionType.BList
             case "bset" => CollectionType.BSet
             case "region" | "rtree" => CollectionType.Region
             case "rawBucket"| "raw-bucket" => CollectionType.RawBucket
-            case "" => CollectionType.Nothing
             case _ => CollectionType.Unknown
     /**
       * This method has the same meaning as the openBucket method of the Transaction trait, 

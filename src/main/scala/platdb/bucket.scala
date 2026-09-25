@@ -1020,7 +1020,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       * @return
       */
     def getBSet(name:String):Option[BSet] = 
-        getBucket(name,Collection.typeSet) match
+        getBucket(name,Collection.typeBSet) match
             case Some(bk) => Some(new BTreeSet(bk))
             case None => None
     /**
@@ -1030,7 +1030,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       * @return
       */
     def createBSet(name:String):Option[BSet] = 
-        createBucket(name,Collection.typeSet) match
+        createBucket(name,Collection.typeBSet) match
             case Some(bk) => Some(new BTreeSet(bk))
             case None => None
     /**
@@ -1040,7 +1040,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       * @return
       */
     def createBSetIfNotExists(name:String):Option[BSet] = 
-        createBucketIfNotExists(name,Collection.typeSet) match
+        createBucketIfNotExists(name,Collection.typeBSet) match
             case Some(bk) => Some(new BTreeSet(bk))
             case None => None
     /**
@@ -1049,7 +1049,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       * @param name
       * @return
       */
-    def deleteBSet(name:String):Unit = deleteBucket(name,Collection.typeSet)
+    def deleteBSet(name:String):Unit = deleteBucket(name,Collection.typeBSet)
 
     /**
       * 
@@ -1059,7 +1059,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       * @return
       */
     def getList(name:String,readonly:Boolean):Option[BList] = 
-        getBucket(name,Collection.typeList) match
+        getBucket(name,Collection.typeBList) match
             case Some(bk) => KList(bk,readonly)
             case None => None
     /**
@@ -1069,7 +1069,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       * @return
       */
     def createList(name:String):Option[BList] = 
-        createBucket(name,Collection.typeList) match
+        createBucket(name,Collection.typeBList) match
             case Some(bk) => KList(bk,false)
             case None => None
     /**
@@ -1079,7 +1079,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       * @return
       */
     def createListIfNotExists(name:String):Option[BList] = 
-        createBucketIfNotExists(name,Collection.typeList) match
+        createBucketIfNotExists(name,Collection.typeBList) match
             case Some(bk) => KList(bk,false) 
             case None => None
     /**
@@ -1088,7 +1088,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       * @param name
       * @return
       */
-    def deleteList(name:String):Unit = deleteBucket(name,Collection.typeList)
+    def deleteList(name:String):Unit = deleteBucket(name,Collection.typeBList)
     /**
       * 
       *

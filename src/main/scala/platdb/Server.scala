@@ -403,7 +403,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
         given tx:Transaction = txn
         if op.collection != "" then
             val tp = cols.get(op.collection) match
-                case None => CollectionType.Nothing
+                case None => CollectionType.Unknown
                 case Some(t) => Collection.getType(t)
             tp match
                 case CollectionType.Bucket =>
@@ -463,7 +463,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                         case "create" =>
                             tx.createListIfNotExists(op.collection) match
                                 case Some(_) => 
-                                    cols(op.collection) = Collection.typeName(Collection.typeList)
+                                    cols(op.collection) = Collection.typeName(Collection.typeBList)
                                     successResult
                                 case None => Failure(new Exception(""))
                         case "get" => 
@@ -529,7 +529,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                         case "create" =>
                             tx.createBSetIfNotExists(op.collection) match
                                 case Some(_) => 
-                                    cols(op.collection) = Collection.typeName(Collection.typeSet)
+                                    cols(op.collection) = Collection.typeName(Collection.typeBSet)
                                     successResult
                                 case None => Failure(new Exception(""))
                         case "get" =>
@@ -562,7 +562,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                             catch
                                 case e:Exception => Failure(e)
                         case _ => Failure(new Exception(s"not support bset operation: ${op.collectionOp}"))
-                case CollectionType.Nothing => Failure(new Exception(s"collection ${op.collection} not exists"))
+                case CollectionType.Unknown => Failure(new Exception(s"collection ${op.collection} not exists"))
                 case _ => Failure(new Exception(s"not support such collection type in transaction:${tp}"))
         else
             try
@@ -667,7 +667,7 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
                 get {
                     log.debug("start get collectins info")
                     val res:Future[Try[Seq[(String,String)]]] = Future{
-                        db.listCollection(CollectionType.Nothing) match
+                        db.listCollection(CollectionType.Unknown) match
                             case Failure(e) => Failure(e)
                             case Success(s) => Success(s)
                     }

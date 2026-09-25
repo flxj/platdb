@@ -558,9 +558,9 @@ class DB(val path:String)(using ops:Options):
             val res = cType match
                 case CollectionType.Bucket => 
                     if !ignoreExists then tx.createBucket(name) else tx.createBucketIfNotExists(name)
-                case CollectionType.BSet | CollectionType.Set => 
+                case CollectionType.BSet => 
                     if !ignoreExists then tx.createBSet(name) else tx.createBSetIfNotExists(name)
-                case CollectionType.BList | CollectionType.List => 
+                case CollectionType.BList => 
                     if !ignoreExists then tx.createList(name) else tx.createListIfNotExists(name)
                 case CollectionType.RawBucket => 
                     if !ignoreExists then tx.createRawBucket(name) else tx.createRawBucketIfNotExists(name)
@@ -583,8 +583,8 @@ class DB(val path:String)(using ops:Options):
         update((tx:Transaction) =>
             val res = cType match
                 case CollectionType.Bucket => tx.deleteBucket(name) 
-                case CollectionType.BSet | CollectionType.Set => tx.deleteBSet(name) 
-                case CollectionType.BList | CollectionType.List => tx.deleteList(name) 
+                case CollectionType.BSet => tx.deleteBSet(name) 
+                case CollectionType.BList => tx.deleteList(name) 
                 case CollectionType.Region => tx.deleteRegion(name)
                 case CollectionType.RawBucket => tx.deleteRawBucket(name)
                 case _ => Failure(new Exception(s"unknown collection type $cType"))
