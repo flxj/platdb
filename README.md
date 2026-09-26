@@ -3,16 +3,16 @@
 
 ## PlatDB 
 
-PlatDB is a disk oriented key value storage engine aimed at providing a simple, easy-to-use, lightweight data persistence solution. 📣
+`PlatDB` is a lightweight embedded Key-Value storage engine for disk storage, providing a simple and easy-to-use interface that can be integrated into your program as a data local persistence solution. 📣
 
 It has the following characteristics：
 
 - ✅ Organize data using a single file for easy migration 👌
 - ✅ Support for ACID transactions 👌
-- ✅ Supports concurrent execution of read and write transactions (mvcc) 👌
+- ✅ Support transaction concurrency management (mvcc) 👌
 - ✅ Supports multiple commonly used data structures (Map/Set/List/RTree) 👌
 - ✅ Supports both embedded usage and independent deployment as a service, providing an HTTP interface for accessing data👌
-- ✅ Supports sql 👌
+- ✅ Supports SQL 👌
 
 The implementation of Platdb refers to projects such as [boltdb](https://github.com/boltdb/bolt), and one of my main purposes in developing Platdb is to learn database related knowledge.
 
