@@ -35,11 +35,11 @@ private def parseConfig(args:Seq[String]):ServerOptions =
     if dbPath.length == 0 then
         throw new Exception("Illegal database.path parameter: data file cannot be empty")
 
-    var dbTimeout = config.getInt("database.timeout")
+    var dbTimeout = config.getLong("database.timeout")
     if dbTimeout < 0 then
         throw new Exception(s"Illegal database.timeout parameter ${dbTimeout}: the timeout cannot be negative")
     else if dbTimeout == 0 then
-        dbTimeout = DB.defaultTimeout
+        dbTimeout = DB.defaultTimeoutMs
 
     var dbBufSize = config.getInt("database.bufSize")
     if dbBufSize < 0 then

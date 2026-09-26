@@ -804,7 +804,6 @@ class SQLEngine(ops:SQLEngineOptions):
                 case _  => throw new SQLException(s"not support value type ${row(i).toString()}")
             
             if col.name == tbi.pk then 
-                println(s"insert key col=${col.name},auto=${col.auto},val=${col.autoNext}")
                 if col.auto then // TODO: if exp not null,return a error 
                     key = Util.longToBytes(col.autoNext)
                     tbi.cols(j).autoNext += 1

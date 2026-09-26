@@ -38,7 +38,7 @@ import java.nio.charset.Charset
   * @param readonly
   * @param fillPercent
   */
-case class Options(timeout:Int,bufSize:Int,readonly:Boolean,fillPercent:Double,tmpDir:String)
+case class Options(timeoutMs:Long,bufSize:Int,readonly:Boolean,fillPercent:Double,tmpDir:String)
 
 /**
   * The DB object contains some default constant information as well as exception information.
@@ -53,7 +53,7 @@ object DB:
     // Default page size, 4kb
     val defaultPageSize = 4096 // 4k
     // Default timeout period,2s
-    val defaultTimeout = 2000 // 2s
+    val defaultTimeoutMs = 2000L // 2s
     // fefaultFillPercent is the percentage that split pages are filled.
     val defaultFillPercent = 0.5
     val minFillPercent = 0.1
@@ -116,7 +116,7 @@ object DB:
 /**
   * Default DB configuration.
   */
-given defaultOptions:Options = Options(DB.defaultTimeout,DB.defaultBufSize,false,DB.defaultFillPercent,System.getProperty("java.io.tmpdir"))
+given defaultOptions:Options = Options(DB.defaultTimeoutMs,DB.defaultBufSize,false,DB.defaultFillPercent,System.getProperty("java.io.tmpdir"))
 
 /**
   * DB represents a database object consisting of several buckets, each of which is a collection of key-value pairs (nested buckets are supported).
@@ -197,8 +197,8 @@ class DB(val path:String)(using ops:Options):
             if openFlag then
                 return Success(None)
             // try to open db file, if get lock timeout,then return an exception.
-            fileManager = new FileManager(path,ops.readonly)
-            fileManager.open(ops.timeout)
+            fileManager = new FileMgr(path,ops.readonly)
+            fileManager.open(ops.timeoutMs)
             // init block buffer.
             blockBuffer = new BlockBuffer(ops.bufSize,fileManager)
 
@@ -256,7 +256,7 @@ class DB(val path:String)(using ops:Options):
                 case Failure(e) => throw e 
 
         // 2.create a null freelist and write to file.
-        var fl = new FreeArray(new BlockHeader(2L,Block.typeFreelist,0,0,0))
+        var fl = new FreeList(new BlockHeader(2L,Block.typeFreelist,0,0,0))
         var fbk = blockBuffer.getIdleBlock(DB.defaultPageSize)
         fbk.setid(2)
         val n = fl.writeTo(fbk) 
