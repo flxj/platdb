@@ -3,6 +3,7 @@ import scala.util.{Try,Success,Failure}
 import platdb._
 import platdb.defaultOptions
 import java.io.File
+import org.junit.internal.runners.statements.Fail
 
 class BucketSuit1 extends munit.FunSuite {
     val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
@@ -444,6 +445,119 @@ class BucketSuit10 extends munit.FunSuite {
                 case Success(_) => println("view success")
                 case Failure(e) => throw e
             assertEquals(count == cnt,false)
+        catch
+            case e:Exception => throw e
+        finally
+            db.close() match
+                case Failure(exception) => println(s"close failed: ${exception.getMessage()}")
+                case Success(value) => 
+                    assertEquals(db.closed,true)
+                    println("close success")
+    }
+}
+
+import scala.concurrent.{Future, Await}
+import scala.concurrent.duration._
+import scala.util.control.Breaks._
+
+
+class BucketSuit11 extends munit.FunSuite {
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
+    val bk1:String = "bk1"
+    val bk2:String = "bk2"
+    val kv = List[(String,String)](
+        ("k1","v1"),
+        ("kk1","vv1"),
+        ("kkkk1","vvvv1"),
+        ("kkkkk1","v1"),
+        ("kfdffd1","vffdf1"),
+        ("ksdsdds1","vgfgg1"),
+        ("kcfdgfd1","vhgfnh1"),
+        ("kty61","vkkfgss1"),
+        ("kvbnhh1","vtrtrrd1"),
+        ("kawqer1","vfbhju1"),
+        ("klop[1","vxcswq1"),
+        ("kjugfdre1","vbnmhy1"),
+        ("kcxvfretghjuy1","vbbbbbbbbbb1")
+    )
+    
+    test("concurrent"){
+        var db = new DB(path)
+        try
+            db.open() match
+                case Failure(exception) => throw exception
+                case Success(value) => println("open db success")
+        
+            assertEquals(db.closed,false)
+            assertEquals(db.readonly,false)
+            //
+
+            val v1:Future[Int] = Future {
+                Thread.sleep(1000)
+                var cnt:Int = 0 
+                db.view( (tx:Transaction) =>
+                    tx.openBucket(bk1) match
+                        case None => throw new Exception("open bucket error")
+                        case Some(bk) => 
+                            for e <- bk.iterator do
+                                e match
+                                    case None => println(s"find None elements")
+                                    case Some(key,value) => cnt += 1
+                ) match
+                    case Failure(e) => throw e 
+                    case Success(_) => println(s"future1 success")
+                cnt
+            }
+
+            val v2:Future[Int] = Future{
+                // read
+                var cnt:Int = 0 
+                var ok:Boolean = false
+                var lp:Int = 0 
+                while !ok && lp < 100 do 
+                    db.view( (tx:Transaction) =>
+                        tx.openBucket(bk2) match
+                            case None => None 
+                            case Some(bk) => 
+                                for e <- bk.iterator do
+                                    e match
+                                        case None => println("find None elements")
+                                        case Some(key,value) => 
+                                            println(s"find key=${key}, value=${value}")
+                                            cnt += 1
+                                ok = true
+                    ) match
+                        case Failure(e) => throw e 
+                        case Success(_) => None
+                    lp+=1
+                    Thread.sleep(50)
+                println(s"future2 success")
+                cnt
+            }
+
+            val v3:Future[Int] = Future{
+                // write
+                var cnt:Int = 0 
+                db.update((tx:Transaction) =>
+                    tx.createBucketIfNotExists(bk2) match
+                        case None => throw new Exception(s"create ${bk2} failed")
+                        case Some(bk) => 
+                            for (k,v) <- kv do 
+                                bk.put(k,v)
+                                cnt += 1
+                ) match
+                    case Failure(e) => throw e 
+                    case Success(_) => println("future3 success")
+                cnt
+            }
+
+            val r1 = Await.result(v1, 5.seconds)
+            val r2 = Await.result(v2, 5.seconds)
+            val r3 = Await.result(v3, 10.seconds)
+            //
+            println(s"r1=${r1}")
+            println(s"r2=${r2},r3=${r3}")
+            assert(r2 == r3 && r2 == kv.length)
         catch
             case e:Exception => throw e
         finally
