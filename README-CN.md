@@ -13,11 +13,11 @@ platdb实现参考了boltdb等项目，本人开发platdb的主要目的之一�
 
 ### 使用platdb 👉
 
-首先需要在你的项目中导入platdb包
+首先需要在你的项目中导入platdb包(建议使用最新版本)
 
 sbt
 ```scala
-libraryDependencies += "io.github.flxj" %% "platdb" % "0.14.0"
+libraryDependencies += "io.github.flxj" %% "platdb" % "0.15.0"
 ```
 
 maven
@@ -25,7 +25,7 @@ maven
 <dependency>
   <groupId>io.github.flxj</groupId>
   <artifactId>platdb_3</artifactId>
-  <version>0.14.0</version>
+  <version>0.15.0</version>
 </dependency>
 ```
 

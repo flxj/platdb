@@ -1,6 +1,6 @@
 val scala3Version = "3.2.2"
 val projectName = "platdb"
-val projectVersion = "0.14.0"
+val projectVersion = "0.15.0"
 
 lazy val root = project
   .in(file("."))
@@ -67,12 +67,13 @@ ThisBuild / homepage := Some(url("https://github.com/flxj/platdb"))
 
 // Remove all additional repository other than Maven Central from POM
 ThisBuild / pomIncludeRepository := { _ => false }
+// new setting for the Central Portal
 ThisBuild / publishTo := {
-  // For accounts created after Feb 2021:
-  val nexus = "https://s01.oss.sonatype.org/"
-  if (isSnapshot.value) Some("snapshots" at nexus + "content/repositories/snapshots")
-  else Some("releases" at nexus + "service/local/staging/deploy/maven2")
+  val centralSnapshots = "https://central.sonatype.com/repository/maven-snapshots/"
+  if (isSnapshot.value) Some("central-snapshots" at centralSnapshots)
+  else localStaging.value
 }
+
 ThisBuild / publishMavenStyle := true
 ThisBuild / publishConfiguration := publishConfiguration.value.withOverwrite(true)
 ThisBuild / publishLocalConfiguration := publishLocalConfiguration.value.withOverwrite(true)
