@@ -4,12 +4,14 @@ PlatDB是一个面向磁盘的key-value存储引擎,目标是提供一种简单�
 
 - 使用单一文件组织数据，便于迁移 👌
 - 支持ACID事务👌
-- 支持读写事务并发执行(mvcc,一写多读)👌
+- 支持事务并发控制机制(mvcc)👌
 - 支持多种常用数据结构(Map/Set/List/RTree)👌
 - 支持嵌入式的使用方式，也支持作为service独立部署并提供访问数据的http接口👌
 - 支持简单的SQL语句👌
 
-platdb实现参考了boltdb等项目，本人开发platdb的主要目的之一是学习数据库相关知识. ⚠️注意当前本项目尚未进行充分的测试，请不要在生产环境中使用！
+platdb实现参考了boltdb等项目，本人开发platdb的主要目的之一是学习数据库相关知识. 
+
+⚠️注意当前本项目尚未进行充分的测试，请不要在生产环境中使用！
 
 ### 使用platdb 👉
 
@@ -110,7 +112,7 @@ db.view(
     case Success(_) => None    
 ```
 
-如下示例显执行了一个读写事务，update是DB实例提供的执行读写事务的便捷方法
+如下示例执行了一个读写事务，update是DB实例提供的执行读写事务的便捷方法
 ```scala
 import platdb._
 import platdb.defaultOptions
