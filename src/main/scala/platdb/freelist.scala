@@ -90,7 +90,7 @@ private object FreeList:
                         Some(freelist)
     // parse freelist from raw bytes data.
     def apply(data:Array[Byte]):Option[FreeList] =
-        if data.length < BlockHeader.size + FreeList.headSize then
+        if data == null || data.length < BlockHeader.size + FreeList.headSize then
             throw new Exception(s"illegal freelist data length ${data.length}")
         BlockHeader(data.slice(0,BlockHeader.size)) match
             case None => throw new Exception("parse freelist block header data failed")
@@ -101,7 +101,7 @@ private object FreeList:
                 apply(bk)
     //
     def bytesToHeader(data:Array[Byte]):Option[FreelistHeader] =
-        if data.length != headSize then
+        if data == null || data.length != headSize then
             throw new Exception("illegal freelist header data")
         val a = (data(0) & 0xff) << 24 | (data(1) & 0xff) << 16 | (data(2) & 0xff) << 8 | (data(3) & 0xff)
         val b = (data(4) & 0xff) << 24 | (data(5) & 0xff) << 16 | (data(6) & 0xff) << 8 | (data(7) & 0xff)
@@ -117,7 +117,7 @@ private object FreeList:
         arr
     //
     def bytesToElem(data:Array[Byte]):Option[(Long,Long)] =
-        if data.length != elemSize then
+        if data == null || data.length != elemSize then
             throw new Exception("illegal freelist element data")
         val a = (data(0) & 0xff) << 24 | (data(1) & 0xff) << 16 | (data(2) & 0xff) << 8 | (data(3) & 0xff)
         val b = (data(4) & 0xff) << 24 | (data(5) & 0xff) << 16 | (data(6) & 0xff) << 8 | (data(7) & 0xff) 
@@ -171,7 +171,7 @@ private object FreeArray:
         None 
     // parse freelist from raw bytes data.
     def apply(data:Array[Byte]):Option[FreeArray] =
-        if data.length < BlockHeader.size + FreeList.headSize then
+        if data == null || data.length < BlockHeader.size + FreeList.headSize then
             throw new Exception(s"illegal freelist data length ${data.length}")
         BlockHeader(data.slice(0,BlockHeader.size)) match
             case None => throw new Exception("parse freelist block header data failed")
@@ -599,7 +599,7 @@ private object FreeTree:
                         Some(freetree)
     // parse freelist from raw bytes data.
     def apply(data:Array[Byte]):Option[FreeTree] =
-        if data.length < BlockHeader.size + FreeList.headSize then
+        if data == null || data.length < BlockHeader.size + FreeList.headSize then
             throw new Exception(s"illegal freelist data length ${data.length}")
         BlockHeader(data.slice(0,BlockHeader.size)) match
             case None => throw new Exception("parse freelist block header data failed")

@@ -76,7 +76,7 @@ private[platdb] class BlockHeader(var pgid:Long,var flag:Byte,var count:Int,var 
 private[platdb] object BlockHeader:
     val size = 21
     def apply(bs:Array[Byte]):Option[BlockHeader] =
-        if bs.length != size then 
+        if bs == null || bs.length != size then 
             None 
         else
             val arr = for i <- 0 to 4 yield

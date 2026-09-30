@@ -52,7 +52,7 @@ trait BList extends PlatDBIterable:
       *
       * @return
       */
-    def head:Option[String]
+    def first:Option[String]
     /**
       * Return the element at the end of the list
       *
@@ -68,6 +68,12 @@ trait BList extends PlatDBIterable:
       */
     def slice(from:Int,until:Int):Option[BList]
     /**
+      * Invert the list in place.
+      *
+      * @return
+      */
+    def reverseInPlace:Unit
+    /**
       * Invert the list, and the obtained inverse list is in read-only mode
       *
       * @return
@@ -78,7 +84,7 @@ trait BList extends PlatDBIterable:
       *
       * @return
       */
-    def init:BList
+    def head:BList
     /**
       * The list obtained after removing the header element is in read-only mode
       *
@@ -251,7 +257,7 @@ private object KList:
     //
     def indexElements(value:String):Option[ArrayBuffer[(Long,Long,Int)]] = 
         val data = Base64.getDecoder().decode(value)
-        if data.length < indexHeaderSize then
+        if data == null || data.length < indexHeaderSize then
             return None
         val count = (data(0) & 0xff) << 24 | (data(1) & 0xff) << 16 | (data(2) & 0xff) << 8 | (data(3) & 0xff)
         if data.length != (indexHeaderSize+indexElementSize*count) then
@@ -307,7 +313,7 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
       *
       * @return
       */
-    def head:Option[String] = 
+    def first:Option[String] = 
         if index.length > 0 then
             val (i,_,_) = index(0)
             bk.get(formatKey(i))
@@ -324,6 +330,8 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             bk.get(formatKey(i))
         else 
             None
+    
+    def reverseInPlace:Unit = None
     /**
       * 
       */
@@ -338,7 +346,7 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
     /**
       * 
       */
-    def init:BList = 
+    def head:BList = 
         var list = new KList(bk,true)
         if index.length > 0 then
             val (i,j,n) = index(index.length-1)
@@ -997,15 +1005,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         catch
             case e:Exception => Failure(e)
 
-private[platdb] class KListIter(val list:KList) extends CollectionIterator:
-    def find(key:String):Option[(String,String)] = ???
-    def first():Option[(String,String)] = ???
-    def last():Option[(String,String)] = ???
-    def hasNext():Boolean = ???
-    def next():Option[(String,String)] = ???
-    def hasPrev():Boolean = ???
-    def prev():Option[(String,String)] = ???
-
 /**
   * 
   *
@@ -1018,7 +1017,7 @@ class BListIter(val list:BList) extends CollectionIterator:
     // index = 0
     def first():Option[(String,String)] = 
         idx = 0
-        list.head match
+        list.first match
             case None => None
             case Some(v) => Some(("0",v))
     // index = list.length-1

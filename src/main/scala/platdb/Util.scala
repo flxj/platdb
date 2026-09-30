@@ -22,6 +22,11 @@ import scala.util.control.Breaks._
 import java.nio.ByteBuffer
 
 private object Util:
+    def encodeLong(v:Long):Array[Byte] = longToBytes(v ^ Long.MinValue)
+    def decodeLong(b:Array[Byte]):Long = 
+        val v = bytesToLong(b)
+        v ^ Long.MinValue
+        
     def intToBytes(v: Long): Array[Byte] = 
         Array(
             ((v >> 24) & 0xFF).toByte,

@@ -119,7 +119,8 @@ object DB:
 given defaultOptions:Options = Options(DB.defaultTimeoutMs,DB.defaultBufSize,false,DB.defaultFillPercent,System.getProperty("java.io.tmpdir"))
 
 /**
-  * DB represents a database object consisting of several buckets, each of which is a collection of key-value pairs (nested buckets are supported).
+  * DB represents a database object consisting of several buckets, 
+  * each of which is a collection of key-value pairs (nested buckets are supported).
   * All operations performed by users on buckets are performed in transactions.
   * 
   */
@@ -136,7 +137,8 @@ class DB(val path:String)(using ops:Options):
     private var rTx:ArrayBuffer[Tx] = new ArrayBuffer[Tx]()
     private var rwTx:Option[Tx] = None 
     // Locks are used to control the execution of read and write transactions. 
-    // PlatDB allows multiple read-only transactions and at most one read-write transaction to execute concurrently at the same time.
+    // PlatDB allows multiple read-only transactions and at most one read-write 
+    // transaction to execute concurrently at the same time.
     private var rwLock:ReentrantReadWriteLock = new ReentrantReadWriteLock()
     // Used to protect meta information.
     private var metaLock:ReentrantLock = new ReentrantLock()

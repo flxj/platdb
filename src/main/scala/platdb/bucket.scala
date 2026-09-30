@@ -179,7 +179,7 @@ private[platdb] object BTreeBucket:
     val valueSize:Int = 25
     def getValue(value:String):Option[BucketValue] = getValue(Base64.getDecoder().decode(value))
     def getValue(data:Array[Byte]):Option[BucketValue] = 
-        if data.length != valueSize then
+        if data == null || data.length != valueSize then
             None 
         else
             val arr = for i <- 0 to 2 yield
@@ -1060,7 +1060,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       */
     def getList(name:String,readonly:Boolean):Option[BList] = 
         getBucket(name,Collection.typeBList) match
-            case Some(bk) => KList(bk,readonly)
+            case Some(bk) => BKList(bk,readonly)
             case None => None
     /**
       * 
@@ -1070,7 +1070,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       */
     def createList(name:String):Option[BList] = 
         createBucket(name,Collection.typeBList) match
-            case Some(bk) => KList(bk,false)
+            case Some(bk) => BKList(bk,false)
             case None => None
     /**
       * 
@@ -1080,7 +1080,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       */
     def createListIfNotExists(name:String):Option[BList] = 
         createBucketIfNotExists(name,Collection.typeBList) match
-            case Some(bk) => KList(bk,false) 
+            case Some(bk) => BKList(bk,false) 
             case None => None
     /**
       * 

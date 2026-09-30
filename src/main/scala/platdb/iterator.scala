@@ -102,11 +102,7 @@ private class Roadmap(var node:Option[Node],var block:Option[Block],var index:In
             case (None,None) => 0
             case (Some(n),_) => n.length
             case (_,Some(b)) => b.header.count
-/**
-  * 
-  *
-  * @param bucket
-  */
+/*
 private[platdb] class BTreeBucketIter(bucket:BTreeBucket) extends CollectionIterator:
     // use a stack to Roadmap serach path.
     private var stack:List[Roadmap] = List[Roadmap]()
@@ -479,6 +475,7 @@ private[platdb] class BTreeBucketIter(bucket:BTreeBucket) extends CollectionIter
                 stack = stack.init
                 stack :+= r
                 seek(key,elems(idx).child)
+*/
 /////////////////////////////////////////////////////////////////////////////////////
 private[platdb] class BTreeBucketIter2(bucket:BTreeBucket) extends CollectionIterator:
     // use a stack to Roadmap serach path.

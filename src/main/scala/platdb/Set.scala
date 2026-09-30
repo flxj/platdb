@@ -20,7 +20,8 @@ import scala.util.{Success,Failure,Try}
 import scala.collection.mutable.TreeMap
 
 /**
-  * BSet represents a set of string elements on disk, where the elements are unique and can be traversed in dictionary order.
+  * BSet represents a set of string elements on disk, 
+  * where the elements are unique and can be traversed in dictionary order.
   */
 trait BSet extends PlatDBIterable:
     /**
@@ -63,56 +64,64 @@ trait BSet extends PlatDBIterable:
       */
     def remove(keys:Seq[String]):Unit
     /**
-      * Calculate the intersection of the current set and the target set, and the result is still a BSet (the object is stored in memory).
+      * Calculate the intersection of the current set and the target set, 
+      * and the result is still a BSet (the object is stored in memory).
       *
       * @param set
       * @return
       */
     def and(set:BSet):BSet
     /**
-      * Calculate the intersection of the current set and the target set，and the result is still a BSet (the object is stored in memory).
+      * Calculate the intersection of the current set and the target set，
+      * and the result is still a BSet (the object is stored in memory).
       *
       * @param set
       * @return
       */
     def and(set:Set[String]):BSet
     /**
-      * Calculate the union of the current set and the target set，and the result is still a BSet (the object is stored in memory).
+      * Calculate the union of the current set and the target set，
+      * and the result is still a BSet (the object is stored in memory).
       *
       * @param set
       * @return
       */
     def union(set:BSet):BSet
     /**
-      * Calculate the union of the current set and the target set，and the result is still a BSet (the object is stored in memory).
+      * Calculate the union of the current set and the target set，
+      * and the result is still a BSet (the object is stored in memory).
       *
       * @param set
       * @return
       */
     def union(set:Set[String]):BSet
     /**
-      * Calculate the difference between the current set and the target set，and the result is still a BSet (the object is stored in memory).
+      * Calculate the difference between the current set and the target set，
+      * and the result is still a BSet (the object is stored in memory).
       *
       * @param set
       * @return
       */
     def diff(set:BSet):BSet
     /**
-      * Calculate the difference between the current set and the target set，and the result is still a BSet (the object is stored in memory).
+      * Calculate the difference between the current set and the target set，
+      * and the result is still a BSet (the object is stored in memory).
       *
       * @param set
       * @return
       */
     def diff(set:Set[String]):BSet
     /**
-      * A convenient method for calculating intersections, equivalent to the add method.
+      * A convenient method for calculating intersections, 
+      * equivalent to the add method.
       *
       * @param set
       * @return
       */
     def &(set:BSet):BSet = and(set)
     /**
-      * A convenient method for calculating intersections, equivalent to the add method.
+      * A convenient method for calculating intersections, 
+      * equivalent to the add method.
       *
       * @param set
       * @return
@@ -120,7 +129,8 @@ trait BSet extends PlatDBIterable:
       */
     def &(set:Set[String]):BSet = and(set) 
     /**
-      * A convenient method for calculating unions, equivalent to the union method.
+      * A convenient method for calculating unions, 
+      * equivalent to the union method.
       *
       * @param set
       * @return
@@ -128,7 +138,8 @@ trait BSet extends PlatDBIterable:
       */
     def |(set:BSet):BSet = union(set) 
     /**
-      * A convenient method for calculating unions, equivalent to the union method.
+      * A convenient method for calculating unions, 
+      * equivalent to the union method.
       *
       * @param set
       * @return
@@ -136,7 +147,8 @@ trait BSet extends PlatDBIterable:
       */
     def |(set:Set[String]):BSet = union(set) 
     /**
-      * A convenient method for calculating difference sets, equivalent to the diff method.
+      * A convenient method for calculating difference sets, 
+      * equivalent to the diff method.
       *
       * @param set
       * @return
@@ -144,7 +156,8 @@ trait BSet extends PlatDBIterable:
       */
     def -(set:BSet):BSet = diff(set) 
     /**
-      * A convenient method for calculating difference sets, equivalent to the diff method.
+      * A convenient method for calculating difference sets, 
+      * equivalent to the diff method.
       *
       * @param set
       * @return
@@ -162,7 +175,7 @@ private[platdb] class BTreeSet(var bk:BTreeBucket) extends BSet:
     def length:Long = bk.length
     def closed:Boolean = bk.closed
     def contains(key:String):Boolean = bk.contains(key)
-    def iterator:CollectionIterator = new BTreeSetIter(new BTreeBucketIter(bk)) 
+    def iterator:CollectionIterator = new BTreeSetIter(new BTreeBucketIter2(bk)) 
     def -=(key:String):Unit = bk-=(key)
     def +=(key:String):Unit = bk+=(key,"")
     /**
@@ -329,7 +342,7 @@ private[platdb] class BTreeSet(var bk:BTreeBucket) extends BSet:
   *
   * @param iter
   */
-private class BTreeSetIter(val iter:BTreeBucketIter) extends CollectionIterator:
+private class BTreeSetIter(val iter:BTreeBucketIter2) extends CollectionIterator:
     def find(key:String):Option[(String,String)] = iter.find(key)
     def first():Option[(String,String)]  = iter.first()
     def last():Option[(String,String)] = iter.last()
