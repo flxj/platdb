@@ -67,6 +67,8 @@ private[platdb] object BKList:
         list.elems = bk.getRawBucket(keyElems) match
             case Some(bucket) => bucket
             case None => 
+                if readonly then
+                    return None
                 bk.createRawBucketIfNotExists(keyElems) match
                     case None => throw new Exception("create list failed: create bucket error")
                     case Some(bucket) => bucket
@@ -710,76 +712,6 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
                     if i - j > 0 then
                         index.remove(j,i-j)
         r
-    /*
-    private val mp:Map[String,String] = Map[String,String]()
-
-    def testRemove(idx:Int,count:Int):Unit = 
-        if idx < 0 || count < 0 || idx+count > length then
-            throw new Exception(s"index [$idx ${idx+count}) out of range [0,${length})")
-        if count == 0 then
-            return None
-
-        val sidx = indexRange(info.reverseFlag,idx,count,true)
-        for (l,r,_) <- sidx do 
-            for k <- l to r do 
-                mp.remove(new String(fmtKey(k)))
-        info.size -= count
-
-    def testAppend(elem:String):Unit = 
-        if length == 0 then
-            mp.put(new String(fmtKey(0L)),elem)
-            index.append((0L,0L,1))
-        else
-            if info.reverseFlag then
-                val (m,n,l) = index(0)
-                mp.put(new String(fmtKey(m-1)),elem)
-                index(0) = (m-1,n,l+1)
-            else
-                val (m,n,l) = index.last
-                mp.put(new String(fmtKey(n+1)),elem)
-                index(index.length-1) = (m,n+1,l+1)
-        info.size += 1
-        
-    def testAppend(items:Seq[String]):Unit = 
-        if items.length == 0 then
-            return None
-        var r:(Long,Long,Int) = (0L,-1L,0)
-        if index.length > 0 then
-            r = if info.reverseFlag then index(0) else index.last
-        
-        for (item,i) <- items.zipWithIndex do 
-            val k = if info.reverseFlag then fmtKey(r(0)-i-1) else fmtKey(r(1)+1+i)
-            mp.put(new String(k),item)
-        //
-        if index.length > 0 then
-            if info.reverseFlag then
-                index(0) = (r(0)-items.length,r(1),r(2)+items.length)
-            else
-                index(index.length-1) = (r(0),r(1)+items.length,r(2)+items.length)
-        else
-            if info.reverseFlag then
-                index.append((-2L-items.length,-1L,items.length))
-            else
-                index.append((0L,0L+items.length-1,items.length))
-        //
-        info.size += items.length
-
-    def printIndex:Unit = 
-        val x = (for (a,b,c) <- index yield s"[${a},${b},${c}]").mkString(",")
-        println(x)
-
-    def testGet(idx:Int):Option[String] = 
-        if idx < 0 || idx >= length then
-            throw new Exception(s"index $idx out of range [0,${length})")
-        mp.get(new String(getKey(idx,info.reverseFlag)))
-
-    def printElems:Unit = 
-        val items = for (a,b,_) <- index yield
-            for k <- a to b yield mp(new String(fmtKey(k)))
-        println(items.mkString(","))
-
-    def testKey(k:Long):String = new String(fmtKey(k))
-    */
 
 private[platdb] class BKListIter(list:BKList,bk:RawBucket,reverseFlag:Boolean) extends CollectionIterator:
     private var idx = -1L

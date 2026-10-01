@@ -305,7 +305,7 @@ class DB(val path:String)(using ops:Options):
                 var bk = new Block(data.length)
                 bk.header = h
                 bk.append(data)
-                FreeArray(bk) match
+                FreeList(bk) match
                     case None => throw new Exception(s"not found freelist data from page ${id}")
                     case Some(fl) => fl
     /**

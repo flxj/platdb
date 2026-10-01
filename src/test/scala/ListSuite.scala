@@ -5,6 +5,7 @@ import platdb._
 import platdb.defaultOptions
 import platdb.Collection._
 import scala.compiletime.ops.double
+import scala.annotation.threadUnsafe
 
 class ListSuit1 extends munit.FunSuite {
     val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
@@ -455,16 +456,110 @@ class ListSuit7 extends munit.FunSuite {
 }
 
 
-/*
+
 class ListSuit8 extends munit.FunSuite {
     val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
     val name:String = "list1"
 
-    test("test list"){
+    test("test take list"){
+        var db = new DB(path)
+        db.open() match
+                case Failure(exception) => throw exception
+                case Success(value) => println("open db success")
+        assertEquals(db.closed,false)
+        assertEquals(db.readonly,false)
+        val elems1 = List[String]("vv1","vv2","vv3","vv4","vv5")
+        val elems2 = List[String]("vv6","vv7","vv8","vv9","vv10")
+        var oldLen = 0L
+        
         try
-
+            db.update(
+                (tx:Transaction) => 
+                    given t:Transaction = tx
+                    var list = openList(name)
+                    oldLen = list.length
+                    list.prepend(elems1) 
+                    list.append(elems2) 
+            ) match
+                case Success(_) => println("write success")
+                case Failure(e) => throw e
+        
+            db.view((tx:Transaction) =>
+                tx.openList(name) match
+                    case None => println("open list success")
+                    case Some(list) => 
+                        if list.length != (oldLen+elems1.length+elems2.length) then
+                            throw new Exception(s"write elements number error: now length=${list.length}")
+                        
+                        list.take(elems1.length) match
+                            case None => throw new Exception("take list error")
+                            case Some(s1) => 
+                                if s1.length != elems1.length then 
+                                    throw new Exception(s"take list length error: ${s1.length}")
+                                val sl1 = (
+                                    for kv <- s1.iterator yield kv match
+                                        case None => ""
+                                        case Some(_,v) => v 
+                                )
+                                for (v1,v2) <- sl1.zip(elems1.reverse) do 
+                                    if v1 != v2 then
+                                        throw new Exception("take list element error")
+                                println(sl1.mkString(","))
+            ) match
+                case Success(_) => None
+                case Failure(e) => throw e
         catch
             case e:Exception => throw e
+        finally
+            db.close() match
+                case Failure(exception) => println(s"close db failed: ${exception.getMessage()}")
+                case Success(value) => println("close db success")
     }
 }
-*/
+
+class ListSuit9 extends munit.FunSuite {
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
+    val name:String = "list1"
+
+    test("test list drop"){
+        var db = new DB(path)
+        db.open() match
+                case Failure(exception) => throw exception
+                case Success(value) => println("open db success")
+        assertEquals(db.closed,false)
+        assertEquals(db.readonly,false)
+        var oldLen = 0L
+        val count = 5
+        
+        try
+            db.update(
+                (tx:Transaction) =>
+                    given t:Transaction = tx
+                    var list = openList(name)
+                    oldLen = list.length
+                    list.drop(count) 
+                    list.dropRight(count) 
+            ) match
+                case Success(_) => println(s"drop list $name success")
+                case Failure(e) => throw e
+        
+            db.view(
+                (tx:Transaction) =>
+                    tx.openList(name) match
+                        case None => throw new Exception("open list failed")  
+                        case Some(list) => 
+                            if list.length != (oldLen-2*count) then
+                                throw new Exception(s"drop list failed: oldlen=${oldLen}, now len=${list.length}") 
+                            println("check drop success") 
+            ) match
+                case Success(_) => None
+                case Failure(e) => throw e
+        catch
+            case e:Exception => throw e
+        finally
+            db.close() match
+                case Failure(exception) => println(s"close db failed: ${exception.getMessage()}")
+                case Success(value) => println("close db success")
+    }
+}
+

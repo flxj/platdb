@@ -97,14 +97,14 @@ trait BList extends PlatDBIterable:
       * @param p
       * @return
       */
-    def filter(p:(String) => Boolean): BList
+    def filter(pred:(String) => Boolean): BList
     /**
       * Find the index of the first element that meets the condition, and return -1 if it does not exist
       *
       * @param p
       * @return
       */
-    def find(p:(String) => Boolean):Int
+    def find(pred:(String) => Boolean):Int
     /**
       * Get the first n elements, and the obtained sublist is read-only
       *
@@ -206,7 +206,7 @@ trait BList extends PlatDBIterable:
       * @param p
       * @return
       */
-    def exists(p:(String) => Boolean): Boolean
+    def exists(pred:(String) => Boolean): Boolean
     /**
       * Convenient methods for retrieving elements
       *
@@ -234,6 +234,7 @@ trait BList extends PlatDBIterable:
       */
     def update(index:Int,elem:String):Unit
 
+/*
 private object KList:
     val indexHeaderSize = 4
     val indexElementSize = 12
@@ -280,20 +281,8 @@ private object KList:
             buf.putInt(b)
         Base64.getEncoder().encodeToString(buf.array())
 
-/**
-  * 
-  *
-  * @param idx
-  * @param start
-  * @param end
-  */
 private[platdb] case class IndexSlice(idx:Int,start:Long,end:Long)
 
-/**
-  * TODO: if index is to large,we need split the index list to multiple fragments to store.
-  *
-  * @param bk
-  */
 private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
     var len:Long = 0L
     var index:ArrayBuffer[(Long,Long,Int)] = null
@@ -308,22 +297,12 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
     
     def iterator: CollectionIterator = new BListIter(this)
     
-    /**
-      * 
-      *
-      * @return
-      */
     def first:Option[String] = 
         if index.length > 0 then
             val (i,_,_) = index(0)
             bk.get(formatKey(i))
         else 
             None
-    /**
-      * 
-      *
-      * @return
-      */
     def last:Option[String] = 
         if index.length > 0 then
             val (_,i,_) = index(index.length-1)
@@ -332,9 +311,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             None
     
     def reverseInPlace:Unit = None
-    /**
-      * 
-      */
     def reverse:BList = 
         var list = new KList(bk,true)
         var idx = new ArrayBuffer[(Long,Long,Int)]()
@@ -343,9 +319,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         list.index = idx 
         list
     
-    /**
-      * 
-      */
     def head:BList = 
         var list = new KList(bk,true)
         if index.length > 0 then
@@ -358,10 +331,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         else 
             list.index = new ArrayBuffer[(Long,Long,Int)]()
         list
-    
-    /**
-      * 
-      */
     def tail:BList =
         var list = new KList(bk,true)
         if index.length > 0 then
@@ -375,13 +344,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             list.index = new ArrayBuffer[(Long,Long,Int)]()
         list
     
-    /**
-      * 
-      *
-      * @param from
-      * @param until
-      * @return
-      */
     def slice(from:Int,until:Int):Option[BList] = 
         if from <0 || from >= length || until <0 ||  until >= length then
             throw new Exception(s"index from($from) or until($until) out of bound [0,${length})")
@@ -398,11 +360,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             n+=m 
         list.len = n
         Some(list)
-    /**
-      * 
-      *
-      * @param p
-      */
     def filter(p:(String) => Boolean): BList = 
         var idx = new ArrayBuffer[(Long,Long,Int)]()
         for (m,n,_) <- index do
@@ -424,12 +381,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         list.len = n
         list
     
-    /**
-      * 
-      *
-      * @param n
-      * @return
-      */
     def take(n: Int): Option[BList] = 
         if n < 0 || n > length then
             throw new Exception(s"$n out of bound [0,${length}]")
@@ -442,12 +393,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         list.len = n.toLong
         Some(list)
         
-    /**
-      * 
-      *
-      * @param n
-      * @return
-      */
     def takeRight(n: Int): Option[BList] = 
         if n < 0 || n > length then
             throw new Exception(s"$n out of bound [0,${length}]")
@@ -460,13 +405,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         list.len = n.toLong
         Some(list)
   
-    // TODO only delete index,not delete bucket elements.
-    /**
-      * 
-      *
-      * @param n
-      * @return
-      */
     def drop(n: Int): Unit = 
         if readonly then
             throw new Exception("current list is readonly mode")
@@ -482,12 +420,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         index = cp
         len-=n
         None
-    /**
-      * 
-      *
-      * @param n
-      * @return
-      */
     def dropRight(n: Int): Unit = 
         if readonly then
             throw new Exception("current list is readonly mode")
@@ -514,12 +446,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
                             break()
         )
         idx
-    /**
-      * 
-      *
-      * @param p
-      * @return
-      */
     def exists(p:(String) => Boolean): Boolean = 
         var flag = false
         breakable(
@@ -532,22 +458,8 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         )
         flag
     
-    /**
-      * 
-      *
-      * @param idx
-      * @param elem
-      * @return
-      */
     def insert(idx: Int, elem:String): Unit = insert(idx,elem)
 
-    /**
-      * 
-      *
-      * @param idx
-      * @param elems
-      * @return
-      */
     def insert(idx: Int, elems: Seq[String]):Unit =
         if readonly then
             throw new Exception("current list is readonly mode")
@@ -580,13 +492,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         bk+=(KList.indexKey,KList.indexValue(cp))
         index = cp
         len+=elems.length
-    
-    /**
-      * 
-      *
-      * @param elem
-      * @return
-      */
     def prepend(elem: String):Unit = 
         if readonly then
             throw new Exception("current list is readonly mode")
@@ -602,13 +507,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         bk+=(KList.indexKey,KList.indexValue(cp))
         index = cp
         len+=1
-    
-    /**
-      * 
-      *
-      * @param elem
-      * @return
-      */
     def append(elem: String):Unit = 
         if readonly then
             throw new Exception("current list is readonly mode")
@@ -624,7 +522,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         bk+=(KList.indexKey,KList.indexValue(cp))
         index = cp
         len+=1
-
     def prepend(elems:Seq[String]):Unit = 
         if readonly then
             throw new Exception("current list is readonly mode")
@@ -648,7 +545,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         bk+=(KList.indexKey,KList.indexValue(cp))
         index = cp
         len+=elems.length
-
     def append(elems:Seq[String]):Unit = 
         if readonly then
             throw new Exception("current list is readonly mode")
@@ -673,7 +569,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         bk+=(KList.indexKey,KList.indexValue(cp))
         index = cp
         len+=elems.length
-
     def remove(idx: Int): Unit = remove(idx,1)
     def remove(idx: Int, count: Int):Unit = 
         if readonly then
@@ -698,25 +593,20 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             throw new Exception(s"index $idx out of bound [0,${length})")
         
         bk+=(formatKey(getKey(idx)),elem) 
-    //
     def get(idx:Int):Option[String] =
         if idx < 0 || idx >= length then
             throw new Exception(s"index $idx out of bound [0,${length})")
         bk.get(formatKey(getKey(idx)))
-
-    //
     def update(idx: Int, elem:String):Unit = 
         if readonly then
             throw new Exception("current list is readonly mode")
         if idx < 0 || idx >= length then
             throw new Exception(s"index $idx out of bound [0,${length})")
         bk+=(formatKey(getKey(idx)),elem) 
-
     def apply(idx: Int):String = 
         if idx < 0 || idx >= length then
             throw new Exception(s"index $idx out of bound [0,${length})")
         bk(formatKey(getKey(idx)))
-    //
     def :+=(elem:String):Unit = 
         if readonly then
             throw new Exception("the list is readonly mode")
@@ -732,7 +622,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         bk+=(KList.indexKey,KList.indexValue(cp))
         index = cp 
         len+=1
-    //
     def +:=(elem:String):Unit = 
         if readonly then
             throw new Exception("the list is readonly mode")
@@ -749,19 +638,8 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         index = cp
         len+=1
     
-    /**
-      * 
-      *
-      * @param n
-      * @return
-      */
     private def formatKey(n:Long):String = n.toBinaryString
-    /**
-      * convert list index value to element key in bucket.
-      *
-      * @param n
-      * @return
-      */
+    
     private def getKey(n:Int):Long =
         var p = 0
         var k = 0L
@@ -774,13 +652,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         )
         k
     
-    /**
-      * 
-      *
-      * @param arr
-      * @param n
-      * @return
-      */
     private def getInsertIndex(arr:ArrayBuffer[(Long,Long,Int)],n:Int):(Int,Long) = 
         var p = 0
         var idx = 0
@@ -796,13 +667,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         )
         (idx,k)
     
-    /**
-      * Gets the key value of n consecutive elements starting from the specified subscript of the list.
-      *
-      * @param idx
-      * @param count
-      * @return
-      */
     private def getIndexSlice(idx:Long,count:Int):List[IndexSlice] = 
         var c = 0L
         var p = 0
@@ -829,12 +693,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         )
         list
 
-    /**
-      * Remove these index fragments from the index.
-      *
-      * @param arr
-      * @param s
-      */
     private def removeIndexSlice(arr:ArrayBuffer[(Long,Long,Int)],s:List[IndexSlice]):Unit = 
         for is <- s.reverse do
             val (s,e,n) = arr(is.idx)
@@ -855,12 +713,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
     private def min(a:Long,b:Long):Long = if a>=b then b else a
     private def max(a:Long,b:Long):Long = if a>=b then a else b
 
-    /**
-      * 
-      *
-      * @param arr
-      * @param is
-      */
     private def mergeIndexSlice(arr:ArrayBuffer[(Long,Long,Int)],is:IndexSlice):Unit = 
         if is.idx <0 || is.idx >= arr.length then
             return None
@@ -895,14 +747,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         arr.clear()
         arr ++= newIdx
     
-    /**
-      * 
-      *
-      * @param arr
-      * @param idx
-      * @param key
-      * @return
-      */
     private def splitIndex(arr:ArrayBuffer[(Long,Long,Int)],idx:Int,key:Long):(ArrayBuffer[(Long,Long,Int)],ArrayBuffer[(Long,Long,Int)]) =
         var arr1 = ArrayBuffer[(Long,Long,Int)]()
         var arr2 = ArrayBuffer[(Long,Long,Int)]()
@@ -919,14 +763,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             arr2.prepend((key,e,(e-key).toInt))
         (arr1,arr2)
     
-    /**
-      * 
-      *
-      * @param arr
-      * @param idx
-      * @param count
-      * @return
-      */
     private def shiftLeft(arr:ArrayBuffer[(Long,Long,Int)],idx:Int,count:Int):Try[IndexSlice] = 
         val (ii,k) = getInsertIndex(arr,idx)
         // split the raw index,and we just need shift the first half.
@@ -962,14 +798,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
         catch
             case e:Exception => Failure(e)
 
-    /**
-      * 
-      *
-      * @param arr
-      * @param idx
-      * @param count
-      * @return
-      */
     private def shiftRight(arr:ArrayBuffer[(Long,Long,Int)],idx:Int,count:Int):Try[IndexSlice] = 
         val (ii,k) = getInsertIndex(arr,idx)
         // split the raw index,and we just need shift the second half.
@@ -1004,12 +832,6 @@ private[platdb] class KList(val bk:Bucket,val readonly:Boolean) extends BList:
             Success(IndexSlice(ii,k,k+count-1))
         catch
             case e:Exception => Failure(e)
-
-/**
-  * 
-  *
-  * @param list
-  */
 class BListIter(val list:BList) extends CollectionIterator:
     private var idx = 0
     // find element by index.
@@ -1046,3 +868,4 @@ class BListIter(val list:BList) extends CollectionIterator:
                 val item = (idx.toString,v)
                 idx-=1
                 Some(item)
+*/

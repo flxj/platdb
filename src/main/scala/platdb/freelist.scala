@@ -141,6 +141,7 @@ private object FreeList:
             c = c >> 8
         arr
 
+/*
 private object FreeArray:
     def apply(bk:Block):Option[FreeArray] = 
         val hSize = FreeList.headSize
@@ -370,6 +371,7 @@ private[platdb] class FreeArray(var header:BlockHeader) extends FreeManager:
         })
         //arr.sortInPlaceWith((p1:(Long,_),p2:(Long,_)) => p1(0) < p2(0)) // TODO: use insert,not sort
         reduce(arr)
+*/
 
 // An double linked list Implementation.
 private[platdb] class FreeList(var header:BlockHeader) extends FreeManager:

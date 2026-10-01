@@ -19,7 +19,7 @@ platdb实现参考了boltdb等项目，本人开发platdb的主要目的之一�
 
 sbt
 ```scala
-libraryDependencies += "io.github.flxj" %% "platdb" % "0.15.0"
+libraryDependencies += "io.github.flxj" %% "platdb" % "0.15.1"
 ```
 
 maven
@@ -27,7 +27,7 @@ maven
 <dependency>
   <groupId>io.github.flxj</groupId>
   <artifactId>platdb_3</artifactId>
-  <version>0.15.0</version>
+  <version>0.15.1</version>
 </dependency>
 ```
 
