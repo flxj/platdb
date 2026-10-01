@@ -425,7 +425,7 @@ extension (arr:ArrayBuffer[Entry])
                 x(i) = m
                 y(i) = n
             Rectangle(x,y)
-    def size:Int = 
+    def bytesSize:Int = 
         var sz = BlockHeader.size
         if arr.length > 0 then
             val d = arr(0).mbr.dimension
@@ -586,7 +586,7 @@ private[platdb] class RNode(var header:BlockHeader) extends Persistence:
                     break()
         )
     //
-    def size():Int = entries.size
+    def size():Int = entries.bytesSize
     //
     def writeTo(blk: Block): Int = 
         if isLeaf then

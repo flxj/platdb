@@ -568,10 +568,11 @@ class DB(val path:String)(using ops:Options):
                     if !ignoreExists then tx.createRawBucket(name) else tx.createRawBucketIfNotExists(name)
                 case CollectionType.Region => 
                     if !ignoreExists then tx.createRegion(name,dimension) else tx.createRegionIfNotExists(name,dimension)
-                case _ => Failure(new Exception(s"unknown collection type $cType"))
+                case _ => throw new Exception(s"unknown collection type $cType")
+            
             res match
-                case Failure(ex) => throw ex
-                case Success(_) => None 
+                case Some(_) => Success(None)
+                case None => Failure(new Exception(s"create collection (type:$cType) failed"))
         )
     /**
       * Delete a collection object of a specified type.
@@ -583,18 +584,19 @@ class DB(val path:String)(using ops:Options):
       */
     def deleteCollection(name:String,cType:CollectionType,ignoreNotExists:Boolean):Try[Unit] = 
         update((tx:Transaction) =>
-            val res = cType match
-                case CollectionType.Bucket => tx.deleteBucket(name) 
-                case CollectionType.BSet => tx.deleteBSet(name) 
-                case CollectionType.BList => tx.deleteList(name) 
-                case CollectionType.Region => tx.deleteRegion(name)
-                case CollectionType.RawBucket => tx.deleteRawBucket(name)
-                case _ => Failure(new Exception(s"unknown collection type $cType"))
-            res match
-                case Failure(ex) => 
+            try
+                cType match
+                    case CollectionType.Bucket => tx.deleteBucket(name) 
+                    case CollectionType.BSet => tx.deleteBSet(name) 
+                    case CollectionType.BList => tx.deleteList(name) 
+                    case CollectionType.Region => tx.deleteRegion(name)
+                    case CollectionType.RawBucket => tx.deleteRawBucket(name)
+                    case _ => throw new Exception(s"unknown collection type $cType")
+                Success(None)
+            catch
+                case ex:Exception => 
                     if !(ignoreNotExists && DB.isNotExists(ex)) then 
                         throw ex
-                case Success(_) => None
         )
     /**
       * Executes user functions in the context of a read-write transaction. 

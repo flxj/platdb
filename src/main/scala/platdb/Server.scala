@@ -204,7 +204,8 @@ class Server private (val ops:ServerOptions,val log:Logger) extends JsonSupport:
         val bindingFuture = Http().newServerAt(ops.host, ops.port).bind(route)
         log.info("server now online,please navigate to http://{}:{}/v1",ops.host,ops.port)
         //
-        val waitOnFuture = Promise[Done].future 
+        //val waitOnFuture = Promise[Done].future 
+        val waitOnFuture = Promise().future 
         val shutdownHook = ShutdownHookThread{
                 log.info("shutdown hook is running")
                 val unbind = bindingFuture.flatMap(_.unbind())
