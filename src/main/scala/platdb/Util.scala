@@ -18,7 +18,7 @@ package platdb
 
 import scala.util.Random
 import scala.compiletime.ops.double
-import scala.util.control.Breaks._
+import scala.util.boundary, boundary.break
 import java.nio.ByteBuffer
 
 private object Util:
@@ -103,17 +103,15 @@ private object Util:
         if a == null then 
             if b == null then 0 else -1
         else
-            var r:Int = 0 
             if b != null then 
-                breakable(
+                val r = boundary {
                     for i <- 0 until min(a.length,b.length) do 
                         if a(i) > b(i) then 
-                            r = 1
-                            break()
+                            break(1)
                         else if a(i) < b(i) then
-                            r = -1
-                            break()
-                )
+                            break(-1)
+                    0
+                }
                 if r != 0 then r else a.length - b.length
             else 
                 1
@@ -245,7 +243,7 @@ private[platdb] class SkipList[K, V](maxLevel: Int = 16,probability: Double = 0.
         var cur: SkipListNode[K, V] = head
         var i = curLevel
         while i >= 0 do
-            breakable(
+            boundary {
                 while true do cur.next(i) match
                     case None => break()
                     case Some(node) => 
@@ -253,7 +251,7 @@ private[platdb] class SkipList[K, V](maxLevel: Int = 16,probability: Double = 0.
                             cur = node 
                         else
                             break()
-            )
+            }
             preds(i) = Some(cur)
             i -= 1
         preds
@@ -294,7 +292,7 @@ private[platdb] class SkipList[K, V](maxLevel: Int = 16,probability: Double = 0.
         var cur: SkipListNode[K, V] = head
         var i = curLevel
         while i >= 0 do
-            breakable(
+            boundary {
                 while true do cur.next(i) match
                     case None => break()
                     case Some(node) => 
@@ -302,7 +300,7 @@ private[platdb] class SkipList[K, V](maxLevel: Int = 16,probability: Double = 0.
                             cur = node 
                         else
                             break()
-            )
+            }
             i -= 1
 
         cur.next(0) match

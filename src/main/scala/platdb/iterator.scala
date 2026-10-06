@@ -17,7 +17,7 @@
 package platdb
 
 import scala.util.Try
-import scala.util.control.Breaks._
+import scala.util.boundary, boundary.break
 import scala.collection.mutable.{ArrayBuffer}
 import scala.collection.mutable
 
@@ -692,13 +692,13 @@ private[platdb] class BTreeBucketIter2(bucket:BTreeBucket) extends CollectionIte
                         case Some(_) => None
                     r.node
             // top-down: convert blocks on search path to nodes.
-            breakable(
+            boundary {
                 for i <- 0 until idx-1 do
                     val r = stack(i) 
                     bucket.getNodeChild(n,r.index) match
                         case Some(nd) => n = Some(nd) 
                         case None => break()
-            )
+            }
             n match
                 case None => None
                 case Some(node) => if node.isLeaf then Some(node) else None

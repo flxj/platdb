@@ -18,7 +18,7 @@ package platdb
 
 import java.nio.ByteBuffer
 import scala.collection.mutable.{ArrayBuffer}
-import scala.util.control.Breaks._
+import scala.util.boundary, boundary.break
 import java.nio.charset.StandardCharsets
 import java.nio.charset.Charset
 
@@ -86,14 +86,11 @@ private[platdb] object Node:
                 if data.length < bk.header.count*indexSize then
                     return None
                 var elems = new ArrayBuffer[NodeElement]()
-                var err:Boolean = false 
-                breakable( 
+                val err = boundary { 
                     for i <- 0 until bk.header.count do
                         val idx = data.slice(indexSize*i,(i+1)*indexSize) 
                         unmashalIndex(idx) match
-                            case None => 
-                                err = true
-                                break() 
+                            case None => break(true) 
                             case Some(ni) =>
                                 val off = ni.offset - BlockHeader.size
                                 val key = new String(data.slice(off,off+ni.keySize),charSet)
@@ -103,7 +100,8 @@ private[platdb] object Node:
                                     child = 0 
                                     value = new String(data.slice(off+ni.keySize,(off+ni.keySize+ni.valSize).toInt),charSet)
                                 elems += new NodeElement(ni.flag,child,key,value)
-                )
+                    false
+                }
                 if !err then Some(elems) else None
     //
     def rawElements(bk:Block):Option[ArrayBuffer[RawNodeElement]] = 
@@ -113,14 +111,11 @@ private[platdb] object Node:
                 if data.length < bk.header.count*indexSize then
                     return None
                 var elems = new ArrayBuffer[RawNodeElement]()
-                var err:Boolean = false 
-                breakable( 
+                val err = boundary { 
                     for i <- 0 until bk.header.count do
                         val idx = data.slice(indexSize*i,(i+1)*indexSize) 
                         unmashalIndex(idx) match
-                            case None => 
-                                err = true
-                                break() 
+                            case None => break(true) 
                             case Some(ni) =>
                                 val off = ni.offset - BlockHeader.size
                                 val key = data.slice(off,off+ni.keySize)
@@ -130,7 +125,8 @@ private[platdb] object Node:
                                     child = 0 
                                     value = data.slice(off+ni.keySize,(off+ni.keySize+ni.valSize).toInt)
                                 elems += new RawNodeElement(ni.flag,child,key,value)
-                )
+                    false
+                }
                 if !err then Some(elems) else None
     // convert block to node.
     def rawNode(bk:Block):Option[RawNode] = 
@@ -275,13 +271,12 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
       * @param node
       */
     def removeChild(node:Node):Unit =
-        var idx:Int = -1 
-        breakable(
+        val idx = boundary {
             for i <- 0 until children.length do 
                 if children(i).id == node.id then 
-                    idx = i 
-                    break()
-        )
+                    break(i)
+            -1
+        }
         if idx >= 0 then 
             children.remove(idx)
 
@@ -292,14 +287,12 @@ private[platdb] class Node(var header:BlockHeader) extends Persistence:
       * @return
       */
     def childIndex(node:Node):Int =
-        var idx:Int = -1
-        breakable(
+        boundary {
             for i <- 0 until elements.length do 
                 if elements(i).child == node.id then 
-                    idx = i
-                    break()
-        )
-        idx
+                    break(i)
+            -1
+        }
     def size():Int = 
         var dataSize:Int = BlockHeader.size+(elements.length*Node.indexSize)
         for e <- elements do

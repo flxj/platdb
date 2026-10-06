@@ -34,7 +34,6 @@ import scala.concurrent.{Future,Promise,Await}
 import scala.concurrent.duration.{Duration,DurationInt}
 import scala.io.StdIn
 import scala.util.{Failure,Success,Try}
-import scala.util.control.Breaks._
 import scala.collection.mutable.Map
 import scala.sys.ShutdownHookThread
 import spray.json._

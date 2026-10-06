@@ -16,7 +16,7 @@
 
 package platdb
 
-import scala.util.control.Breaks._
+import scala.util.boundary, boundary.break
 import scala.collection.mutable.{ArrayBuffer}
 import net.sf.jsqlparser.expression.Expression
 
@@ -52,22 +52,20 @@ private[platdb] class FilterOperator(val child:Operator,val exp:Expression,val p
     def open(): Unit = child.open()
     def close():Unit = child.close()
     def next():Option[Record] = 
-        var r:Option[Record] = None
-        breakable (
+        boundary {
             while true do 
-                r = child.next() 
-                r match
-                    case None => break()
+                child.next() match
+                    case None => break(None)
                     case Some(re) =>
                         if exp != null then
                             pred.row = re.row 
                             val (ok,_) = exp.accept(pred,null)
                             if ok.length > 0 && (ok(0)&1) != 0 then
-                                break()
+                                break(Some(re))
                         else
-                            break()
-        )
-        r
+                            break(Some(re))
+            None
+        }
 
 private[platdb] class ProjectOperator(val child:Operator,val db:SQLEngine,val cidx:ArrayBuffer[Int]) extends Operator:
     private def project(cidx:ArrayBuffer[Int],row:Array[Array[Byte]]):Array[Array[Byte]] = 

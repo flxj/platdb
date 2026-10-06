@@ -17,7 +17,7 @@
 package platdb
 
 import scala.collection.mutable.{ArrayBuffer}
-import scala.util.control.Breaks._
+import scala.util.boundary, boundary.break
 import scala.util.Failure
 import scala.util.Success
 import scala.util.Try
@@ -142,13 +142,12 @@ private[platdb] object tableProto extends DefaultJsonProtocol {
   */
 private[platdb] class SQLEvaluator(val table:tableInfo,var row:Array[Array[Byte]]) extends ExpressionVisitorAdapter[(Array[Byte],Byte)] {
     override def visit[S](col: Column,ctx: S): (Array[Byte],Byte) = 
-        var idx:Int = -1 
-        breakable(
+        val idx = boundary {
             for (c,i) <- table.cols.zipWithIndex do 
                 if col.getColumnName() == c.name then 
-                    idx = i
-                    break()
-        )
+                    break(i)
+            -1
+        }
         if idx < 0 then throw new IllegalArgumentException(s"Column '${col.getColumnName}' not found in context")
         var t:Byte = 0
         if row(idx).length > 0 then 
@@ -181,14 +180,14 @@ private[platdb] class SQLEvaluator(val table:tableInfo,var row:Array[Array[Byte]
                 case 1 => 
                     var ok:Boolean = true
                     var ok2:Boolean = false 
-                    breakable(
+                    boundary {
                         for i <- 0 until Util.min(l.length,r.length) do 
                             if l(i) < r(i) then 
                                 ok = false
                                 break()
                             else if l(i) > r(i) then 
                                 ok2 = true 
-                    )
+                    }
                     if !ok then 
                         (Array[Byte](0),4) // <
                     else if ok2 then 
@@ -208,13 +207,12 @@ private[platdb] class SQLEvaluator(val table:tableInfo,var row:Array[Array[Byte]
                 case 3 => if Util.bytesToLong(l) >= Util.bytesToLong(r) then (Array[Byte](1),4) else (Array[Byte](0),4)
                 case 2 => if Util.bytesToDouble(l) >= Util.bytesToDouble(r) then (Array[Byte](1),4) else (Array[Byte](0),4)
                 case 1 => 
-                    var ok:Boolean = true
-                    breakable(
+                    val ok = boundary {
                         for i <- 0 until Util.min(l.length,r.length) do 
                             if l(i) < r(i) then 
-                                ok = false 
-                                break()
-                    )
+                                break(false)
+                        true
+                    }
                     if ok then (Array[Byte](1),4) else (Array[Byte](0),4)
                 case _ => (Array[Byte](0),0)
     }
@@ -231,14 +229,14 @@ private[platdb] class SQLEvaluator(val table:tableInfo,var row:Array[Array[Byte]
                 case 1 => 
                     var ok:Boolean = true
                     var ok2:Boolean = false 
-                    breakable(
+                    boundary {
                         for i <- 0 until Util.min(l.length,r.length) do 
                             if l(i) > r(i) then 
                                 ok = false
                                 break()
                             else if l(i) < r(i) then 
                                 ok2 = true 
-                    )
+                    }
                     if !ok then 
                         (Array[Byte](0),4) // > 
                     else if ok2 then 
@@ -258,13 +256,12 @@ private[platdb] class SQLEvaluator(val table:tableInfo,var row:Array[Array[Byte]
                 case 3 => if Util.bytesToLong(l) >= Util.bytesToLong(r) then (Array[Byte](1),4) else (Array[Byte](0),4)
                 case 2 => if Util.bytesToDouble(l) >= Util.bytesToDouble(r) then (Array[Byte](1),4) else (Array[Byte](0),4)
                 case 1 => 
-                    var ok:Boolean = true
-                    breakable(
+                    val ok = boundary {
                         for i <- 0 until Util.min(l.length,r.length) do 
                             if l(i) > r(i) then 
-                                ok = false 
-                                break()
-                    )
+                                break(false)
+                        true
+                    }
                     if ok then (Array[Byte](1),4) else (Array[Byte](0),4)
                 case _ => (Array[Byte](0),0)
     }

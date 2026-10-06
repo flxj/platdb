@@ -27,7 +27,6 @@ import java.nio.channels.FileChannel
 import java.util.Timer
 import java.util.Date
 import java.util.concurrent.locks.ReentrantLock
-import scala.util.control.Breaks._
 import scala.collection.mutable.Map
 import scala.collection.mutable.ArrayDeque
 import java.nio.channels.OverlappingFileLockException

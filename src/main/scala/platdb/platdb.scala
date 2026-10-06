@@ -22,7 +22,7 @@ import java.io.ByteArrayOutputStream
 import java.io.ByteArrayInputStream
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import scala.collection.mutable.ArrayBuffer
-import scala.util.control.Breaks._
+import scala.util.boundary, boundary.break
 import scala.util.{Try,Failure,Success}
 import java.util.concurrent.locks.ReentrantLock
 import java.util.concurrent.TimeUnit
@@ -750,13 +750,12 @@ class DB(val path:String)(using ops:Options):
       * @param txid
       */
     private[platdb] def removeTx(txid:Long):Unit =
-        var idx = -1
-        breakable(
+        val idx = boundary {
             for i <- 0 until rTx.length do
                 if txid == rTx(i).id then
-                    idx = i
-                    break()
-        )
+                    break(i)
+            -1
+        }
         if idx >=0 then
             rTx.remove(idx,1)
         else

@@ -27,7 +27,7 @@ import java.nio.channels.FileChannel
 import java.util.Timer
 import java.util.Date
 import java.util.concurrent.locks.ReentrantLock
-import scala.util.control.Breaks._
+import scala.util.boundary, boundary.break
 import scala.collection.mutable.Map
 import scala.collection.mutable.ArrayDeque
 import java.nio.channels.OverlappingFileLockException
@@ -171,13 +171,12 @@ private[platdb] class BlockManager(val maxsize:Int,var fm:FileManager) extends C
     def getIdleBlock(size:Int):Block =
         idleLock.lock()
         try 
-            var idx:Int = -1
-            breakable(
+            val idx = boundary {
                 for (bk,i) <- idle.zipWithIndex do
                     if bk.capacity >= size then
-                        idx = i
-                        break()
-            )
+                        break(i)
+                -1
+            }
             var bk:Block = null
             if idx >= 0 then
                 bk = idle.remove(idx)
@@ -239,22 +238,22 @@ private[platdb] class BlockManager(val maxsize:Int,var fm:FileManager) extends C
                             cached = true
                         else
                             // cache already full, so try to select a element to eliminate.
-                            breakable(
+                            idx = boundary {
                                 for i <- Range(link.length-1,-1,-1) do
                                     if !pinned.contains(link(i)) then
-                                        idx = i
-                                        break()
-                            )
+                                        break(i)
+                                -1
+                            }
                             if idx < 0 then // cache is busy,so we just ignore current block.
                                 ignore = true
                     else
                         // the block has cached, so just move it to head of link.
-                        breakable(
+                        idx = boundary {
                             for i <- Range(0,link.length,1) do
                                 if link(i) == bk.id then
-                                    idx = i
-                                    break()
-                        )
+                                    break(i)
+                            -1
+                        }
                     // update lru queue.
                     if idx >= 0 then
                         val id = link(idx)

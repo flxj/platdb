@@ -19,7 +19,7 @@ package platdb
 import scala.collection.immutable.Range
 import scala.collection.mutable.{ArrayBuffer,Map}
 import scala.util.{Try,Success,Failure}
-import scala.util.control.Breaks._
+import scala.util.boundary, boundary.break
 import java.nio.ByteBuffer
 import java.util.Base64
 import scala.compiletime.ops.double
@@ -269,14 +269,14 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
     def find(pred:(String) => Boolean):Int = 
         var idx = -1
         val iter = if !info.reverseFlag then iterator else reverseIterator
-        breakable(
+        boundary {
             for kv <- iter do kv match
                 case None => None
                 case Some((n,value)) =>
                         if pred(value) then
                             idx = n.toInt
                             break()   
-        )
+        }
         idx
     def take(n: Int): Option[BList] = 
         if n < 0 || n > length then
@@ -454,14 +454,14 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
     def exists(pred:(String) => Boolean): Boolean = 
         var ok:Boolean = false 
         val iter = if !info.reverseFlag then iterator else reverseIterator
-        breakable(
+        boundary {
             for kv <- iter do kv match
                 case None => None
                 case Some((_,value)) =>
                         if pred(value) then
                             ok = true
                             break()   
-        )
+        }
         ok
     def apply(idx: Int):String = get(idx) match
         case Some(value) => value
@@ -480,14 +480,14 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
             // until the end of the index list or the 
             // hole is greater than the count parameter.
             var j = i+1
-            breakable (
+            boundary {
                 while j < index.length do 
                     hole += index(j)(0)-index(j-1)(1)-1
                     if hole >= count then
                         break()
                     else
                         j += 1
-            )
+            }
             var l,r:Long = 0L
             var n:Int = 0
             if hole < count then
@@ -525,14 +525,14 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
                     index.remove(p+1,j-p-1)
         else
             var j = i-1
-            breakable (
+            boundary {
                 while j >= 0 do 
                     hole += index(j+1)(0)-index(j)(1)-1
                     if hole >= count then
                         break()
                     else
                         j -= 1
-            )
+            }
             var l,r:Long = 0L
             var n:Int = 0
             if hole < count then
@@ -572,7 +572,7 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
     
     private def insertIndex(s:(Long,Long,Int),right:Boolean):Unit = 
         var i:Int = -1
-        breakable(
+        boundary {
             for (p,j) <- index.zipWithIndex do
                 if s(1) < p(0) then
                     if s(1) == p(0) - 1 then
@@ -586,7 +586,7 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
                     if s(0) == p(1) + 1 then
                         index(j) = (p(0),s(1),p(2)+s(2))
                         break()
-        )
+        }
         if i >= 0 then index.insert(i,s)
 
     private def findKey(idx:Int,right:Boolean):(Long,Int) = 
@@ -594,23 +594,23 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
         var k:Long = 0L
         var i:Int = 0
         if !right then
-            breakable(
+            boundary {
                 for ((m,_,l),j) <- index.zipWithIndex do 
                     if cnt + l >= idx then
                         k = m + idx - cnt 
                         i = j 
                         break()
                     cnt += l 
-            )
+            }
         else
-            breakable(
+            boundary {
                 for ((_,n,l),j) <- index.reverseIterator.zipWithIndex do 
                     if cnt + l >= idx then
                         k = n + cnt - idx 
                         i = j 
                         break()
                     cnt += l 
-            )
+            }
         (k,i)
     
     private def getKey(idx:Int,right:Boolean):Array[Byte] = 
@@ -628,7 +628,7 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
         var cnt = 0
         var split:(Long,Long,Int) = (0,0,0)
         if !right then
-            breakable(
+            boundary {
                 while j < index.length do
                     val s = index(j)
                     if s(0) > k then k = s(0)
@@ -654,7 +654,7 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
                         //k += d-1
                         j += 1
                         cnt += d 
-            )
+            }
             if cnt != count then
                 throw new Exception(s"cannot found ${count} elements at index ${idx}")
             if cutFlag then
@@ -670,7 +670,7 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
                     if i + 1 < index.length && j-(i+1) > 0 then
                         index.remove(i+1,j-(i+1))
         else
-            breakable(
+            boundary {
                 while j >= 0 do
                     val s = index(j)
                     if k > s(1) then k = s(1)
@@ -695,7 +695,7 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
                             index(j) = (k+1,s(1),(s(1)-k).toInt)
                         j -= 1
                         cnt += d 
-            )
+            }
             if cnt != count then
                 throw new Exception(s"cannot found ${count} elements at index ${idx}")
             if cutFlag then

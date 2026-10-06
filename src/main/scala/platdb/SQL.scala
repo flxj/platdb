@@ -16,9 +16,9 @@
 
 package platdb
 
-import scala.collection.mutable.{Map,ArrayBuffer}
+import scala.collection.mutable.{Map,LongMap,ArrayBuffer}
 import scala.jdk.CollectionConverters._
-import scala.util.control.Breaks._
+import scala.util.boundary, boundary.break
 import scala.util.Failure
 import scala.util.Success
 import scala.util.Try
@@ -127,7 +127,7 @@ class SQLEngine(ops:SQLEngineOptions):
     private var db:DB = null
     // Cache table information.
     private[platdb] var tbs:Map[String,tableInfo] = Map[String,tableInfo]()
-    private[platdb] var dbTx:Map[Long,Transaction] = Map[Long,Transaction]()
+    private[platdb] var dbTx:LongMap[Transaction] = LongMap.empty[Transaction]
 
     /**
       * The default encoding of the database cannot be changed currently.
@@ -406,13 +406,12 @@ class SQLEngine(ops:SQLEngineOptions):
                             cidx.append(i)
                     else
                         for (c,_) <- columns do 
-                            var i:Int = -1
-                            breakable(
+                            val i = boundary {
                                 for (col,j) <- tbi.cols.zipWithIndex do 
                                     if col.name == c then 
-                                        i = j 
-                                        break()
-                            )
+                                        break(j)
+                                -1
+                            }
                             if i < 0 then throw new SQLException(s"not found column ${c}")
                             ftypes.append(tbi.cols(i).ctype)
                             cidx.append(i)
@@ -543,13 +542,12 @@ class SQLEngine(ops:SQLEngineOptions):
                             cidx.append(i)
                     else
                         for (c,_) <- columns do 
-                            var i:Int = -1
-                            breakable(
+                            val i = boundary {
                                 for (col,j) <- tbi.cols.zipWithIndex do 
                                     if col.name == c then 
-                                        i = j 
-                                        break()
-                            )
+                                        break(j)
+                                -1
+                            }
                             if i < 0 then throw new SQLException(s"not found column ${c}")
                             ftypes.append(tbi.cols(i).getValueType())
                             cidx.append(i)
@@ -743,13 +741,12 @@ class SQLEngine(ops:SQLEngineOptions):
                         throw new SQLException("too much columns")
                     cidx = new Array[Int](cols.length)
                     for (c,i) <- cols.zipWithIndex do 
-                        var j = -1 
-                        breakable ( 
+                        val j = boundary { 
                             for (col,k) <- tbi.cols.zipWithIndex do 
                                 if c.getColumnName().toLowerCase() == col.name then 
-                                    j = k
-                                    break()
-                        )
+                                    break(k)
+                            -1
+                        }
                         if j < 0 then 
                             throw new SQLException(s"field ${c.getColumnName()} not exists in table ${table}")
                         else
@@ -764,7 +761,7 @@ class SQLEngine(ops:SQLEngineOptions):
                     case None => throw new SQLException("insert values is empty")
                     case Some(vals:Values) => 
                         val rows = vals.getExpressions.asScala.toArray
-                        breakable(
+                        boundary {
                             for exp <- rows do exp match
                                 case row:ParenthesedExpressionList[Expression] =>
                                     // muti-rows insert
@@ -774,7 +771,7 @@ class SQLEngine(ops:SQLEngineOptions):
                                     data.append(encode(tbi,cidx,r))
                                 case _:Expression => break() // TODO: single row insert 
                                 case null => throw new SQLException("insert values is empty")
-                        )
+                        }
                         if data.length == 0 then 
                             data.append(encode(tbi,cidx,rows))
                 (table,data)
@@ -901,7 +898,7 @@ class SQLEngine(ops:SQLEngineOptions):
                         val exps = s.getValues().asScala
                         cols.zip(exps).foreach( (col,exp) => 
                             val name = col.getColumnName().toLowerCase()
-                            breakable(
+                            boundary {
                                 for (col,i) <- tbi.cols.zipWithIndex do 
                                     if col.name == name then 
                                         cidx.append(i)
@@ -914,7 +911,7 @@ class SQLEngine(ops:SQLEngineOptions):
                                             throw new SQLException(s"column ${name} type is ${tbi.cols(i).ctype}")
                                         newVal.append(v)
                                         break()
-                            )
+                            }
                         )
                     )
                     case None => throw new SQLException("set columns is empty")

@@ -17,9 +17,9 @@
 package platdb
 
 import java.nio.ByteBuffer
-import scala.collection.mutable.{ArrayBuffer,Map,SortedMap}
+import scala.collection.mutable.{ArrayBuffer,Map,LongMap,SortedMap}
 import scala.jdk.CollectionConverters.*
-import scala.util.control.Breaks._
+import scala.util.boundary, boundary.break
 import scala.util.{Try,Success,Failure}
 import scala.compiletime.ops.double
 import java.util.Comparator
@@ -382,7 +382,7 @@ private[platdb] class FreeList(var header:BlockHeader) extends FreeManager:
     // record a file data pages freeclaim about a version txid.
     var pending:SortedMap[Long,ArrayBuffer[FreeFragment]] = SortedMap[Long,ArrayBuffer[FreeFragment]]()
     // trace allocated pages for tx.
-    var allocated:Map[Long,ArrayBuffer[FreeFragment]] = Map[Long,ArrayBuffer[FreeFragment]]() 
+    var allocated:LongMap[ArrayBuffer[FreeFragment]] = LongMap.empty[ArrayBuffer[FreeFragment]]
 
     override def toString(): String =
         (for f <- idle.iterator yield f.toString()).mkString(",")
@@ -464,13 +464,12 @@ private[platdb] class FreeList(var header:BlockHeader) extends FreeManager:
     def allocate(txid:Long,n:Int):Long = 
         if n <= 0 then
             throw new Exception(s"allocate negative page n:${n}")
-        var f:FreeFragment = null
-        breakable(
+        val f = boundary {
             for ff <- idle.iterator do 
                 if ff.length >= n then
-                    f = ff 
-                    break()
-        )
+                    break(ff)
+            null
+        }
         if f == null then
             return -1
         else
@@ -618,7 +617,7 @@ private[platdb] class FreeTree(var header:BlockHeader) extends FreeManager:
     // record a file data pages freeclaim about a version txid.
     var pending:SortedMap[Long,ArrayBuffer[FreeFragment]] = SortedMap[Long,ArrayBuffer[FreeFragment]]()
     // trace allocated pages for tx.
-    var allocated:Map[Long,ArrayBuffer[FreeFragment]] = Map[Long,ArrayBuffer[FreeFragment]]() 
+    var allocated:LongMap[ArrayBuffer[FreeFragment]] = LongMap.empty[ArrayBuffer[FreeFragment]]
 
     override def toString(): String =
         (for f <- idle.iterator yield f.toString()).mkString(",")
@@ -649,7 +648,7 @@ private[platdb] class FreeTree(var header:BlockHeader) extends FreeManager:
             case None => None
             case Some(n) => 
                 node = n 
-                breakable(
+                boundary {
                     while node != null do 
                         if f.overlap(node.value) then
                             throw new Exception(s"release repeatedly,tx $txid try to release [$start,$ed],but its overlap with already released")
@@ -659,7 +658,7 @@ private[platdb] class FreeTree(var header:BlockHeader) extends FreeManager:
                             node.next(0) match
                                 case None => break()
                                 case Some(n) => node = n 
-                )
+                }
         for (id,ffs) <- pending do 
             for ff <- ffs do if ff.overlap(f) then
                 throw new Exception(s"release repeatedly,tx $txid try to release [$start,$ed], but tx ${id} already released [${ff.start},${ff.end}]")
@@ -671,13 +670,12 @@ private[platdb] class FreeTree(var header:BlockHeader) extends FreeManager:
     def allocate(txid:Long,n:Int):Long = 
         if n <= 0 then
             throw new Exception(s"allocate negative page n:${n}")
-        var node:SkipListNode[Long,FreeFragment] = null
-        breakable(
+        val node = boundary {
             for ff <- idle.nodeIterator do 
                 if ff.value.length >= n then
-                    node = ff 
-                    break()
-        )
+                    break(ff)
+            null
+        }
         if node == null then
             return -1
         else
@@ -719,7 +717,7 @@ private[platdb] class FreeTree(var header:BlockHeader) extends FreeManager:
         val keys = new ArrayBuffer[Long]()
         var ed = node.value.end
         var nxt = node.next(0)
-        breakable(
+        boundary {
             while true do 
                 nxt match
                     case None => break()
@@ -730,7 +728,7 @@ private[platdb] class FreeTree(var header:BlockHeader) extends FreeManager:
                             nxt = n.next(0)
                         else
                             break()
-        )
+        }
         if keys.length > 0 then
             node.value.reset(node.key,ed)
             for k <- keys do idle.remove(k)

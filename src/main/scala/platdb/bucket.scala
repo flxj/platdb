@@ -17,8 +17,8 @@
 package platdb
 
 import java.nio.ByteBuffer
-import scala.collection.mutable.{Map,ArrayBuffer}
-import scala.util.control.Breaks._
+import scala.collection.mutable.{LongMap,Map,ArrayBuffer}
+import scala.util.boundary, boundary.break
 import scala.util.Try
 import scala.util.Success
 import scala.util.Failure
@@ -197,7 +197,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
     var bkv:BucketValue = null
     var root:Option[Node] = None
     /** cache nodes about writeable tx. */
-    val nodes:Map[Long,Node] = Map[Long,Node]() 
+    val nodes:LongMap[Node] = LongMap.empty[Node]
     /** cache sub-buckets */
     val buckets:Map[String,BTreeBucket] = Map[String,BTreeBucket]()
     val rawBuckets:Map[String,BTreeRawBucket] = Map[String,BTreeRawBucket]()
@@ -764,14 +764,13 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         
         val threshold = (sz*DB.fillPercent).toInt
         var n = BlockHeader.size
-        var idx = -1
-        breakable(
+        val idx = boundary {
             for i <- 0 until node.length do
                 n += Node.indexSize + node.elements(i).keySize(Node.charSet) + node.elements(i).valueSize(Node.charSet)
                 if n >= threshold then 
-                    idx = i 
-                    break()
-        )
+                    break(i)
+            -1
+        }
         if idx < 0 then
             return (node,None)
          

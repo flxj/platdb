@@ -16,9 +16,9 @@
 
 package platdb
 
-import scala.collection.mutable.{ArrayBuffer,Map}
+import scala.collection.mutable.{ArrayBuffer,LongMap}
 import scala.util.{Try,Failure,Success}
-import scala.util.control.Breaks._
+import scala.util.boundary, boundary.break
 import java.nio.ByteBuffer
 import java.util.Base64
 
@@ -116,7 +116,7 @@ trait Region:
       *
       * @return
       */
-    def boundary():Option[Rectangle]
+    def mbr():Option[Rectangle]
     /**
       * 
       *
@@ -208,14 +208,12 @@ case class Rectangle(min:Array[Double],max:Array[Double]):
       * @return
       */
     def isPoint:Boolean = 
-        var flag = true
-        breakable(
+        boundary {
             for i <- 0 until dimension do
                 if max(i)!=0.0 && min(i) != max(i) then
-                    flag = false
-                    break()
-        )
-        flag
+                    break(false)
+            true
+        }
     /**
       * 
       *
@@ -241,14 +239,12 @@ case class Rectangle(min:Array[Double],max:Array[Double]):
             case 1 => !(min(0) > r.max(0) || max(0) < r.min(0))
             case 2 => Min(min(0),r.min(0)) <= Min(max(0),r.max(0)) && Max(min(1),r.min(1)) <= Min(max(1),r.max(1))
             case n =>
-                var flag = true
-                breakable(
+                boundary {
                     for i <- 1 to n do
                         if !this.projectFollow(i).intersect(r.projectFollow(i)) then
-                            flag = false
-                            break()
-                )
-                flag 
+                            break(false)
+                    true
+                }
     /**
       * Project along the axis, projecting the current rectangle onto a plane other than that axis.
       * for example,(x,y,z) -> (y,z), axis=1
@@ -275,14 +271,12 @@ case class Rectangle(min:Array[Double],max:Array[Double]):
     def cover(r:Rectangle):Boolean =
         if dimension != r.dimension then
             return false
-        var cov = true
-        breakable(
+        boundary {
             for i <- 0 until dimension do
                 if min(i)>=r.min(i) || max(i)<=r.max(i) then
-                    cov = false
-                    break()
-        )
-        cov
+                    break(false)
+            true
+        }
     /**
       * whether current rectangle be corverd by r.
       *
@@ -448,14 +442,11 @@ private[platdb] object RNode:
                 if data.length < blk.header.count*idxSize then
                     return Failure(new Exception(s"block ${blk.id} data format wrong"))
                 var entries = new ArrayBuffer[Entry]()
-                var err:Boolean = false 
-                breakable( 
+                val err = boundary { 
                     for i <- 0 until blk.header.count do
                         val idx = data.slice(idxSize*i,(i+1)*idxSize) 
                         unmashalIndex(idx,dimension) match
-                            case None => 
-                                err = true
-                                break() 
+                            case None => break(true) 
                             case Some(ei) =>
                                 var child = -1L
                                 var key:String = ""
@@ -465,7 +456,8 @@ private[platdb] object RNode:
                                 else 
                                     child = (ei.offset & 0x00000000ffffffffL) << 32 | (ei.keySize & 0x00000000ffffffffL)
                                 entries+=new Entry(ei.mbr,child,key)
-                )
+                    false
+                }
                 if !err then Success(entries) else Failure(new Exception("parse block data failed"))
     //
     def apply(blk:Block,dimension:Int):Try[RNode] = 
@@ -523,39 +515,36 @@ private[platdb] class RNode(var header:BlockHeader) extends Persistence:
     //
     def put(obj:SpatialObject):Unit = 
         if !isLeaf then return None
-        var idx = -1
-        breakable(
+        val idx = boundary {
             for i <- 0 until entries.length do
                 if entries(i).key == obj.key then
-                    idx = i
-                    break()
-        )
+                    break(i)
+            -1
+        }
         if idx >= 0 then 
             entries(idx) = Entry(obj.coord,0,obj.key)
         else 
             entries += Entry(obj.coord,0,obj.key)
     //
     def put(oldId:Long,entry:Entry):Unit = 
-        var idx = -1
-        breakable(
+        val idx = boundary {
             for i <- 0 until entries.length do
                 if entries(i).child == oldId then
-                    idx = i
-                    break()
-        )
+                    break(i)
+            -1
+        }
         if idx >= 0 then 
             entries(idx) = entry
         else 
             entries += entry
     // 
     def del(key:String):Unit = 
-        var idx = -1
-        breakable(
+        val idx = boundary {
             for i <- 0 until entries.length do
                 if entries(i).key == key then
-                    idx = i
-                    break()
-        )
+                    break(i)
+            -1
+        }
         if idx >=0 then
             entries.remove(idx,1)
     //
@@ -568,23 +557,22 @@ private[platdb] class RNode(var header:BlockHeader) extends Persistence:
         entries = es
     //
     def removeChild(node:RNode):Unit = 
-        var idx = -1
-        breakable(
+        val idx = boundary {
             for i <- 0 until children.length do
                 if children(i).id == node.id then
-                    idx = i
-                    break()
-        )
+                    break(i)
+            -1
+        }
         if idx >=0 then
             children.remove(idx,1)
     def updateMbr(child:RNode):Unit = 
-        breakable(
+        boundary {
             for i <- 0 until entries.length do
                 if entries(i).child == child.id then
                     val (_,r) = entries(i).mbr.enlargeAreaToCover(child.mbr)
                     entries(i).mbr = r
                     break()
-        )
+        }
     //
     def size():Int = entries.bytesSize
     //
@@ -743,7 +731,7 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
     var value:RegionValue = null
     var root:Option[RNode] = None
     // cache nodes about writeable tx. 
-    private var nodes:Map[Long,RNode] = Map[Long,RNode]() 
+    private var nodes:LongMap[RNode] = LongMap.empty[RNode]
     // record nodes that need to reinseart when delete.
     private var reInsertNodes = List[RNode]()
 
@@ -868,7 +856,7 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                         bk.delete(k)
                         n.del(keys)
     //
-    def boundary():Option[Rectangle] = 
+    def mbr():Option[Rectangle] = 
         root match
             case Some(node) => Some(node.mbr)
             case None => 
@@ -887,7 +875,7 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                     que.push(element(0.0,node.mbr,Some(node),None))
             case Some(node) => que.push(element(0.0,node.mbr,Some(node),None))
         var err:Option[String] = None
-        breakable(
+        boundary {
             while true do
                 que.pop() match
                     case None => break()
@@ -913,7 +901,7 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                                             case Success(n) =>
                                                 elt = element(distFunc(obj,sobj),e.mbr,Some(n),None)
                                     que.push(elt)       
-        )
+        }
         err match
             case Some(msg) => throw new Exception(msg)
             case None => list
@@ -931,7 +919,7 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                     que.push(element(0.0,node.mbr,Some(node),None))
             case Some(node) => que.push(element(0.0,node.mbr,Some(node),None))
         var err:Option[String] = None
-        breakable(
+        boundary {
             while true do
                 que.pop() match
                     case None => break()
@@ -959,7 +947,7 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                                             case Success(n) =>
                                                 elt = element(distFunc(obj,sobj),e.mbr,Some(n),None)
                                     que.push(elt)       
-        )
+        }
         err match
             case Some(msg) => throw new Exception(msg)
             case None => list
@@ -984,7 +972,7 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                     que.push(element(0.0,node.mbr,Some(node),None))
             case Some(node) => que.push(element(0.0,node.mbr,Some(node),None))
         var err:Option[String] = None
-        breakable(
+        boundary {
             while true do
                 que.pop() match
                     case None => break()
@@ -1012,7 +1000,7 @@ private[platdb] class RTreeBucket(val bk:Bucket,val tx:Tx) extends Region:
                                                 break()
                                             case Success(n) =>
                                                 que.push(element(distFunc(obj,sobj),e.mbr,Some(n),None))                   
-        )
+        }
         err match
             case Some(msg) => throw new Exception(msg)
             case None => list
@@ -1248,7 +1236,7 @@ private[platdb] class queue:
         nodes+=elem
         // shiftUp
         var i = nodes.length-1
-        breakable(
+        boundary {
             while i > 0 do
                 val p = (i-1)/2
                 if nodes(p).dist > nodes(i).dist then 
@@ -1258,7 +1246,7 @@ private[platdb] class queue:
                     i = p
                 else
                     break()
-        )
+        }
     //
     def pop():Option[element] = 
         if nodes.length == 0 then
@@ -1268,7 +1256,7 @@ private[platdb] class queue:
         nodes.dropRight(1)
         // shiftDown
         var i = 0
-        breakable(
+        boundary {
             while i < nodes.length do
                 val p1 = i*2 + 1
                 val p2 = i*2+2
@@ -1291,7 +1279,7 @@ private[platdb] class queue:
                         i = p1
                 else
                     break()
-        )
+        }
         Some(e)
 //
 private[platdb] class RRecord(var node:Option[RNode],var block:Option[Block],var index:Int):

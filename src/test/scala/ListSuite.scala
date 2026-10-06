@@ -562,4 +562,3 @@ class ListSuit9 extends munit.FunSuite {
                 case Success(value) => println("close db success")
     }
 }
-

@@ -16,14 +16,6 @@
 
 package platdb
 
-import scala.collection.immutable.Range
-import scala.collection.mutable.ArrayBuffer
-import scala.util.{Try,Success,Failure}
-import scala.util.control.Breaks._
-import java.nio.ByteBuffer
-import java.util.Base64
-
-
 /**
   * A list of strings
   */

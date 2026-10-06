@@ -17,7 +17,7 @@
 package platdb
 
 import scala.util.{Try,Success,Failure}
-import scala.util.control.Breaks._
+import scala.util.boundary, boundary.break
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.{AtomicInteger, LongAdder}
 import java.util.concurrent.locks.ReentrantLock
@@ -129,14 +129,13 @@ private[platdb] class BlockBuffer(val poolSize: Int,val fm:FileManager) extends 
     def getIdleBlock(size:Int):Block =
         idleLock.lock()
         try 
-            var bk:Block = null 
-            breakable(
+            var bk:Block = boundary {
                 for b <- idle.iterator do
                     if b.block.capacity >= size then
-                        bk = b.block
                         idle.remove(b)
-                        break()
-            )
+                        break(b.block)
+                null
+            }
             if bk == null then
                 bk = new Block(size)
             bk.reset()
@@ -179,15 +178,15 @@ private[platdb] class BlockBuffer(val poolSize: Int,val fm:FileManager) extends 
                     var ok:Boolean = false
                     if full then
                         // cache already full, so try to select a element to eliminate.
-                        breakable(
+                        ok = boundary {
                             for bf <- lru.iterator do 
                                 if !bf.isPinned then
                                     lru.remove(bf)
                                     index.remove(bf.frameId)
                                     drop(bf)
-                                    ok = true
-                                    break()
-                        )
+                                    break(true)
+                            false
+                        }
                     else
                         // cache not full, so cache the block directly.
                         ok = true
@@ -215,16 +214,15 @@ private[platdb] class BlockBuffer(val poolSize: Int,val fm:FileManager) extends 
                 index.put(bk.id,bf)
             else
                 if !index.contains(bk.id) then
-                    var ok:Boolean = false 
-                    breakable(
+                    val ok = boundary {
                         for bf <- lru.iterator do 
                             if !bf.isPinned then
                                 lru.remove(bf)
                                 index.remove(bf.frameId)
                                 drop(bf)
-                                ok = true
-                                break()
-                    )
+                                break(true)
+                        false
+                    }
                     if ok then
                         val bf = new BlockFrame(bk.id,bk)
                         lru.pushTail(bf)

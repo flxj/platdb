@@ -18,8 +18,8 @@ package platdb
 
 import java.util.Base64
 import java.nio.ByteBuffer
-import scala.collection.mutable.{Map,ArrayBuffer}
-import scala.util.control.Breaks._
+import scala.collection.mutable.{Map,LongMap,ArrayBuffer}
+import scala.util.boundary, boundary.break
 import scala.util.Try
 import scala.util.Success
 import scala.util.Failure
@@ -246,13 +246,12 @@ private class RawNode(var header:BlockHeader) extends Persistence:
       * @param node
       */
     def removeChild(node:RawNode):Unit =
-        var idx:Int = -1 
-        breakable(
+        val idx = boundary {
             for i <- 0 until children.length do 
                 if children(i).id == node.id then 
-                    idx = i 
-                    break()
-        )
+                    break(i)
+            -1
+        }
         if idx >= 0 then 
             children.remove(idx)
 
@@ -263,14 +262,12 @@ private class RawNode(var header:BlockHeader) extends Persistence:
       * @return
       */
     def childIndex(node:RawNode):Int =
-        var idx:Int = -1
-        breakable(
+        boundary {
             for i <- 0 until elements.length do 
                 if elements(i).child == node.id then 
-                    idx = i
-                    break()
-        )
-        idx
+                    break(i)
+            -1
+        }
     def size():Int = 
         var dataSize:Int = BlockHeader.size+(elements.length*Node.indexSize)
         for e <- elements do dataSize += e.keySize + e.valueSize
@@ -307,7 +304,7 @@ private[platdb] class BTreeRawBucket(val bkname:Array[Byte],var tx:Tx) extends R
     var bkv:BucketValue = null
     var root:Option[RawNode] = None
     /** cache nodes about writeable tx. */
-    var nodes:Map[Long,RawNode] = Map[Long,RawNode]() 
+    var nodes:LongMap[RawNode] = LongMap.empty[RawNode]
     /** cache sub-buckets */
     var buckets:Map[String,BTreeRawBucket] = Map[String,BTreeRawBucket]()
 
@@ -857,14 +854,13 @@ private[platdb] class BTreeRawBucket(val bkname:Array[Byte],var tx:Tx) extends R
         
         val threshold = (sz*DB.fillPercent).toInt
         var n = BlockHeader.size
-        var idx = -1
-        breakable(
+        val idx = boundary {
             for i <- 0 until node.length do
                 n += Node.indexSize + node.elements(i).keySize + node.elements(i).valueSize
                 if n >= threshold then 
-                    idx = i 
-                    break()
-        )
+                    break(i)
+            -1
+        }
         if idx < 0 then
             return (node,None)
          
@@ -1304,13 +1300,13 @@ private class BTreeRawBucketIter(private var bucket:BTreeRawBucket) extends RawI
                         case Some(_) => None
                     r.node
             // top-down: convert blocks on search path to nodes.
-            breakable(
+            boundary {
                 for i <- 0 until idx-1 do
                     val r = stack(i) 
                     bucket.getNodeChild(n,r.index) match
                         case Some(nd) => n = Some(nd) 
                         case None => break()
-            )
+            }
             n match
                 case None => None
                 case Some(node) => if node.isLeaf then Some(node) else None

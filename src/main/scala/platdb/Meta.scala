@@ -18,7 +18,6 @@ package platdb
 
 import java.nio.ByteBuffer
 import scala.collection.mutable.{ArrayBuffer,Map}
-import scala.util.control.Breaks._
 import scala.util.{Try,Success,Failure}
 
 /**
