@@ -763,7 +763,7 @@ class SQLEngine(ops:SQLEngineOptions):
                         val rows = vals.getExpressions.asScala.toArray
                         boundary {
                             for exp <- rows do exp match
-                                case row:ParenthesedExpressionList[Expression] =>
+                                case row:ParenthesedExpressionList[Expression @unchecked] =>
                                     // muti-rows insert
                                     val r = row.getExpressions().asScala.toArray 
                                     if r.length != cidx.length then
