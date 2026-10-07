@@ -175,7 +175,7 @@ private[platdb] class BTreeSet(var bk:BTreeBucket) extends BSet:
     def length:Long = bk.length
     def closed:Boolean = bk.closed
     def contains(key:String):Boolean = bk.contains(key)
-    def iterator:CollectionIterator = new BTreeSetIter(new BTreeBucketIter2(bk)) 
+    def iterator:CollectionIterator = new BTreeSetIter(new BTreeBucketIter(bk)) 
     def -=(key:String):Unit = bk-=(key)
     def +=(key:String):Unit = bk+=(key,"")
     /**
@@ -342,7 +342,7 @@ private[platdb] class BTreeSet(var bk:BTreeBucket) extends BSet:
   *
   * @param iter
   */
-private class BTreeSetIter(val iter:BTreeBucketIter2) extends CollectionIterator:
+private class BTreeSetIter(val iter:BTreeBucketIter) extends CollectionIterator:
     def find(key:String):Option[(String,String)] = iter.find(key)
     def first():Option[(String,String)]  = iter.first()
     def last():Option[(String,String)] = iter.last()

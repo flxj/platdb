@@ -212,7 +212,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
       *
       * @return BucketIterator
       */
-    def iterator:CollectionIterator = new BTreeBucketIter2(this)
+    def iterator:CollectionIterator = new BTreeBucketIter(this)
     /**
       * 
       *
@@ -317,7 +317,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         else if value != null && value.length >= DB.maxValueSize then
             throw DB.exValueTooLarge
 
-        val c = new BTreeBucketIter2(this)
+        val c = new BTreeBucketIter(this)
         c.search(key) match 
             case (None,_) => None
             case (Some(k,v),f) =>
@@ -346,7 +346,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
             else if v != null && v.length >= DB.maxValueSize then
                 throw DB.exValueTooLarge
         
-        val c = new BTreeBucketIter2(this)
+        val c = new BTreeBucketIter(this)
         for (key,value) <- elems do
             c.search(key) match 
                 case (None,_) => None
@@ -374,7 +374,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         if key == null || key.length == 0 then
             return None 
         
-        val c = new BTreeBucketIter2(this)
+        val c = new BTreeBucketIter(this)
         c.search(key) match 
             case (None,_) => None 
             case (Some(k,v),f) =>
@@ -395,7 +395,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         if keys.length == 0 then
             return None
 
-        val c = new BTreeBucketIter2(this)
+        val c = new BTreeBucketIter(this)
         for key <- keys if (key != null && key.length() > 0 ) do
             c.search(key) match 
                 case (None,_) => None 
@@ -650,7 +650,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
     def split():Unit =
         for (_,region) <- regions do region.split()
         // split all cache subbuckets.
-        val c = new BTreeBucketIter2(this)
+        val c = new BTreeBucketIter(this)
         for (name,rbk) <- rawBuckets do
             rbk.split()
             rbk.root match
@@ -831,7 +831,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         bkv.root = 0
 
     // try to get a sub-bucket.
-    private def searchBucket(c:BTreeBucketIter2,name:String,dataType:Byte):Option[BTreeBucket] = 
+    private def searchBucket(c:BTreeBucketIter,name:String,dataType:Byte):Option[BTreeBucket] = 
         c.search(name) match
             case (None,_) => None
             case (Some(k,v),f) => 
@@ -863,7 +863,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         if buckets.contains(name) then 
             return buckets.get(name)
         
-        val c = new BTreeBucketIter2(this)
+        val c = new BTreeBucketIter(this)
         c.search(name) match
             case (None,_) => None
             case (Some(k,v),f) => 
@@ -900,7 +900,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         if buckets.contains(name) || regions.contains(name) then 
             throw new Exception(s"already exists bucket or region name $name")
         
-        val c = new BTreeBucketIter2(this)
+        val c = new BTreeBucketIter(this)
         c.search(name) match
             //case (None,_) => throw new Exception("bucket create failed: not found create node")
             case (None,_) => None
@@ -960,7 +960,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         else if name.length() >= DB.maxKeySize then
             throw DB.exKeyTooLarge
 
-        val c = new BTreeBucketIter2(this)
+        val c = new BTreeBucketIter(this)
         var obk:Option[BTreeBucket] = None
         if buckets.contains(name) then
             obk = buckets.get(name) 
@@ -1001,7 +1001,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         else if !tx.writable then 
             throw DB.exNotAllowOp
         //
-        val c = new BTreeBucketIter2(this)
+        val c = new BTreeBucketIter(this)
         for kv <- c do kv match
             case Some(k,v) => if v == DB.magicStr then deleteBucket(k,Collection.typeBucket)
             case None => None 
@@ -1098,7 +1098,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         for kv <- iterator do kv match
             case None => None
             case Some((key,v)) => if v == DB.magicStr then arr+=((key,""))
-        val iter = new BTreeBucketIter2(this)
+        val iter = new BTreeBucketIter(this)
         for i <- 0 until arr.length do
             val (key,_) = arr(i)
             iter.search(key) match
@@ -1184,7 +1184,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                         regions.remove(name)
                         None 
     //
-    private def searchRawBucket(c:BTreeBucketIter2,name:String):Option[BTreeRawBucket] = 
+    private def searchRawBucket(c:BTreeBucketIter,name:String):Option[BTreeRawBucket] = 
         c.search(name) match
             case (None,_) => None
             case (Some(k,v),f) => 
@@ -1216,7 +1216,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         if rawBuckets.contains(name) then 
             return rawBuckets.get(name)
         
-        val c = new BTreeBucketIter2(this)
+        val c = new BTreeBucketIter(this)
         c.search(name) match
             case (None,_) => None
             case (Some(k,v),f) => 
@@ -1252,7 +1252,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         if rawBuckets.contains(name) || buckets.contains(name) || regions.contains(name) then 
             throw new Exception(s"already exists bucket or region name $name")
         
-        val c = new BTreeBucketIter2(this)
+        val c = new BTreeBucketIter(this)
         c.search(name) match
             case (None,_) => None
             case (Some(k,v),f) => 
@@ -1312,7 +1312,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         else if name.length >= DB.maxKeySize then
             throw DB.exKeyTooLarge
 
-        val c = new BTreeBucketIter2(this)
+        val c = new BTreeBucketIter(this)
         var obk:Option[BTreeRawBucket] = None
         if rawBuckets.contains(name) then
             obk = rawBuckets.get(name) 
