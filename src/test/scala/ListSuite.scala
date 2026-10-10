@@ -562,3 +562,65 @@ class ListSuit9 extends munit.FunSuite {
                 case Success(value) => println("close db success")
     }
 }
+
+
+class ListSuit10 extends munit.FunSuite {
+    val path:String= s"C:${File.separator}platdb${File.separator}db.test" 
+    val name:String = "list1"
+
+    test("test list clear"){
+        var db = new DB(path)
+        db.open() match
+                case Failure(exception) => throw exception
+                case Success(value) => println("open db success")
+        assertEquals(db.closed,false)
+        assertEquals(db.readonly,false)
+        var oldLen = -1L
+        var newLen = -1L
+        
+        try
+            db.view(
+                (tx:Transaction) =>
+                    tx.openList(name) match
+                        case None => throw new Exception("open list failed")  
+                        case Some(list) => oldLen = list.length
+            ) match
+                case Success(_) => None
+                case Failure(e) => throw e
+            
+            println(s"old length is:${oldLen}")
+
+            db.update(
+                (tx:Transaction) =>
+                    given t:Transaction = tx
+                    var list = openList(name)
+                    list.clear()
+            ) match
+                case Success(_) => println(s"clear list $name success")
+                case Failure(e) => throw e
+            //
+            db.view(
+                (tx:Transaction) =>
+                    tx.openList(name) match
+                        case None => throw new Exception("open list failed")  
+                        case Some(list) => 
+                            newLen = list.length
+                            var count:Int = 0 
+                            for v <- list.iterator do count+=1
+                            if count != 0 then 
+                                throw new Exception(s"clear list failed: find ${count} elements")
+            ) match
+                case Success(_) => None
+                case Failure(e) => throw e
+
+            assert(oldLen >= 0L)
+            assert(newLen == 0L)
+        catch
+            case e:Exception => throw e
+        finally
+            db.close() match
+                case Failure(exception) => println(s"close db failed: ${exception.getMessage()}")
+                case Success(value) => println("close db success")
+    }
+}
+

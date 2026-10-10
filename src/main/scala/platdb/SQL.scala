@@ -976,7 +976,7 @@ class SQLEngine(ops:SQLEngineOptions):
             case Some(bk) => 
                 if all then 
                     val r = bk.length
-                    bk.clean()
+                    bk.clear()
                     Result(0,r)
                 else 
                     for key <- keys do bk.delete(key)

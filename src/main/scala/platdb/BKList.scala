@@ -114,6 +114,7 @@ private[platdb] object BKList:
   * @param readonly
   */
 private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
+    private val errReadonly = new Exception("current list is readonly mode")
     private val encoder = Base64.getEncoder()
     private var index:ArrayBuffer[(Long,Long,Int)] = new ArrayBuffer[(Long,Long,Int)]()
     private var elems:RawBucket = null
@@ -191,7 +192,15 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
             list.index = indexRange(info.reverseFlag,from,until-from,false)
             list.info.size = (until-from).toLong
         Some(list)
-
+    
+    def clear(): Unit =
+        if readonly then
+            throw errReadonly
+        if elems != null then
+            elems.clear()
+        index.clear()
+        info = new BKListInfo(0L,false)
+        save()
     def reverseInPlace:Unit = info.reverseFlag = !info.reverseFlag
     def reverse:BList = 
         val list = newList(readonly)
@@ -294,7 +303,7 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
         Some(list)
     def drop(n: Int):Unit = 
         if readonly then
-            throw new Exception("current list is readonly mode")
+            throw errReadonly
         if n < 0 || n > length then
             throw new Exception(s"parameter ${n} out of bound [0,${length}]")
         val idx = takeIndex(info.reverseFlag,n,true)
@@ -305,7 +314,7 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
         save()
     def dropRight(n: Int):Unit = 
         if readonly then
-            throw new Exception("current list is readonly mode")
+            throw errReadonly
         if n < 0 || n > length then
             throw new Exception(s"parameter ${n} out of bound [0,${length}]")
         val idx = takeIndex(!info.reverseFlag,n,true) 
@@ -317,7 +326,7 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
     def insert(idx: Int, item:String):Unit = insert(idx,item)
     def insert(idx: Int, items:Seq[String]):Unit = 
         if readonly then
-            throw new Exception("current list is readonly mode")
+            throw errReadonly
         if idx < 0 || idx >= length then
             throw new Exception(s"index $idx out of range [0,${length})")
         
@@ -343,7 +352,7 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
         save()
     def append(item:String):Unit = 
         if readonly then
-            throw new Exception("current list is readonly mode")
+            throw errReadonly
         if length == 0 then
             elems.put(fmtKey(0L),item.getBytes())
             index.append((0L,0L,1))
@@ -361,7 +370,7 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
         
     def append(items:Seq[String]):Unit = 
         if readonly then
-            throw new Exception("current list is readonly mode")
+            throw errReadonly
         if items.length == 0 then
             return None
         var r:(Long,Long,Int) = (0L,-1L,0)
@@ -388,7 +397,7 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
 
     def prepend(item: String):Unit = 
         if readonly then
-            throw new Exception("current list is readonly mode")
+            throw errReadonly
         if length == 0 then
             elems.put(fmtKey(0L),item.getBytes())
             index.append((0L,0L,1))
@@ -405,7 +414,7 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
         save()
     def prepend(items: Seq[String]):Unit = 
         if readonly then
-            throw new Exception("current list is readonly mode")
+            throw errReadonly
         if items.length == 0 then
             return None
         var r:(Long,Long,Int) = (0L,-1L,0)
@@ -447,7 +456,7 @@ private[platdb] class BKList(bk:Bucket,readonly:Boolean) extends BList:
         save()
     def set(idx: Int, item:String):Unit = 
         if readonly then
-            throw new Exception("current list is readonly mode")
+            throw errReadonly
         if idx < 0 || idx >= length then
             throw new Exception(s"index $idx out of range [0,${length})")
         elems.put(getKey(idx,info.reverseFlag),item.getBytes()) 

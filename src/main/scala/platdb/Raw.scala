@@ -148,7 +148,7 @@ trait RawBucket:
       * @param value
       * @throws
       */
-    def clean():Unit
+    def clear():Unit
 
 
 /**
@@ -1089,7 +1089,7 @@ private[platdb] class BTreeRawBucket(val bkname:Array[Byte],var tx:Tx) extends R
                         None
             case None => None
     //
-    def clean():Unit = 
+    def clear():Unit = 
         if tx.closed then
             throw DB.exTxClosed
         else if !tx.writable then 
@@ -1105,8 +1105,6 @@ private[platdb] class BTreeRawBucket(val bkname:Array[Byte],var tx:Tx) extends R
         freeAll() // release all pages about the bucket
         bkv = new BucketValue(-1,0,0,Collection.typeRawBucket) // empty bkv
         root = Some(new RawNode(new BlockHeader(-1L,Block.typeLeaf,0,0,0))) // empty root node
-        None
-        // TODO:update the buckets record
 
 trait RawIterator extends Iterator[Option[(Array[Byte],Array[Byte])]]:
     def find(key:Array[Byte]):Option[(Array[Byte],Array[Byte])]

@@ -149,7 +149,7 @@ trait Bucket extends PlatDBIterable:
       * @param value
       * @throws
       */
-    def clean():Unit
+    def clear():Unit
 
 
 // count is the number of keys in current bucket
@@ -995,7 +995,7 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
                             bkv.count -= 1
                         None
             case None => None
-    def clean():Unit = 
+    def clear():Unit = 
         if tx.closed then
             throw DB.exTxClosed
         else if !tx.writable then 
@@ -1010,8 +1010,6 @@ private[platdb] class BTreeBucket(val bkname:String,var tx:Tx) extends Bucket:
         freeAll() // release all pages about the bucket
         bkv = new BucketValue(-1,0,0,Collection.typeBucket) 
         root = Some(new Node(new BlockHeader(-1L,Block.typeLeaf,0,0,0)))
-        None
-        // TODO:update the buckets record
     /**
       * 
       *

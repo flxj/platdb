@@ -225,3 +225,7 @@ trait BList extends PlatDBIterable:
       * @param elem
       */
     def update(index:Int,elem:String):Unit
+    /**
+      * delete all elements.
+      */
+    def clear():Unit 
